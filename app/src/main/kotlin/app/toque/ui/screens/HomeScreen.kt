@@ -84,12 +84,6 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         scaleCard.setOnClickListener { a.push(ScaleScreen(a)) }
         left.addView(scaleCard, Ui.lp(Ui.MATCH, Ui.WRAP, t = 12))
 
-        // Rangée 3 : Bouton Turbo instantané à maintien
-        val turbo = HoldButton(c, tr("Turbo"), onDown = {
-            a.machine.turboDown(Accessory.BLADE) { v -> if (!v.ok) a.refusal(v) }
-        }, onUp = { a.machine.turboUp() })
-        left.addView(turbo, Ui.lp(Ui.MATCH, Ui.u(54), t = 12))
-
         resumeCard = Ui.horizontal(c)
         resumeCard.setPadding(Ui.u(22), Ui.u(16), Ui.u(18), Ui.u(16))
         resumeCard.background = Ui.pressable(Ui.round(Ui.ACCENT_DIM, 24f), 24f)
@@ -109,7 +103,16 @@ class HomeScreen(a: MainActivity) : Screen(a) {
             val r = a.app.recipes.getAdjusted(a.prefs.guidedRecipe)
             if (r != null) a.push(CookScreen(a, r, a.prefs.guidedStep)) else { a.prefs.guidedRecipe = ""; refresh() }
         }
-        left.addView(resumeCard, Ui.lp(Ui.MATCH, Ui.WRAP, t = 16))
+        left.addView(resumeCard, Ui.lp(Ui.MATCH, Ui.WRAP, t = 12))
+
+        // Espace flexible pour caler le bouton Turbo tout en bas de la colonne.
+        left.addView(Ui.spacer(c, weight = 1f))
+
+        // Rangée 3 : Bouton Turbo instantané à maintien (calé en bas)
+        val turbo = HoldButton(c, tr("Turbo"), onDown = {
+            a.machine.turboDown(Accessory.BLADE) { v -> if (!v.ok) a.refusal(v) }
+        }, onUp = { a.machine.turboUp() })
+        left.addView(turbo, Ui.lp(Ui.MATCH, Ui.u(54)))
         root.addView(left, LinearLayout.LayoutParams(0, Ui.MATCH, 0.42f).apply { rightMargin = Ui.u(28) })
 
         val grid = Ui.vertical(c)
