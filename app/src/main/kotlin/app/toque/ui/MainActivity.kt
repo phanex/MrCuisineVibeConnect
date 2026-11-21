@@ -207,6 +207,7 @@ class MainActivity : Activity() {
         val v = s.view
         (v.parent as? FrameLayout)?.removeView(v)
         content.addView(v, Ui.flp())
+        topBar.visibility = if (s is app.toque.ui.screens.HomeScreen) View.GONE else View.VISIBLE
         topBar.setTitle(s.title, stack.size > 1)
         s.onShow()
         s.onSnapshot(snapshot)

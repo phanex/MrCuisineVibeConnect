@@ -30,6 +30,9 @@ class HomeScreen(a: MainActivity) : Screen(a) {
     private lateinit var resumeText: TextView
     private lateinit var knobChip: LinearLayout
     private lateinit var weightValue: TextView
+    private lateinit var tempValue: TextView
+    private lateinit var tempIcon: Icon
+    private lateinit var lidIcon: Icon
     private var unsub: (() -> Unit)? = null
     private val tick = object : Runnable {
         override fun run() {
@@ -40,11 +43,35 @@ class HomeScreen(a: MainActivity) : Screen(a) {
 
     override fun build(): View {
         val root = Ui.horizontal(c, Gravity.TOP)
-        root.setPadding(Ui.u(28), Ui.u(10), Ui.u(24), Ui.u(24))
+        root.setPadding(Ui.u(28), Ui.u(20), Ui.u(24), Ui.u(24))
 
         val left = Ui.vertical(c)
+        val headerRow = Ui.horizontal(c, Gravity.CENTER_VERTICAL).apply {
+            minimumHeight = Ui.u(38)
+        }
         greeting = Ui.text(c, "", 24f, Ui.TEXT2, Ui.LIGHT)
-        left.addView(greeting, Ui.lp(t = 8))
+        headerRow.addView(greeting, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
+
+        // Cluster de statut compact réservé (température, couvercle, etc.)
+        val statusCluster = Ui.horizontal(c, Gravity.CENTER_VERTICAL).apply {
+            minimumHeight = Ui.u(38)
+        }
+        val tempChip = Ui.horizontal(c, Gravity.CENTER_VERTICAL).apply {
+            setPadding(Ui.u(10), Ui.u(4), Ui.u(10), Ui.u(4))
+            background = Ui.round(Ui.SURFACE2, 14f, Ui.STROKE, 1f)
+            tempIcon = Icon(c, Icon.Kind.THERMO, Ui.TEXT2)
+            addView(tempIcon, LinearLayout.LayoutParams(Ui.u(18), Ui.u(18)).apply { rightMargin = Ui.u(6) })
+            tempValue = Ui.text(c, "0 °C", 15f, Ui.TEXT2, Ui.REGULAR)
+            addView(tempValue)
+        }
+        statusCluster.addView(tempChip)
+        lidIcon = Icon(c, Icon.Kind.LID, Ui.WARN).apply {
+            visibility = View.GONE
+        }
+        statusCluster.addView(lidIcon, LinearLayout.LayoutParams(Ui.u(24), Ui.u(24)).apply { leftMargin = Ui.u(8) })
+        headerRow.addView(statusCluster, LinearLayout.LayoutParams(Ui.WRAP, Ui.u(38)))
+        left.addView(headerRow, Ui.lp(Ui.MATCH, Ui.WRAP, t = 4))
+
         clock = Ui.text(c, "", 132f, Ui.TEXT, Ui.THIN)
         left.addView(clock, Ui.lp(t = 2))
         date = Ui.text(c, "", 22f, Ui.TEXT2, Ui.LIGHT)
@@ -96,7 +123,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
             bottomMargin = Ui.u(-2)
         })
         val weightBox = Ui.horizontal(c, Gravity.BOTTOM)
-        weightValue = Ui.text(c, "0", 72f, Ui.TEXT, Ui.MEDIUM).apply {
+        weightValue = Ui.text(c, "0", 72f, Ui.TEXT, Ui.THIN).apply {
             includeFontPadding = false
         }
         weightBox.addView(weightValue)
@@ -278,6 +305,15 @@ class HomeScreen(a: MainActivity) : Screen(a) {
 
     override fun onSnapshot(s: Snapshot) {
         if (!::weightValue.isInitialized) return
-        weightValue.text = if (!s.hasSample) "—" else "${s.weightG} g"
+        weightValue.text = if (!s.hasSample) "—" else "${s.weightG}"
+        if (::tempValue.isInitialized) {
+            tempValue.text = "${s.actualTempC} °C"
+            val col = if (s.actualTempC >= 40) Ui.tempColor(s.actualTempC) else Ui.TEXT2
+            tempValue.setTextColor(col)
+            tempIcon.color = col
+        }
+        if (::lidIcon.isInitialized) {
+            lidIcon.visibility = if (s.hasSample && s.lidOpen) View.VISIBLE else View.GONE
+        }
     }
 }
