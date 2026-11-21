@@ -61,21 +61,21 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
     init {
         orientation = HORIZONTAL
         setGravity(Gravity.CENTER_VERTICAL)
-        setPadding(Ui.u(10), 0, Ui.u(18), 0)
-        // Transparente : le dégradé du fond passe aussi derrière la barre du haut.
-        back.setPadding(Ui.u(10), Ui.u(10), Ui.u(10), Ui.u(10))
-        back.background = Ui.pressable(Ui.round(0, 30f), 30f)
+        setPadding(Ui.u(16), 0, Ui.u(16), 0)
+        // Zone de toucher confortable avec marge de sécurité par rapport au bord de l'écran.
+        back.setPadding(Ui.u(12), Ui.u(12), Ui.u(12), Ui.u(12))
+        back.background = Ui.pressable(Ui.round(0, 28f), 28f)
         back.setOnClickListener { a.back() }
-        addView(back, LayoutParams(Ui.u(52), Ui.u(52)))
-        addView(titleView, LayoutParams(0, Ui.WRAP, 1f).apply { leftMargin = Ui.u(6) })
+        addView(back, LayoutParams(Ui.u(56), Ui.u(56)))
+        addView(titleView, LayoutParams(0, Ui.WRAP, 1f).apply { leftMargin = Ui.u(10) })
         addView(lid, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
         addView(temp, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
         addView(link, Ui.lp(Ui.WRAP, Ui.WRAP, r = 16))
         addView(clock, Ui.lp(Ui.WRAP, Ui.WRAP, r = 6))
-        home.setPadding(Ui.u(10), Ui.u(10), Ui.u(10), Ui.u(10))
-        home.background = Ui.pressable(Ui.round(0, 30f), 30f)
+        home.setPadding(Ui.u(12), Ui.u(12), Ui.u(12), Ui.u(12))
+        home.background = Ui.pressable(Ui.round(0, 28f), 28f)
         home.setOnClickListener { a.home() }
-        addView(home, LayoutParams(Ui.u(52), Ui.u(52)))
+        addView(home, LayoutParams(Ui.u(56), Ui.u(56)))
         lid.visibility = View.GONE
         temp.visibility = View.GONE
         // Accès caché aux réglages Android : 5 appuis rapides sur l'heure.
