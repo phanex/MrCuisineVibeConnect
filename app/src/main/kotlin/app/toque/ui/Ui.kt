@@ -159,7 +159,7 @@ object Ui {
 
     /** Bouton arrondi avec icône facultative. */
     fun button(c: Context, label: String, style: Style = Style.SECONDARY, icon: Icon.Kind? = null,
-               height: Int = 64, textSize: Float = 20f, onClick: (View) -> Unit): LinearLayout {
+               height: Int = 64, textSize: Float = 20f, padH: Int = 22, onClick: (View) -> Unit): LinearLayout {
         val (bg, fg) = when (style) {
             Style.PRIMARY -> ACCENT to 0xFF1A0E05.toInt()
             Style.SECONDARY -> SURFACE3 to TEXT
@@ -169,7 +169,7 @@ object Ui {
         }
         val row = horizontal(c, Gravity.CENTER)
         row.minimumHeight = u(height)
-        row.setPadding(u(22), 0, u(22), 0)
+        row.setPadding(u(padH), 0, u(padH), 0)
         val base = if (style == Style.GHOST) round(Color.TRANSPARENT, height / 2f, STROKE, 1.5f) else round(bg, height / 2f)
         row.background = pressable(base, height / 2f)
         if (icon != null) {
@@ -202,9 +202,11 @@ object Ui {
     fun chipText(chip: LinearLayout): TextView = chip.getChildAt(chip.childCount - 1) as TextView
 
     /** Puce sélectionnable (filtres, choix). */
-    fun toggleChip(c: Context, label: String, selected: Boolean, onClick: () -> Unit): TextView {
+    fun toggleChip(c: Context, label: String, selected: Boolean, minWidth: Int = 0, onClick: () -> Unit): TextView {
         val t = text(c, label, 17f, if (selected) 0xFF1A0E05.toInt() else TEXT, MEDIUM)
-        t.setPadding(u(18), u(10), u(18), u(10))
+        t.gravity = Gravity.CENTER
+        if (minWidth > 0) t.minWidth = u(minWidth)
+        t.setPadding(u(14), u(10), u(14), u(10))
         t.background = pressable(if (selected) round(ACCENT, 40f) else round(SURFACE2, 40f, STROKE, 1f), 40f)
         t.isClickable = true
         t.setOnClickListener { onClick() }

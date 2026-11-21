@@ -58,13 +58,13 @@ class HomeScreen(a: MainActivity) : Screen(a) {
 
         // Rangée 1 : 3 raccourcis compacts en pilules
         val shortcuts = Ui.horizontal(c)
-        shortcuts.addView(Ui.button(c, tr("Recherche"), Ui.Style.SECONDARY, Icon.Kind.SEARCH, height = 50, textSize = 16f) {
+        shortcuts.addView(Ui.button(c, tr("Recherche"), Ui.Style.SECONDARY, Icon.Kind.SEARCH, height = 50, textSize = 16f, padH = 10) {
             a.push(RecipesScreen(a, focusSearch = true))
         }, LinearLayout.LayoutParams(0, Ui.WRAP, 1f).apply { rightMargin = Ui.u(8) })
-        shortcuts.addView(Ui.button(c, tr("Récentes"), Ui.Style.SECONDARY, Icon.Kind.CLOCK, height = 50, textSize = 16f) {
+        shortcuts.addView(Ui.button(c, tr("Récentes"), Ui.Style.SECONDARY, Icon.Kind.CLOCK, height = 50, textSize = 16f, padH = 10) {
             a.push(RecipesScreen(a, initialUsage = RecipesScreen.Usage.RECENT))
         }, LinearLayout.LayoutParams(0, Ui.WRAP, 1f).apply { rightMargin = Ui.u(8) })
-        shortcuts.addView(Ui.button(c, tr("Fréquentes"), Ui.Style.SECONDARY, Icon.Kind.FLAME, height = 50, textSize = 16f) {
+        shortcuts.addView(Ui.button(c, tr("Fréquentes"), Ui.Style.SECONDARY, Icon.Kind.FLAME, height = 50, textSize = 16f, padH = 10) {
             a.push(RecipesScreen(a, initialUsage = RecipesScreen.Usage.MOST))
         }, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
         left.addView(shortcuts, Ui.lp(Ui.MATCH, Ui.WRAP, t = 18))
@@ -76,10 +76,10 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         scaleCard.addView(Icon(c, Icon.Kind.SCALE, Ui.COOL), LinearLayout.LayoutParams(Ui.u(26), Ui.u(26)).apply { rightMargin = Ui.u(12) })
         weightValue = Ui.text(c, "0 g", 24f, Ui.TEXT, Ui.MEDIUM)
         scaleCard.addView(weightValue, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
-        val tareBtn = Ui.button(c, tr("Tare"), Ui.Style.GHOST, height = 44, textSize = 16f) {
+        val tareBtn = Ui.button(c, tr("Tare"), Ui.Style.GHOST, height = 44, textSize = 16f, padH = 14) {
             a.machine.tare()
         }
-        scaleCard.addView(tareBtn, LinearLayout.LayoutParams(Ui.u(78), Ui.u(44)))
+        scaleCard.addView(tareBtn, LinearLayout.LayoutParams(Ui.WRAP, Ui.u(44)))
         scaleCard.isClickable = true
         scaleCard.setOnClickListener { a.push(ScaleScreen(a)) }
         left.addView(scaleCard, Ui.lp(Ui.MATCH, Ui.WRAP, t = 12))
