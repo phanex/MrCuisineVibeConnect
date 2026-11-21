@@ -6,7 +6,10 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import app.toque.core.i18n.I18n
 import app.toque.core.i18n.tr
+import app.toque.core.machine.Accessory
+import app.toque.core.machine.Snapshot
 import app.toque.core.recipes.UserRecipes
+import app.toque.ui.HoldButton
 import app.toque.ui.Icon
 import app.toque.ui.MainActivity
 import app.toque.ui.Screen
@@ -26,6 +29,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
     private lateinit var resumeCard: LinearLayout
     private lateinit var resumeText: TextView
     private lateinit var knobChip: LinearLayout
+    private lateinit var weightValue: TextView
     private var unsub: (() -> Unit)? = null
     private val tick = object : Runnable {
         override fun run() {
@@ -52,24 +56,39 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         knobChip.setOnClickListener { a.push(KnobSetupScreen(a)) }
         left.addView(knobChip, Ui.lp(Ui.WRAP, Ui.WRAP, t = 12))
 
-        val search = Ui.horizontal(c)
-        search.setPadding(Ui.u(24), 0, Ui.u(24), 0)
-        search.background = Ui.pressable(Ui.round(Ui.SURFACE, 36f, Ui.STROKE, 1f), 36f)
-        search.addView(Icon(c, Icon.Kind.SEARCH, Ui.TEXT2), LinearLayout.LayoutParams(Ui.u(28), Ui.u(28)).apply { rightMargin = Ui.u(14) })
-        search.addView(Ui.text(c, tr("Rechercher une recette…"), 21f, Ui.TEXT3))
-        search.isClickable = true
-        search.setOnClickListener { a.push(RecipesScreen(a, focusSearch = true)) }
-        left.addView(search, Ui.lp(Ui.MATCH, Ui.u(72), t = 34))
-
-        // Raccourcis sous la recherche : dernières recettes cuisinées, et les plus cuisinées.
+        // Rangée 1 : 3 raccourcis compacts en pilules
         val shortcuts = Ui.horizontal(c)
-        shortcuts.addView(Ui.button(c, tr("Récentes"), Ui.Style.SECONDARY, Icon.Kind.CLOCK, height = 56, textSize = 18f) {
+        shortcuts.addView(Ui.button(c, tr("Recherche"), Ui.Style.SECONDARY, Icon.Kind.SEARCH, height = 50, textSize = 16f) {
+            a.push(RecipesScreen(a, focusSearch = true))
+        }, LinearLayout.LayoutParams(0, Ui.WRAP, 1f).apply { rightMargin = Ui.u(8) })
+        shortcuts.addView(Ui.button(c, tr("Récentes"), Ui.Style.SECONDARY, Icon.Kind.CLOCK, height = 50, textSize = 16f) {
             a.push(RecipesScreen(a, initialUsage = RecipesScreen.Usage.RECENT))
-        }, LinearLayout.LayoutParams(0, Ui.WRAP, 1f).apply { rightMargin = Ui.u(12) })
-        shortcuts.addView(Ui.button(c, tr("Fréquentes"), Ui.Style.SECONDARY, Icon.Kind.FLAME, height = 56, textSize = 18f) {
+        }, LinearLayout.LayoutParams(0, Ui.WRAP, 1f).apply { rightMargin = Ui.u(8) })
+        shortcuts.addView(Ui.button(c, tr("Fréquentes"), Ui.Style.SECONDARY, Icon.Kind.FLAME, height = 50, textSize = 16f) {
             a.push(RecipesScreen(a, initialUsage = RecipesScreen.Usage.MOST))
         }, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
-        left.addView(shortcuts, Ui.lp(Ui.MATCH, Ui.WRAP, t = 14))
+        left.addView(shortcuts, Ui.lp(Ui.MATCH, Ui.WRAP, t = 18))
+
+        // Rangée 2 : Widget de pesée en direct avec bouton Tare
+        val scaleCard = Ui.horizontal(c, Gravity.CENTER_VERTICAL)
+        scaleCard.setPadding(Ui.u(18), Ui.u(10), Ui.u(14), Ui.u(10))
+        scaleCard.background = Ui.pressable(Ui.round(Ui.SURFACE, 22f, Ui.STROKE, 1f), 22f)
+        scaleCard.addView(Icon(c, Icon.Kind.SCALE, Ui.COOL), LinearLayout.LayoutParams(Ui.u(26), Ui.u(26)).apply { rightMargin = Ui.u(12) })
+        weightValue = Ui.text(c, "0 g", 24f, Ui.TEXT, Ui.MEDIUM)
+        scaleCard.addView(weightValue, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
+        val tareBtn = Ui.button(c, tr("Tare"), Ui.Style.GHOST, height = 44, textSize = 16f) {
+            a.machine.tare()
+        }
+        scaleCard.addView(tareBtn, LinearLayout.LayoutParams(Ui.u(78), Ui.u(44)))
+        scaleCard.isClickable = true
+        scaleCard.setOnClickListener { a.push(ScaleScreen(a)) }
+        left.addView(scaleCard, Ui.lp(Ui.MATCH, Ui.WRAP, t = 12))
+
+        // Rangée 3 : Bouton Turbo instantané à maintien
+        val turbo = HoldButton(c, tr("Turbo"), onDown = {
+            a.machine.turboDown(Accessory.BLADE) { v -> if (!v.ok) a.refusal(v) }
+        }, onUp = { a.machine.turboUp() })
+        left.addView(turbo, Ui.lp(Ui.MATCH, Ui.u(54), t = 12))
 
         resumeCard = Ui.horizontal(c)
         resumeCard.setPadding(Ui.u(22), Ui.u(16), Ui.u(18), Ui.u(16))
@@ -119,22 +138,20 @@ class HomeScreen(a: MainActivity) : Screen(a) {
     private fun tileLp(gap: Boolean) = LinearLayout.LayoutParams(0, Ui.MATCH, 1f).apply { if (gap) rightMargin = Ui.u(16) }
 
     private fun tile(icon: Icon.Kind, title: String, sub: String = "", hasSub: Boolean = true, onClick: () -> Unit): Pair<LinearLayout, TextView> {
-        // Tuile centrée : grande pastille d'icône, titre et sous-titre dessous. La pastille est à la
-        // même hauteur dans toutes les tuiles, quel que soit le texte (une ou deux lignes, avec ou
-        // sans sous-titre) : espace fixe au-dessus, texte accroché sous la pastille.
+        // Tuile géométriquement alignée : pastille centrée en haut, titre et sous-titre calés au même niveau.
         val t = Ui.vertical(c, Gravity.CENTER_HORIZONTAL)
-        t.setPadding(Ui.u(14), Ui.u(14), Ui.u(14), Ui.u(14))
+        t.setPadding(Ui.u(14), Ui.u(16), Ui.u(14), Ui.u(12))
         t.background = Ui.pressable(Ui.round(Ui.SURFACE, 26f, Ui.STROKE, 1f), 26f)
-        t.addView(View(c), LinearLayout.LayoutParams(1, 0, 2f))
         val badge = android.widget.FrameLayout(c)
         badge.background = Ui.round(Ui.ACCENT_DIM, 44f)
-        badge.addView(Icon(c, icon, Ui.ACCENT), Ui.flp(Ui.u(46), Ui.u(46), Gravity.CENTER))
+        badge.addView(Icon(c, icon, Ui.ACCENT), Ui.flp(Ui.u(48), Ui.u(48), Gravity.CENTER))
         t.addView(badge, LinearLayout.LayoutParams(Ui.u(84), Ui.u(84)))
         val text = Ui.vertical(c, Gravity.CENTER_HORIZONTAL or Gravity.TOP)
-        text.addView(Ui.text(c, title, 22f, Ui.TEXT, Ui.MEDIUM).apply { gravity = Gravity.CENTER }, Ui.lp(Ui.WRAP, Ui.WRAP, t = 12))
-        val s = Ui.ellipsize(Ui.text(c, sub, 15f, Ui.TEXT2).apply { gravity = Gravity.CENTER }, 2)
-        if (hasSub) text.addView(s, Ui.lp(Ui.WRAP, Ui.WRAP, t = 4))
-        t.addView(text, LinearLayout.LayoutParams(Ui.MATCH, 0, 3f))
+        text.addView(Ui.text(c, title, 21f, Ui.TEXT, Ui.MEDIUM).apply { gravity = Gravity.CENTER }, Ui.lp(Ui.WRAP, Ui.WRAP, t = 8))
+        val s = Ui.ellipsize(Ui.text(c, sub, 14f, Ui.TEXT2).apply { gravity = Gravity.CENTER }, 2)
+        if (hasSub) text.addView(s, Ui.lp(Ui.WRAP, Ui.WRAP, t = 3))
+        t.addView(text, LinearLayout.LayoutParams(Ui.MATCH, Ui.WRAP))
+        t.addView(View(c), LinearLayout.LayoutParams(1, 0, 1f))
         t.isClickable = true
         t.setOnClickListener { onClick() }
         return t to s
@@ -203,5 +220,10 @@ class HomeScreen(a: MainActivity) : Screen(a) {
             a.prefs.guidedStep = 0
             refresh()
         }
+    }
+
+    override fun onSnapshot(s: Snapshot) {
+        if (!::weightValue.isInitialized) return
+        weightValue.text = if (!s.hasSample) "—" else "${s.weightG} g"
     }
 }
