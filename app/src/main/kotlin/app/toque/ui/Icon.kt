@@ -36,6 +36,11 @@ class Icon(context: Context, var kind: Kind, color: Int) : View(context) {
     private val path = Path()
     private val rect = RectF()
 
+    init {
+        // Évite le flou de 2 px de PathCache HWUI sous Android 6 en forçant le rendu vectoriel Skia 1:1.
+        setLayerType(LAYER_TYPE_SOFTWARE, null)
+    }
+
     fun set(k: Kind) {
         if (k != kind) {
             kind = k
@@ -49,11 +54,11 @@ class Icon(context: Context, var kind: Kind, color: Int) : View(context) {
         canvas.save()
         canvas.translate((width - 24 * s) / 2f, (height - 24 * s) / 2f)
         canvas.scale(s, s)
-        stroke.strokeWidth = 2f
+        stroke.strokeWidth = Math.max(1f, Math.round(2f * s) / s)
         val p = path
         p.reset()
         when (kind) {
-            Kind.BACK -> { p.moveTo(15f, 5f); p.lineTo(8f, 12f); p.lineTo(15f, 19f); canvas.drawPath(p, stroke) }
+            Kind.BACK -> { canvas.drawLine(6f, 12f, 19f, 12f, stroke); p.moveTo(12.5f, 5.5f); p.lineTo(6f, 12f); p.lineTo(12.5f, 18.5f); canvas.drawPath(p, stroke) }
             Kind.CHEVRON -> { p.moveTo(9f, 5f); p.lineTo(16f, 12f); p.lineTo(9f, 19f); canvas.drawPath(p, stroke) }
             Kind.SEARCH -> { canvas.drawCircle(10.5f, 10.5f, 6.5f, stroke); canvas.drawLine(15.5f, 15.5f, 20.5f, 20.5f, stroke) }
             Kind.PLAY -> { p.moveTo(7f, 4.5f); p.lineTo(19.5f, 12f); p.lineTo(7f, 19.5f); p.close(); canvas.drawPath(p, fill) }
@@ -140,7 +145,11 @@ class Icon(context: Context, var kind: Kind, color: Int) : View(context) {
                 p.moveTo(12f, 3f); p.lineTo(22f, 20.5f); p.lineTo(2f, 20.5f); p.close(); canvas.drawPath(p, stroke)
                 canvas.drawLine(12f, 9.5f, 12f, 14f, stroke); canvas.drawCircle(12f, 17.3f, 1.2f, fill)
             }
-            Kind.HOME -> { p.moveTo(3.5f, 11f); p.lineTo(12f, 4f); p.lineTo(20.5f, 11f); canvas.drawPath(p, stroke); rect.set(6f, 10f, 18f, 20f); canvas.drawRect(rect, stroke) }
+            Kind.HOME -> {
+                p.moveTo(5f, 20f); p.lineTo(5f, 10.5f); p.lineTo(12f, 4.5f); p.lineTo(19f, 10.5f); p.lineTo(19f, 20f); p.close()
+                canvas.drawPath(p, stroke)
+                canvas.drawLine(10f, 20f, 10f, 14.5f, stroke); canvas.drawLine(10f, 14.5f, 14f, 14.5f, stroke); canvas.drawLine(14f, 14.5f, 14f, 20f, stroke)
+            }
             Kind.WHISK -> {
                 canvas.drawLine(12f, 21.5f, 12f, 15f, stroke)
                 rect.set(7f, 2.5f, 17f, 16f); canvas.drawOval(rect, stroke)
