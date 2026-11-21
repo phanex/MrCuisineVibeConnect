@@ -11,7 +11,7 @@ import android.view.View
 class Icon(context: Context, var kind: Kind, color: Int) : View(context) {
     enum class Kind {
         BACK, SEARCH, PLAY, PAUSE, STOP, THERMO, SPEED, CLOCK, REVERSE, SCALE, BOOK, STAR, STAR_FILLED,
-        SETTINGS, PLUS, MINUS, CHECK, CLOSE, KNEAD, STEAM, FLAME, BOLT, SYNC, LID, WARNING, HOME, WHISK,
+        SETTINGS, PLUS, MINUS, CHECK, CLOSE, KNEAD, STEAM, FLAME, BOLT, SYNC, LID, WARNING, HOME, WHISK, BLADE,
         CHEVRON, LINK, INFO, POT, TIMER, DROP, EDIT, TRASH, PEOPLE, DOWNLOAD, UPLOAD, GLOBE, BELL,
     }
 
@@ -154,6 +154,20 @@ class Icon(context: Context, var kind: Kind, color: Int) : View(context) {
                 canvas.drawLine(12f, 21.5f, 12f, 15f, stroke)
                 rect.set(7f, 2.5f, 17f, 16f); canvas.drawOval(rect, stroke)
                 rect.set(9.5f, 2.5f, 14.5f, 16f); canvas.drawOval(rect, stroke)
+            }
+            Kind.BLADE -> {
+                canvas.drawCircle(12f, 12f, 1.3f, fill)
+                p.moveTo(9.2f, 9.2f)
+                p.cubicTo(11.2f, 6.5f, 13.5f, 4f, 16.8f, 2.4f)
+                p.cubicTo(18.8f, 4.5f, 17.2f, 8f, 14.8f, 9.2f)
+                p.cubicTo(17.5f, 11.2f, 20f, 13.5f, 21.6f, 16.8f)
+                p.cubicTo(19.5f, 18.8f, 16f, 17.2f, 14.8f, 14.8f)
+                p.cubicTo(12.8f, 17.5f, 10.5f, 20f, 7.2f, 21.6f)
+                p.cubicTo(5.2f, 19.5f, 6.8f, 16f, 9.2f, 14.8f)
+                p.cubicTo(6.5f, 12.8f, 4f, 10.5f, 2.4f, 7.2f)
+                p.cubicTo(4.5f, 5.2f, 8f, 6.8f, 9.2f, 9.2f)
+                p.close()
+                canvas.drawPath(p, stroke)
             }
             Kind.LINK -> { canvas.drawCircle(12f, 12f, 4f, fill); canvas.drawCircle(12f, 12f, 8.5f, stroke) }
             Kind.INFO -> { canvas.drawCircle(12f, 12f, 9f, stroke); canvas.drawLine(12f, 11f, 12f, 16.5f, stroke); canvas.drawCircle(12f, 7.8f, 1.2f, fill) }

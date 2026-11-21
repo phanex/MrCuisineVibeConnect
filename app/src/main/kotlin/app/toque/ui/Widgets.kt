@@ -171,8 +171,9 @@ class TempRing(c: Context) : View(c) {
 }
 
 /** Bouton « maintenir pour Turbo ». */
-class HoldButton(c: Context, label: String, private val onDown: () -> Unit, private val onUp: () -> Unit) : LinearLayout(c) {
+class HoldButton(c: Context, label: String, icon: Icon.Kind = Icon.Kind.BLADE, private val onDown: () -> Unit, private val onUp: () -> Unit) : LinearLayout(c) {
     private val text: TextView
+    private val iconView: Icon
 
     init {
         orientation = HORIZONTAL
@@ -180,7 +181,8 @@ class HoldButton(c: Context, label: String, private val onDown: () -> Unit, priv
         setPadding(Ui.u(22), 0, Ui.u(22), 0)
         minimumHeight = Ui.u(64)
         background = Ui.round(Ui.SURFACE3, 32f)
-        addView(Icon(c, Icon.Kind.BOLT, Ui.WARN), LayoutParams(Ui.u(26), Ui.u(26)).apply { rightMargin = Ui.u(10) })
+        iconView = Icon(c, icon, Ui.TEXT)
+        addView(iconView, LayoutParams(Ui.u(32), Ui.u(32)).apply { rightMargin = Ui.u(12) })
         text = Ui.text(c, label, 20f, Ui.TEXT, Ui.MEDIUM)
         addView(text)
         isClickable = true
@@ -190,13 +192,15 @@ class HoldButton(c: Context, label: String, private val onDown: () -> Unit, priv
         if (!isEnabled) return false
         when (e.action) {
             MotionEvent.ACTION_DOWN -> {
-                background = Ui.round(Ui.WARN, 32f)
-                text.setTextColor(0xFF1A1405.toInt())
+                background = Ui.round(Ui.ACCENT, 32f)
+                text.setTextColor(0xFF1A0E05.toInt())
+                iconView.color = 0xFF1A0E05.toInt()
                 onDown()
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 background = Ui.round(Ui.SURFACE3, 32f)
                 text.setTextColor(Ui.TEXT)
+                iconView.color = Ui.TEXT
                 onUp()
             }
         }

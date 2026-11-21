@@ -74,7 +74,7 @@
   "Attendez l'arrêt complet du moteur": "Зачекайте повної зупинки мотора",
   "au besoin": "за потреби",
   "Aucun": "Немає",
-  "Aucun favori": "Немає\nулюблених",
+  "Aucun favori": "Поки що порожньо",
   "Aucun favori pour l'instant.\nTouchez l'étoile d'une recette pour l'ajouter.": "Поки що немає улюблених рецептів.\nНатисніть зірочку на рецепті, щоб додати.",
   "Aucun fichier de recettes Toque dans Download": "У папці Download немає файлів рецептів Toque",
   "Aucun ingrédient pour l'instant.": "Інгредієнтів поки немає.",
@@ -415,7 +415,7 @@
   "Pesez %d g (recette : %d g)": "Зважте %d г (у рецепті: %d г)",
   "Pétrir": "Замішування",
   "Pétrir, vapeur, rissoler": "Мішати, пара,\nсмажити",
-  "Pétrir, vapeur, rissoler, nettoyage": "Замішування, пара, обсмажування, очищення",
+  "Pétrir, vapeur, rissoler, nettoyage": "Автоматичні режими",
   "Pétrissage : vitesse 4 maximum": "Замішування: швидкість максимум 4",
   "Phase de durée nulle": "Фаза з нульовою тривалістю",
   "Photos : %d / %d": "Фотографії: %d / %d",
@@ -583,5 +583,10 @@
   "Vitesse hors plage (0 à 10)": "Швидкість поза діапазоном (від 0 до 10)",
   "Vitesse minimale : 1": "Мінімальна швидкість: 1",
   "Voir plus d'avis (%d sur %d)": "Показати більше відгуків (%d з %d)",
-  "Vrai robot": "Комбайн"
+  "Vrai robot": "Комбайн",
+  "Contrôle manuel": "Ручне керування",
+  "Préréglages": "Автоматичні режими",
+  "Système et appareil": "Налаштування пристрою і системи",
+  "Recettes favorites": "Збережені рецепти",
+  "1 118 recettes": "1 118 рецептів"
 }
