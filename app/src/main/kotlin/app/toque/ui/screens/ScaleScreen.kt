@@ -45,6 +45,7 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
     private var lastAutoLoggedWeight = 0
     private var stableSinceMs = 0L
     private var pendingAutoWeight = 0
+    private var lastAutoRecordTimeMs = 0L
 
     override fun build(): View {
         val root = Ui.horizontal(c, Gravity.TOP)
@@ -80,14 +81,7 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
 
         val buttons = Ui.horizontal(c, Gravity.CENTER)
         val tareBtn = Ui.button(c, tr("Tare (remise à zéro)"), Ui.Style.PRIMARY, Icon.Kind.SYNC, height = 72, textSize = 22f) {
-            if (lastWeightG > 5 && lastWeightG != lastAutoLoggedWeight) {
-                recordCurrentWeight()
-                a.weighRecordedSound()
-            }
-            lastAutoLoggedWeight = 0
-            pendingAutoWeight = 0
-            stableSinceMs = 0L
-            a.machine.tare()
+            handleTare()
         }
         buttons.addView(tareBtn)
 
@@ -142,7 +136,9 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
         panel.addView(pHeader, Ui.lp(b = 10))
 
         historyList = Ui.vertical(c)
-        val scroll = Ui.scroll(c, historyList)
+        val scroll = Ui.scroll(c, historyList).apply {
+            isVerticalScrollBarEnabled = true
+        }
         historyScroll = scroll
         panel.addView(scroll, LinearLayout.LayoutParams(Ui.MATCH, 0, 1f))
 
@@ -247,15 +243,16 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
         textView.text = txt
         textView.setTextColor(col)
 
-        // --- Автоматична фіксація заміру при спокої > 2.5 сек ---
+        // --- Автоматична фіксація заміру при спокої > 5 сек ---
         if (s.scaleStable && s.weightG >= 10) {
             val now = System.currentTimeMillis()
             if (kotlin.math.abs(s.weightG - pendingAutoWeight) > 5) {
                 pendingAutoWeight = s.weightG
                 stableSinceMs = now
-            } else if (stableSinceMs > 0L && now - stableSinceMs >= 2500L) {
+            } else if (stableSinceMs > 0L && now - stableSinceMs >= 5000L) {
                 if (kotlin.math.abs(s.weightG - lastAutoLoggedWeight) > 10) {
                     lastAutoLoggedWeight = s.weightG
+                    lastAutoRecordTimeMs = now
                     recordCurrentWeight()
                     a.weighRecordedSound()
                 }
@@ -272,15 +269,29 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
         }
     }
 
-    override fun onKnobPress(): Boolean {
-        if (lastWeightG > 5 && lastWeightG != lastAutoLoggedWeight) {
+    private fun handleTare() {
+        val now = System.currentTimeMillis()
+        if (lastAutoRecordTimeMs > 0L && now - lastAutoRecordTimeMs <= 5000L && history.isNotEmpty()) {
+            history.removeAt(history.lastIndex)
+            renderHistory()
+        } else if (lastWeightG > 5 && lastWeightG != lastAutoLoggedWeight) {
             recordCurrentWeight()
             a.weighRecordedSound()
         }
         lastAutoLoggedWeight = 0
         pendingAutoWeight = 0
         stableSinceMs = 0L
+        lastAutoRecordTimeMs = 0L
         a.machine.tare()
+    }
+
+    override fun onKnob(delta: Int): Boolean {
+        historyScroll.smoothScrollBy(0, delta * Ui.u(64))
+        return true
+    }
+
+    override fun onKnobPress(): Boolean {
+        handleTare()
         return true
     }
 }
