@@ -14,7 +14,6 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import app.toque.core.i18n.I18n
 import app.toque.core.i18n.tr
-import app.toque.core.recipes.McOnline
 import app.toque.core.recipes.QuantityLinks
 import app.toque.core.recipes.Ingredient
 import app.toque.core.recipes.Portions
@@ -27,7 +26,6 @@ import app.toque.core.recipes.Weigh
 import app.toque.core.recipes.adjusted
 import app.toque.core.recipes.corrected
 import app.toque.core.recipes.unlistedWeighings
-import app.toque.recipes.Reviews
 import app.toque.ui.Icon
 import app.toque.ui.ImageLoader
 import app.toque.ui.MainActivity
@@ -113,13 +111,6 @@ class RecipeScreen(a: MainActivity, val recipe: Recipe) : Screen(a) {
         steps.addView(section(tr("Étapes")))
         steps.addView(stepsList)
         renderSteps()
-        McOnline.apiIdOf(recipe.id)?.let { apiId ->
-            steps.addView(reviewsBox, Ui.lp(t = 22))
-            reviewsBox.addView(section(if (recipe.ratingCount > 0)
-                tr("Avis · %s/5 (%d notes)", rating(recipe.rating), recipe.ratingCount) else tr("Avis")))
-            reviewsBox.addView(reviewsState, Ui.lp(t = 10))
-            loadReviews(apiId, 1)
-        }
         val stepsBox = Ui.vertical(c)
         stepsBox.background = Ui.round(Ui.SURFACE, 24f)
         stepsBox.setPadding(Ui.u(22), Ui.u(10), Ui.u(22), Ui.u(18))
@@ -415,73 +406,6 @@ class RecipeScreen(a: MainActivity, val recipe: Recipe) : Screen(a) {
         card.requestLayout()
         input.requestFocus()
         input.post { imm.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT) }
-    }
-
-    // ------------------------------------------------------------------ avis
-
-    private val reviewsBox by lazy { Ui.vertical(c) }
-    private val reviewsState by lazy { Ui.text(c, "", 16f, Ui.TEXT3) }
-    private var moreButton: View? = null
-    private var loading = false
-
-    private fun loadReviews(apiId: Long, page: Int) {
-        if (loading) return
-        loading = true
-        reviewsState.visibility = View.VISIBLE
-        reviewsState.text = tr("Chargement des avis…")
-        Thread {
-            val result = try {
-                Reviews.load(apiId, page, recipe.language)
-            } catch (e: Exception) {
-                null
-            }
-            reviewsBox.post {
-                loading = false
-                if (result == null) {
-                    reviewsState.text = tr("Avis indisponibles (pas de connexion ?)")
-                    return@post
-                }
-                showReviews(apiId, result)
-            }
-        }.start()
-    }
-
-    private fun showReviews(apiId: Long, p: McOnline.ReviewPage) {
-        moreButton?.let { reviewsBox.removeView(it) }
-        moreButton = null
-        if (p.page == 1 && p.reviews.isEmpty()) {
-            reviewsState.text = tr("Pas encore de commentaire sur cette recette.")
-            return
-        }
-        reviewsState.visibility = View.GONE
-        for (r in p.reviews) reviewsBox.addView(reviewRow(r), Ui.lp(t = 14))
-        if (p.page < p.totalPages) {
-            val shown = reviewsBox.childCount - 2
-            val more = Ui.button(c, tr("Voir plus d'avis (%d sur %d)", shown, p.total), Ui.Style.GHOST, height = 50, textSize = 16f) {
-                loadReviews(apiId, p.page + 1)
-            }
-            moreButton = more
-            reviewsBox.addView(more, Ui.lp(Ui.WRAP, Ui.WRAP, t = 12))
-        }
-    }
-
-    private fun reviewRow(r: McOnline.Review): View {
-        val box = Ui.vertical(c)
-        box.background = Ui.round(Ui.SURFACE2, 16f)
-        box.setPadding(Ui.u(16), Ui.u(12), Ui.u(16), Ui.u(12))
-        val head = Ui.horizontal(c)
-        head.addView(Ui.text(c, "★".repeat(r.rating) + "☆".repeat(5 - r.rating), 17f, Ui.ACCENT), Ui.lp(Ui.WRAP, Ui.WRAP, r = 12))
-        val who = listOf(r.author.ifBlank { tr("Anonyme") }, r.date).filter { it.isNotBlank() }.joinToString(" · ")
-        head.addView(Ui.ellipsize(Ui.text(c, who, 15f, Ui.TEXT3)), LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
-        box.addView(head)
-        if (r.message.isNotBlank()) {
-            box.addView(Ui.text(c, r.message, 17f, Ui.TEXT).apply { setLineSpacing(0f, 1.12f) }, Ui.lp(t = 6))
-        }
-        if (r.reply.isNotBlank()) {
-            box.addView(Ui.text(c, tr("Réponse de Monsieur Cuisine : %s", r.reply), 15f, Ui.TEXT2)
-                .apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 8))
-        }
-        return box
     }
 
     private fun rating(v: Double): String = String.format(I18n.locale, "%.1f", v)
