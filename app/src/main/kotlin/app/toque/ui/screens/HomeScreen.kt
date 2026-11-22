@@ -75,7 +75,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         }
         statusCluster.addView(lidIcon, LinearLayout.LayoutParams(Ui.u(24), Ui.u(24)).apply { leftMargin = Ui.u(8) })
 
-        faultIcon = Icon(c, Icon.Kind.WARNING, Ui.DANGER).apply {
+        faultIcon = Icon(c, Icon.Kind.WARNING, Ui.WARN).apply {
             visibility = View.GONE
             isClickable = true
             setOnClickListener {
@@ -86,7 +86,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
                     app.toque.core.machine.LinkState.ARMING -> tr("Connexion…")
                     else -> tr("Alerte")
                 }
-                a.toast(msg, if (s.link == app.toque.core.machine.LinkState.ARMING) Ui.WARN else Ui.DANGER)
+                a.toast(msg, if (s.link == app.toque.core.machine.LinkState.ARMING) Ui.TEXT2 else Ui.WARN)
             }
         }
         statusCluster.addView(faultIcon, LinearLayout.LayoutParams(Ui.u(24), Ui.u(24)).apply { leftMargin = Ui.u(8) })
@@ -176,7 +176,6 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         }
         weightBox.addView(weightUnit, LinearLayout.LayoutParams(Ui.WRAP, Ui.WRAP).apply {
             leftMargin = Ui.u(6)
-            bottomMargin = Ui.u(8)
         })
         scaleRow.addView(weightBox, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
 
@@ -224,7 +223,9 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         val turbo = HoldButton(c, tr("Turbo"), onDown = {
             a.machine.turboDown(Accessory.BLADE) { v -> if (!v.ok) a.refusal(v) }
         }, onUp = { a.machine.turboUp() })
-        left.addView(turbo, Ui.lp(Ui.MATCH, Ui.u(54)))
+        left.addView(turbo, LinearLayout.LayoutParams(Ui.WRAP, Ui.u(54)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+        })
         root.addView(left, LinearLayout.LayoutParams(0, Ui.MATCH, 0.42f).apply { rightMargin = Ui.u(28) })
 
         val grid = Ui.vertical(c)
@@ -363,10 +364,10 @@ class HomeScreen(a: MainActivity) : Screen(a) {
             val hasFaultOrLost = s.hasFault || s.link == app.toque.core.machine.LinkState.LOST || s.link == app.toque.core.machine.LinkState.OFFLINE
             val arming = s.link == app.toque.core.machine.LinkState.ARMING
             if (hasFaultOrLost) {
-                faultIcon.color = Ui.DANGER
+                faultIcon.color = Ui.WARN
                 faultIcon.visibility = View.VISIBLE
             } else if (arming) {
-                faultIcon.color = Ui.WARN
+                faultIcon.color = Ui.TEXT2
                 faultIcon.visibility = View.VISIBLE
             } else {
                 faultIcon.visibility = View.GONE
