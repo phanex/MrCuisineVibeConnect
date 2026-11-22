@@ -80,8 +80,10 @@ class Icon(context: Context, var kind: Kind, color: Int) : View(context) {
                 if (kind == Kind.TIMER) canvas.drawLine(10f, 2.5f, 14f, 2.5f, stroke)
             }
             Kind.REVERSE -> {
-                rect.set(4f, 4f, 20f, 20f); canvas.drawArc(rect, -60f, -260f, false, stroke)
-                p.moveTo(17f, 3f); p.lineTo(16.5f, 6.8f); p.lineTo(20.5f, 7f); canvas.drawPath(p, stroke)
+                rect.set(4.5f, 4.5f, 19.5f, 19.5f)
+                canvas.drawArc(rect, -20f, -140f, false, stroke); canvas.drawArc(rect, 160f, -140f, false, stroke)
+                p.moveTo(5.5f, 3.5f); p.lineTo(5f, 8f); p.lineTo(9.5f, 8f); canvas.drawPath(p, stroke)
+                p.reset(); p.moveTo(18.5f, 20.5f); p.lineTo(19f, 16f); p.lineTo(14.5f, 16f); canvas.drawPath(p, stroke)
             }
             Kind.SCALE -> {
                 rect.set(3f, 7f, 21f, 20f); canvas.drawRoundRect(rect, 3f, 3f, stroke)

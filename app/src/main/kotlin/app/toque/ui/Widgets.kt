@@ -33,13 +33,12 @@ class ValueCard(c: Context, label: String, icon: Icon.Kind) : LinearLayout(c) {
         head.addView(iconView, LayoutParams(Ui.u(24), Ui.u(24)).apply { rightMargin = Ui.u(8) })
         head.addView(Ui.text(c, label.uppercase(), 15f, Ui.TEXT2, Ui.MEDIUM).apply { letterSpacing = 0.08f })
         addView(head)
-        addView(Ui.spacer(c, h = 0, weight = 1f))
         val row = Ui.horizontal(c, Gravity.BOTTOM)
         row.addView(valueView)
         row.addView(unitView, Ui.lp(Ui.WRAP, Ui.WRAP, l = 6, b = 10))
-        addView(row)
-        addView(subView, Ui.lp(t = 4))
-        addView(Ui.spacer(c, h = 0, weight = 1.2f))
+        addView(row, Ui.lp(t = 18))
+        addView(subView, Ui.lp(t = 6))
+        addView(Ui.spacer(c, h = 0, weight = 1f))
         val buttons = Ui.horizontal(c)
         minus = Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.MINUS, height = 60) { onSelect(); onMinus() }
         plus = Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.PLUS, height = 60) { onSelect(); onPlus() }
@@ -47,7 +46,7 @@ class ValueCard(c: Context, label: String, icon: Icon.Kind) : LinearLayout(c) {
         repeatOnHold(plus, { repeatEnabled }) { onPlus() }
         buttons.addView(minus, LayoutParams(0, Ui.u(60), 1f).apply { rightMargin = Ui.u(10) })
         buttons.addView(plus, LayoutParams(0, Ui.u(60), 1f))
-        addView(buttons, Ui.lp(t = 14))
+        addView(buttons)
         isClickable = true
         setOnClickListener { onSelect() }
         refreshBg()

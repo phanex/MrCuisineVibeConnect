@@ -28,7 +28,6 @@ class ProgramsScreen(a: MainActivity) : Screen(a) {
         lateinit var value: TextView
         lateinit var unit: TextView
         lateinit var card: LinearLayout
-        lateinit var start: View
     }
 
     private val progs = listOf(
@@ -44,6 +43,7 @@ class ProgramsScreen(a: MainActivity) : Screen(a) {
     private val cleaning = progs.size - 1
     private var selected = 0
     private lateinit var turbo: HoldButton
+    private lateinit var startBtn: LinearLayout
 
     override fun build(): View {
         val root = Ui.vertical(c)
@@ -58,7 +58,9 @@ class ProgramsScreen(a: MainActivity) : Screen(a) {
             badge.addView(Icon(c, p.icon, Ui.ACCENT), Ui.flp(Ui.u(32), Ui.u(32), Gravity.CENTER))
             card.addView(badge, LinearLayout.LayoutParams(Ui.u(56), Ui.u(56)))
             card.addView(Ui.ellipsize(Ui.text(c, p.name, 26f, Ui.TEXT, Ui.MEDIUM)), Ui.lp(t = 14))
-            card.addView(Ui.text(c, p.text, 16f, Ui.TEXT2).apply { setLineSpacing(0f, 1.15f) }, Ui.lp(t = 6))
+            card.addView(Ui.text(c, p.text, 15f, Ui.TEXT2).apply {
+                setLineSpacing(0f, 1.15f)
+            }, Ui.lp(t = 6))
             if (i == cleaning) rinseRecipe()?.let { r ->
                 // La recette de rinçage du catalogue Lidl, quand elle est synchronisée.
                 card.addView(Ui.button(c, tr("Recette Lidl"), Ui.Style.GHOST, Icon.Kind.BOOK, height = 46, textSize = 16f) {
@@ -77,24 +79,28 @@ class ProgramsScreen(a: MainActivity) : Screen(a) {
             dur.addView(gauge, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
             dur.addView(Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.PLUS, height = 56) { selected = i; bump(p, 1) }, Ui.lp(Ui.u(56), Ui.WRAP))
             card.addView(dur, Ui.lp(t = 10))
-            p.start = Ui.button(c, tr("Démarrer"), Ui.Style.PRIMARY, Icon.Kind.PLAY, height = 66) {
-                selected = i
-                a.startJob(p.make(p.seconds * 1000L))
-            }
-            card.addView(p.start, Ui.lp(t = 14))
             card.isClickable = true
             card.setOnClickListener { selected = i; refresh() }
             row.addView(card, LinearLayout.LayoutParams(0, Ui.MATCH, 1f).apply { if (i < progs.size - 1) rightMargin = Ui.u(16) })
         }
         root.addView(row, LinearLayout.LayoutParams(Ui.MATCH, 0, 1f))
 
-        val bottom = Ui.horizontal(c)
-        bottom.addView(Ui.text(c, tr("Turbo : impulsions à vitesse maximale, sans chauffe, 3 s maximum par appui."), 17f, Ui.TEXT2),
-            LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
-        turbo = HoldButton(c, tr("Maintenir pour Turbo"), onDown = {
+        val bottom = Ui.horizontal(c, Gravity.CENTER_VERTICAL)
+        val turboNote = Ui.text(c, tr("Turbo : impulsions à vitesse maximale, sans chauffe, 3 s maximum par appui."), 15f, Ui.TEXT2).apply {
+            maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setLineSpacing(0f, 1.15f)
+        }
+        bottom.addView(turboNote, LinearLayout.LayoutParams(0, Ui.WRAP, 1f).apply { rightMargin = Ui.u(20) })
+        turbo = HoldButton(c, "Turbo", onDown = {
             a.machine.turboDown(app.toque.core.machine.Accessory.BLADE) { v -> if (!v.ok) a.refusal(v) }
         }, onUp = { a.machine.turboUp() })
         bottom.addView(turbo, Ui.lp(Ui.WRAP, Ui.u(64)))
+        startBtn = Ui.button(c, tr("Démarrer"), Ui.Style.PRIMARY, Icon.Kind.PLAY, height = 64, textSize = 22f) {
+            val p = progs[selected]
+            a.startJob(p.make(p.seconds * 1000L))
+        }
+        bottom.addView(startBtn, Ui.lp(Ui.u(200), Ui.u(64), l = 16))
         root.addView(bottom, Ui.lp(t = 16))
         refresh()
         return root
@@ -122,7 +128,7 @@ class ProgramsScreen(a: MainActivity) : Screen(a) {
     }
 
     override fun onSnapshot(s: Snapshot) {
-        for (p in progs) Ui.setButtonEnabled(p.start, !s.busy)
+        Ui.setButtonEnabled(startBtn, !s.busy)
         turbo.isEnabled = !s.busy || s.turboActive
         turbo.alpha = if (turbo.isEnabled) 1f else 0.35f
     }

@@ -51,7 +51,9 @@ class ManualScreen(
     private lateinit var dirRow: LinearLayout
     private lateinit var accRow: LinearLayout
     private lateinit var ring: TempRing
+    private lateinit var weightIcon: Icon
     private lateinit var weight: TextView
+    private lateinit var weightBox: LinearLayout
     private lateinit var startBtn: LinearLayout
     private lateinit var hint: TextView
     private lateinit var turbo: HoldButton
@@ -99,8 +101,13 @@ class ManualScreen(
         right.setPadding(Ui.u(18), Ui.u(14), Ui.u(18), Ui.u(18))
         ring = TempRing(c)
         right.addView(ring, LinearLayout.LayoutParams(Ui.MATCH, 0, 1f))
+        weightIcon = Icon(c, Icon.Kind.SCALE, Ui.TEXT2)
         weight = Ui.text(c, "", 18f, Ui.TEXT2)
-        right.addView(weight, Ui.lp(Ui.WRAP, Ui.WRAP, t = 2))
+        weightBox = Ui.horizontal(c, Gravity.CENTER_VERTICAL).apply {
+            addView(weightIcon, LinearLayout.LayoutParams(Ui.u(20), Ui.u(20)).apply { rightMargin = Ui.u(8) })
+            addView(weight)
+        }
+        right.addView(weightBox, Ui.lp(Ui.WRAP, Ui.WRAP, t = 14))
         hint = Ui.text(c, "", 16f, Ui.WARN).apply { gravity = Gravity.CENTER }
         right.addView(hint, Ui.lp(Ui.MATCH, Ui.WRAP, t = 8))
         startBtn = if (onPick != null) Ui.button(c, tr("Utiliser ce réglage"), Ui.Style.PRIMARY, Icon.Kind.CHECK, height = 80, textSize = 22f) { start() }
@@ -248,7 +255,16 @@ class ManualScreen(
     override fun onSnapshot(s: Snapshot) {
         ring.set(if (s.hasSample) s.actualTempC else 0, if (s.jobActive && s.jobTempLevel > 0) Mcc.celsiusForLevel(s.jobTempLevel) else
             if (tempLevel > 0) Mcc.celsiusForLevel(tempLevel) else 0, s.speedLevel)
-        weight.text = if (s.hasSample) tr("Balance : %d g", s.weightG) else tr("Base non connectée")
+        if (s.hasSample) {
+            val w = s.weightG
+            val sign = if (w < 0) "- " else ""
+            val formatted = String.format(java.util.Locale.FRENCH, "%,d", Math.abs(w)).replace('\u00A0', ' ')
+            weight.text = "$sign$formatted г"
+            weightIcon.visibility = View.VISIBLE
+        } else {
+            weight.text = tr("Base non connectée")
+            weightIcon.visibility = View.GONE
+        }
         if (onPick != null) return
         val manualJob = s.kind?.name == "MANUAL" && (s.state == JobState.RUNNING || s.state == JobState.STARTING || s.state == JobState.PAUSED)
         live = manualJob && s.state != JobState.PAUSED
@@ -272,14 +288,19 @@ class ManualScreen(
         (startBtn.getChildAt(1) as TextView).text = if (s.state == JobState.PAUSED && manualJob) tr("Reprendre") else tr("Démarrer")
         turbo.isEnabled = !busy || s.turboActive
         turbo.alpha = if (turbo.isEnabled) 1f else 0.35f
-        if (live) hint.text = tr("Réglages appliqués en direct")
-        else if (!busy) refreshHintOnly()
+        if (live) {
+            hint.text = tr("Réglages appliqués en direct")
+            hint.setTextColor(Ui.TEXT2)
+        } else if (!busy) {
+            refreshHintOnly()
+        }
     }
 
     private fun refreshHintOnly() {
         val v = SafetyPolicy.checkJob(spec(), if (a.snapshot.hasSample) a.snapshot.actualTempC else null)
             .filter { it.code != SafetyPolicy.HOT_BLEND }
         hint.text = v.firstOrNull()?.message ?: if (a.snapshot.hot && speed >= 4) tr("Contenu chaud : confirmation demandée") else ""
+        hint.setTextColor(Ui.WARN)
     }
 
     override fun onKnob(delta: Int): Boolean {

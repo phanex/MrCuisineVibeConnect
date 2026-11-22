@@ -148,9 +148,9 @@ class HomeScreen(a: MainActivity) : Screen(a) {
             setOnClickListener { a.push(RecipesScreen(a, initialUsage = RecipesScreen.Usage.MOST)) }
         }
         shortcuts.addView(freqBtn, LinearLayout.LayoutParams(Ui.u(50), Ui.u(50)))
-        left.addView(shortcuts, Ui.lp(Ui.MATCH, Ui.WRAP, t = 36))
+        left.addView(shortcuts, Ui.lp(Ui.MATCH, Ui.WRAP, t = 20))
 
-        // Espace supérieur pour centrer le widget de pesée entre la recherche et Turbo
+        // Рівномірний простір зверху (ваги строго по центру між пошуком і Турбо)
         left.addView(Ui.spacer(c, weight = 1f))
 
         // Rangée 2 : Affichage de pesée grand format (sans cadre) avec compensation de descente de police (+16dp)
@@ -192,9 +192,6 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         scaleRow.setOnClickListener { a.push(ScaleScreen(a)) }
         left.addView(scaleRow, Ui.lp(Ui.MATCH, Ui.WRAP))
 
-        // Espace inférieur pour centrer le widget de pesée
-        left.addView(Ui.spacer(c, weight = 1f))
-
         resumeCard = Ui.horizontal(c)
         resumeCard.setPadding(Ui.u(22), Ui.u(16), Ui.u(18), Ui.u(16))
         resumeCard.background = Ui.pressable(Ui.round(Ui.ACCENT_DIM, 24f), 24f)
@@ -216,7 +213,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         }
         left.addView(resumeCard, Ui.lp(Ui.MATCH, Ui.WRAP, t = 12))
 
-        // Espace flexible pour caler le bouton Turbo tout en bas de la colonne.
+        // Рівномірний простір знизу (рівно 1f, як і зверху)
         left.addView(Ui.spacer(c, weight = 1f))
 
         // Rangée 3 : Bouton Turbo instantané à maintien (calé en bas)
