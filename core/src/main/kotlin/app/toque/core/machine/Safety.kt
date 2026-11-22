@@ -23,7 +23,7 @@ data class Setting(
 ) {
     val heated: Boolean get() = temperatureLevel > 0
     val temperatureC: Int get() = Mcc.celsiusForLevel(temperatureLevel)
-    val isRest: Boolean get() = operation == Operation.STOP
+    val isRest: Boolean get() = operation == Operation.STOP || operation == Operation.SLEEP
 
     companion object {
         val STOP = Setting(Operation.STOP, 0, 0, Direction.CLOCKWISE)

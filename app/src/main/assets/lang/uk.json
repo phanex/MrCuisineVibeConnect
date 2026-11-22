@@ -609,5 +609,7 @@
   "écriture impossible": "запис неможливий",
   "База відсутня": "База не підключена",
   "… et %d autres": "… та ще %d",
-  "Corriger le réglage": "Виправити налаштування"
+  "Corriger le réglage": "Виправити налаштування",
+  "Sommeil profond (veille totale)": "Глибокий сон (повне вимкнення)",
+  "Coupe complètement l'écran et la puissance de la machine. Un appui sur l'écran ou le bouton rotatif la réveille instantanément.": "Повністю вимикає підсвітку екрана та силове живлення комбайна. Дотик до дисплея або коліщатка миттєво пробуджує пристрій."
 }

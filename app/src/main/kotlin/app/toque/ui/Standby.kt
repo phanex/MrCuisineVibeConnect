@@ -10,6 +10,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import app.toque.core.i18n.tr
+import app.toque.core.machine.RootShell
 import app.toque.core.machine.Snapshot
 import kotlin.random.Random
 
@@ -30,6 +31,7 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
     private var hot: TextView? = null
     private var running = false
     private var wokeMs = 0L
+    private var wasDeepSleep = false
 
     val asleep: Boolean get() = view != null
 
@@ -106,27 +108,35 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
         val v = FrameLayout(a)
         v.setBackgroundColor(0xFF000000.toInt())
         v.isClickable = true
-        val b = Ui.vertical(a, Gravity.CENTER_HORIZONTAL)
-        val t = Ui.text(a, "", 150f, 0xFF7C828B.toInt(), Ui.THIN)
-        b.addView(t, Ui.lp(Ui.WRAP, Ui.WRAP))
-        val h = Ui.text(a, "", 22f, Ui.WARN, Ui.MEDIUM)
-        b.addView(h, Ui.lp(Ui.WRAP, Ui.WRAP, t = 6))
-        b.addView(Ui.text(a, tr("Touchez l'écran pour reprendre"), 17f, 0xFF3E434A.toInt()), Ui.lp(Ui.WRAP, Ui.WRAP, t = 18))
-        v.addView(b, Ui.flp(Ui.WRAP, Ui.WRAP, Gravity.CENTER))
         root.addView(v, Ui.flp())
         view = v
-        box = b
-        clock = t
-        hot = h
-        refresh()
-        v.alpha = 0f
-        v.animate().alpha(1f).setDuration(800).start()
-        brightness(0.02f)
-        when (a.prefs.standbyKnob) {
-            "dim" -> KnobLight.start(KnobLight.NIGHT_LEVEL)
-            "off" -> KnobLight.start(0)
+
+        wasDeepSleep = a.prefs.deepSleep
+        if (wasDeepSleep) {
+            a.machine.setStandby(true)
+            RootShell.run("echo 0 > /sys/class/leds/lcd-backlight/brightness", 5_000)
+            KnobLight.start(0)
+        } else {
+            val b = Ui.vertical(a, Gravity.CENTER_HORIZONTAL)
+            val t = Ui.text(a, "", 150f, 0xFF7C828B.toInt(), Ui.THIN)
+            b.addView(t, Ui.lp(Ui.WRAP, Ui.WRAP))
+            val h = Ui.text(a, "", 22f, Ui.WARN, Ui.MEDIUM)
+            b.addView(h, Ui.lp(Ui.WRAP, Ui.WRAP, t = 6))
+            b.addView(Ui.text(a, tr("Touchez l'écran pour reprendre"), 17f, 0xFF3E434A.toInt()), Ui.lp(Ui.WRAP, Ui.WRAP, t = 18))
+            v.addView(b, Ui.flp(Ui.WRAP, Ui.WRAP, Gravity.CENTER))
+            box = b
+            clock = t
+            hot = h
+            refresh()
+            v.alpha = 0f
+            v.animate().alpha(1f).setDuration(800).start()
+            brightness(0.02f)
+            when (a.prefs.standbyKnob) {
+                "dim" -> KnobLight.start(KnobLight.NIGHT_LEVEL)
+                "off" -> KnobLight.start(0)
+            }
+            main.postDelayed(tick, 60_000)
         }
-        main.postDelayed(tick, 60_000)
     }
 
     private fun wake() {
@@ -138,6 +148,11 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
         box = null
         clock = null
         hot = null
+        if (wasDeepSleep) {
+            RootShell.run("echo 200 > /sys/class/leds/lcd-backlight/brightness", 5_000)
+            a.machine.setStandby(false)
+            wasDeepSleep = false
+        }
         brightness(WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE)
         KnobLight.stop()
         if (running) onWake?.invoke()

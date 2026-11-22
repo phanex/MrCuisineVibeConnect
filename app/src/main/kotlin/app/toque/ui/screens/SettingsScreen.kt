@@ -123,12 +123,13 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
 
         // ---- Écran
         val screen = section(right, tr("Écran"), Icon.Kind.CLOCK)
-        val delays = listOf("0" to tr("Jamais")) + listOf(2, 5, 10, 15, 30).map { it.toString() to tr("Après %d min", it) }
+        val delays = listOf("0" to tr("Jamais")) + listOf(1, 2, 5, 10, 15, 30).map { it.toString() to tr("Après %d min", it) }
         screen.addView(Ui.text(c, tr("Mise en veille"), 18f, Ui.TEXT))
         screen.addView(dropdown(delays, a.prefs.standbyMinutes.toString()) { m -> a.prefs.standbyMinutes = m.toInt() },
             Ui.lp(Ui.MATCH, Ui.u(58), t = 8))
-        screen.addView(Ui.text(c, tr("Sans geste ni programme en cours, l'écran s'assombrit et n'affiche plus que l'heure. Touchez-le ou tournez le bouton pour reprendre ; le couvercle et la balance le réveillent aussi."),
-            15f, Ui.TEXT3).apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 8))
+        screen.addView(toggle(tr("Sommeil profond (veille totale)"), a.prefs.deepSleep) { a.prefs.deepSleep = it }, Ui.lp(t = 12))
+        screen.addView(Ui.text(c, tr("Coupe complètement l'écran et la puissance de la machine. Un appui sur l'écran ou le bouton rotatif la réveille instantanément."),
+            15f, Ui.TEXT3).apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 6))
         val knob = listOf("normal" to tr("Normale"), "dim" to tr("Plus légère"), "off" to tr("Éteinte"))
         screen.addView(Ui.text(c, tr("Molette pendant la veille"), 18f, Ui.TEXT), Ui.lp(t = 12))
         screen.addView(dropdown(knob, a.prefs.standbyKnob) { a.prefs.standbyKnob = it },
@@ -382,6 +383,7 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
                 if (sync.components().hardwareService != null && !sync.setVendorHardware(false))
                     problems += tr("impossible de couper l'appli d'origine du moteur")
                 sync.forceStop()
+                RootShell.run("pm disable de.silpion.mc2/activity.MainActivity 2>/dev/null; pm disable com.example.endurancetest 2>/dev/null", 8_000)
             }
             view.post {
                 if (problems.isNotEmpty()) {
@@ -402,6 +404,7 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
             a.prefs.bootLaunch = false
             a.machine.reconfigure {
                 Thread {
+                    RootShell.run("pm enable de.silpion.mc2/activity.MainActivity; pm enable com.example.endurancetest", 8_000)
                     val sync = LidlSync(a, a.prefs, a.app.recipes, a.app.log)
                     sync.setVendorHardware(true)
                     val launch = sync.components().launch

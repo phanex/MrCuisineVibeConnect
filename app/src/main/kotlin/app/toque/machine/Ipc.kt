@@ -31,6 +31,7 @@ object Ipc {
     const val SUSPEND_PORT = 21
     const val RESUME_PORT = 22
     const val SIM = 23
+    const val STANDBY = 24
 
     /** Clé de la langue de l'interface, jointe à chaque commande. */
     const val LANG = "lang"

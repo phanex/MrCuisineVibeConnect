@@ -114,6 +114,13 @@ class Prefs(context: Context) {
             p.edit().putString("standbyKnob", v).commit()
         }
 
+    /** Mode sommeil profond (veille totale) : extinction de l'écran et mise en veille de la base moteur. */
+    var deepSleep: Boolean
+        get() = p.getBoolean("deepSleep", true)
+        set(v) {
+            p.edit().putBoolean("deepSleep", v).commit()
+        }
+
     /** Fuseau horaire : « auto » (d'après la connexion Internet) ou un identifiant IANA choisi à la main. */
     var timeZone: String
         get() = p.getString("timeZone", "auto") ?: "auto"

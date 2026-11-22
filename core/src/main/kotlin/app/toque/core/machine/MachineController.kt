@@ -123,6 +123,8 @@ class MachineController(
     private var job: ActiveJob? = null
     private var turboStartedAt: Long? = null
     private var tarePending = false
+    var standby = false
+        private set
     private val recentWeights = ArrayDeque<Pair<Long, Int>>()
     private var scaleStableComputed = false
 
@@ -274,9 +276,11 @@ class MachineController(
     fun tick(): ByteArray {
         val now = clock.nowMs()
         if ((link == LinkState.READY || link == LinkState.ARMING) && now - latestAtMs > config.staleMs) {
-            setLink(LinkState.LOST)
-            if (job?.active == true || turboStartedAt != null)
-                raiseFault(FaultCode.COMM_LOST, tr("Plus de réponse de la base moteur : tout est arrêté"))
+            if (!standby) {
+                setLink(LinkState.LOST)
+                if (job?.active == true || turboStartedAt != null)
+                    raiseFault(FaultCode.COMM_LOST, tr("Plus de réponse de la base moteur : tout est arrêté"))
+            }
         }
         updateTurbo(now)
         updateJob(now)
@@ -303,6 +307,7 @@ class MachineController(
     private fun desiredSetting(): Setting {
         if (fault != null || link != LinkState.READY) return stopSetting()
         if (turboStartedAt != null) return Programs.turboSetting()
+        if (standby && (job == null || job?.state != JobState.RUNNING)) return Setting(Operation.SLEEP, 0, 0, lastWire.direction)
         val j = job ?: return stopSetting()
         if (j.state != JobState.RUNNING || j.waitingStop != null) return stopSetting()
         val s = j.phase.setting
@@ -475,6 +480,13 @@ class MachineController(
         tarePending = true
         recentWeights.clear()
         scaleStableComputed = false
+    }
+
+    fun setStandby(enabled: Boolean) {
+        standby = enabled
+        if (!enabled) {
+            latestAtMs = clock.nowMs()
+        }
     }
 
     fun acknowledgeFault(): Verdict {
