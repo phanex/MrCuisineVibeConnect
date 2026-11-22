@@ -105,6 +105,7 @@ object Ui {
         }
 
     fun ellipsize(t: TextView, lines: Int = 1): TextView {
+        if (lines > 1) t.setSingleLine(false)
         t.maxLines = lines
         t.ellipsize = TextUtils.TruncateAt.END
         return t
