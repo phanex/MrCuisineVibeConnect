@@ -34,8 +34,6 @@ class ScaleScreen(a: MainActivity) : Screen(a) {
     private lateinit var unit: TextView
     private lateinit var state: LinearLayout
     private lateinit var historyList: LinearLayout
-    private lateinit var countBadge: TextView
-    private lateinit var totalValue: TextView
     private lateinit var clearBtn: View
 
     private var lastWeightG = 0
@@ -104,37 +102,22 @@ class ScaleScreen(a: MainActivity) : Screen(a) {
         // --- Права частина : Панель історії зважувань ---
         val panel = Ui.vertical(c)
         panel.background = Ui.round(Ui.SURFACE, 26f)
-        panel.setPadding(Ui.u(20), Ui.u(18), Ui.u(20), Ui.u(16))
+        panel.setPadding(Ui.u(20), Ui.u(16), Ui.u(20), Ui.u(16))
 
         val pHeader = Ui.horizontal(c, Gravity.CENTER_VERTICAL)
         pHeader.addView(Icon(c, Icon.Kind.SCALE, Ui.COOL), LinearLayout.LayoutParams(Ui.u(22), Ui.u(22)).apply { rightMargin = Ui.u(10) })
         pHeader.addView(Ui.text(c, tr("Historique des pesées"), 18f, Ui.TEXT, Ui.MEDIUM))
         pHeader.addView(Ui.spacer(c, weight = 1f), LinearLayout.LayoutParams(0, 1, 1f))
-        countBadge = Ui.text(c, "", 15f, Ui.TEXT2, Ui.LIGHT)
-        pHeader.addView(countBadge)
-        panel.addView(pHeader, Ui.lp(b = 12))
+        clearBtn = Ui.button(c, tr("Effacer"), Ui.Style.GHOST, Icon.Kind.TRASH, height = 44, textSize = 15f) {
+            history.clear()
+            renderHistory()
+        }
+        pHeader.addView(clearBtn)
+        panel.addView(pHeader, Ui.lp(b = 10))
 
         historyList = Ui.vertical(c)
         val scroll = Ui.scroll(c, historyList)
         panel.addView(scroll, LinearLayout.LayoutParams(Ui.MATCH, 0, 1f))
-
-        val pFooter = Ui.vertical(c)
-        val divider = View(c).apply { background = Ui.round(Ui.STROKE, 1f) }
-        pFooter.addView(divider, LinearLayout.LayoutParams(Ui.MATCH, Ui.u(1)).apply { bottomMargin = Ui.u(10) })
-
-        val totalRow = Ui.horizontal(c, Gravity.CENTER_VERTICAL)
-        totalRow.addView(Ui.text(c, tr("Total pesé :"), 15f, Ui.TEXT2))
-        totalRow.addView(Ui.spacer(c, weight = 1f), LinearLayout.LayoutParams(0, 1, 1f))
-        totalValue = Ui.text(c, "0 g", 18f, Ui.TEXT, Ui.MEDIUM)
-        totalRow.addView(totalValue)
-        pFooter.addView(totalRow, Ui.lp(b = 10))
-
-        clearBtn = Ui.button(c, tr("Effacer"), Ui.Style.GHOST, Icon.Kind.TRASH, height = 48, textSize = 16f) {
-            history.clear()
-            renderHistory()
-        }
-        pFooter.addView(clearBtn, Ui.lp(Ui.MATCH, Ui.WRAP))
-        panel.addView(pFooter, Ui.lp(t = 8))
 
         root.addView(panel, LinearLayout.LayoutParams(Ui.u(340), Ui.MATCH))
 
@@ -162,26 +145,22 @@ class ScaleScreen(a: MainActivity) : Screen(a) {
     private fun renderHistory() {
         historyList.removeAllViews()
         if (history.isEmpty()) {
+            clearBtn.visibility = View.INVISIBLE
             val empty = Ui.text(c, tr("Aucune pesée"), 15f, Ui.TEXT3, Ui.LIGHT).apply {
                 gravity = Gravity.CENTER
             }
-            historyList.addView(empty, Ui.lp(Ui.MATCH, Ui.WRAP, t = 40))
-            countBadge.text = ""
-            totalValue.text = "0 g"
-            clearBtn.visibility = View.INVISIBLE
+            historyList.addView(empty, Ui.lp(Ui.MATCH, Ui.WRAP, t = 60))
             return
         }
 
         clearBtn.visibility = View.VISIBLE
-        countBadge.text = "${history.size}"
-        val total = history.sumOf { it.grams }
-        totalValue.text = "$total g"
 
         // Нові записи зверху
         for (i in history.indices.reversed()) {
             val entry = history[i]
             val item = Ui.vertical(c)
-            item.setPadding(0, Ui.u(8), 0, Ui.u(8))
+            item.background = Ui.round(Ui.SURFACE2, 16f)
+            item.setPadding(Ui.u(14), Ui.u(10), Ui.u(14), Ui.u(10))
 
             if (!entry.ingredient.isNullOrBlank()) {
                 val chip = Ui.chip(c, entry.ingredient, Icon.Kind.POT, Ui.WARN, 0x26FFC14D.toInt(), 13f)
@@ -189,7 +168,7 @@ class ScaleScreen(a: MainActivity) : Screen(a) {
             }
 
             val r = Ui.horizontal(c, Gravity.CENTER_VERTICAL)
-            r.addView(Ui.text(c, entry.time, 16f, Ui.TEXT2, Ui.LIGHT))
+            r.addView(Ui.text(c, entry.time, 15f, Ui.TEXT2, Ui.LIGHT))
             r.addView(Ui.spacer(c, weight = 1f), LinearLayout.LayoutParams(0, 1, 1f))
             r.addView(Ui.text(c, "${entry.grams} g", 19f, Ui.TEXT, Ui.MEDIUM))
 
@@ -200,13 +179,10 @@ class ScaleScreen(a: MainActivity) : Screen(a) {
                     renderHistory()
                 }
             }
-            r.addView(del, LinearLayout.LayoutParams(Ui.u(24), Ui.u(24)).apply { leftMargin = Ui.u(12) })
+            r.addView(del, LinearLayout.LayoutParams(Ui.u(22), Ui.u(22)).apply { leftMargin = Ui.u(12) })
             item.addView(r)
 
-            val sep = View(c).apply { background = Ui.round(0x1AFFFFFF.toInt(), 1f) }
-            item.addView(sep, LinearLayout.LayoutParams(Ui.MATCH, Ui.u(1)).apply { topMargin = Ui.u(8) })
-
-            historyList.addView(item)
+            historyList.addView(item, Ui.lp(b = 8))
         }
     }
 

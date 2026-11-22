@@ -190,7 +190,7 @@ class MachineController(
         latestAtMs = now
 
         recentWeights.addLast(now to t.weight)
-        while (recentWeights.isNotEmpty() && now - recentWeights.first().first > 800L) {
+        while (recentWeights.isNotEmpty() && now - recentWeights.first().first > 600L) {
             recentWeights.removeFirst()
         }
         scaleStableComputed = if (recentWeights.size >= 3) {
@@ -200,7 +200,7 @@ class MachineController(
                 if (w.second < minW) minW = w.second
                 if (w.second > maxW) maxW = w.second
             }
-            (maxW - minW) <= 2
+            (maxW - minW) <= 5
         } else false
 
         when (link) {
