@@ -41,6 +41,15 @@ object Sounds {
         },
     )
 
+    /** Bip discret de pesée stabilisée (double impulsion douce, basse intensité). */
+    fun weighRecorded() = play(
+        listOf(
+            Note(1175.0, 35, gain = 0.28, decay = 4.0),
+            Note(0.0, 25),
+            Note(1396.9, 35, gain = 0.28, decay = 4.0),
+        ),
+    )
+
     /** Fin de recette : arpège montant joué deux fois, fort. */
     fun recipeDone() {
         val c6 = 1046.5; val e6 = 1318.5; val g6 = 1568.0; val c7 = 2093.0

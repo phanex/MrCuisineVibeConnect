@@ -307,6 +307,11 @@ class MainActivity : Activity() {
         if (prefs.sound) Sounds.weighReached(prefs.weighSound)
     }
 
+    /** Bip discret de pesée enregistrée en mémoire. */
+    fun weighRecordedSound() {
+        if (prefs.sound) Sounds.weighRecorded()
+    }
+
     /** Fin de recette : mélodie forte, comme l'appli d'origine. */
     fun recipeDoneSound() {
         if (prefs.sound) Sounds.recipeDone()

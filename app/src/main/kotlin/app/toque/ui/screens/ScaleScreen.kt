@@ -3,6 +3,7 @@ package app.toque.ui.screens
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import app.toque.Prefs
 import app.toque.core.i18n.tr
@@ -34,6 +35,7 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
     private lateinit var unit: TextView
     private lateinit var state: LinearLayout
     private lateinit var historyList: LinearLayout
+    private lateinit var historyScroll: ScrollView
     private lateinit var clearBtn: View
 
     private var lastWeightG = 0
@@ -56,9 +58,10 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
             clipChildren = false
             clipToPadding = false
         }
-        row.addView(Icon(c, Icon.Kind.SCALE, Ui.TEXT2), LinearLayout.LayoutParams(Ui.u(44), Ui.u(44)).apply {
+        val scaleIcon = Icon(c, Icon.Kind.SCALE, Ui.TEXT2)
+        row.addView(scaleIcon, LinearLayout.LayoutParams(Ui.u(44), Ui.u(44)).apply {
             rightMargin = Ui.u(16)
-            bottomMargin = Ui.u(14)
+            bottomMargin = Ui.u(36)
         })
         value = Ui.text(c, "—", 140f, Ui.TEXT, Ui.THIN).apply {
             includeFontPadding = false
@@ -79,6 +82,7 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
         val tareBtn = Ui.button(c, tr("Tare (remise à zéro)"), Ui.Style.PRIMARY, Icon.Kind.SYNC, height = 72, textSize = 22f) {
             if (lastWeightG > 5 && lastWeightG != lastAutoLoggedWeight) {
                 recordCurrentWeight()
+                a.weighRecordedSound()
             }
             lastAutoLoggedWeight = 0
             pendingAutoWeight = 0
@@ -91,6 +95,7 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
             if (lastWeightG != 0) {
                 lastAutoLoggedWeight = lastWeightG
                 recordCurrentWeight()
+                a.weighRecordedSound()
             }
         }
         buttons.addView(recordBtn, Ui.lp(Ui.WRAP, Ui.WRAP, l = 14))
@@ -122,20 +127,23 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
         pHeader.addView(Ui.text(c, tr("Historique des pesées"), 18f, Ui.TEXT, Ui.MEDIUM))
         pHeader.addView(Ui.spacer(c, weight = 1f), LinearLayout.LayoutParams(0, 1, 1f))
 
-        val clearIcon = Icon(c, Icon.Kind.TRASH, Ui.TEXT2).apply {
+        val clearTouch = Ui.vertical(c, Gravity.CENTER).apply {
             isClickable = true
+            val trashIcon = Icon(c, Icon.Kind.TRASH, Ui.TEXT2)
+            addView(trashIcon, LinearLayout.LayoutParams(Ui.u(20), Ui.u(20)))
             setOnClickListener {
                 history.clear()
                 lastAutoLoggedWeight = 0
                 renderHistory()
             }
         }
-        clearBtn = clearIcon
-        pHeader.addView(clearIcon, LinearLayout.LayoutParams(Ui.u(32), Ui.u(32)))
+        clearBtn = clearTouch
+        pHeader.addView(clearTouch, LinearLayout.LayoutParams(Ui.u(44), Ui.u(44)))
         panel.addView(pHeader, Ui.lp(b = 10))
 
         historyList = Ui.vertical(c)
         val scroll = Ui.scroll(c, historyList)
+        historyScroll = scroll
         panel.addView(scroll, LinearLayout.LayoutParams(Ui.MATCH, 0, 1f))
 
         root.addView(panel, LinearLayout.LayoutParams(Ui.u(340), Ui.MATCH))
@@ -157,18 +165,20 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
     private fun renderHistory() {
         historyList.removeAllViews()
         if (history.isEmpty()) {
+            historyList.gravity = Gravity.CENTER
             clearBtn.visibility = View.INVISIBLE
             val empty = Ui.text(c, tr("Aucune pesée"), 15f, Ui.TEXT3, Ui.LIGHT).apply {
                 gravity = Gravity.CENTER
             }
-            historyList.addView(empty, Ui.lp(Ui.MATCH, Ui.WRAP, t = 60))
+            historyList.addView(empty, Ui.lp(Ui.MATCH, Ui.WRAP))
             return
         }
 
+        historyList.gravity = Gravity.BOTTOM
         clearBtn.visibility = View.VISIBLE
 
-        // Нові записи зверху
-        for (i in history.indices.reversed()) {
+        // Записи йдуть знизу нагору: найстаріші згори, найновіші знизу
+        for (i in history.indices) {
             val entry = history[i]
             val item = Ui.vertical(c)
             item.background = Ui.round(Ui.SURFACE2, 16f)
@@ -204,6 +214,11 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
             item.addView(r)
 
             historyList.addView(item, Ui.lp(b = 8))
+        }
+
+        // Автоскрол до останнього заміру внизу
+        historyScroll.post {
+            historyScroll.fullScroll(View.FOCUS_DOWN)
         }
     }
 
@@ -242,7 +257,7 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
                 if (kotlin.math.abs(s.weightG - lastAutoLoggedWeight) > 10) {
                     lastAutoLoggedWeight = s.weightG
                     recordCurrentWeight()
-                    a.weighBeep()
+                    a.weighRecordedSound()
                 }
                 stableSinceMs = 0L
             }
@@ -260,6 +275,7 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
     override fun onKnobPress(): Boolean {
         if (lastWeightG > 5 && lastWeightG != lastAutoLoggedWeight) {
             recordCurrentWeight()
+            a.weighRecordedSound()
         }
         lastAutoLoggedWeight = 0
         pendingAutoWeight = 0
