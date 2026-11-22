@@ -56,7 +56,7 @@ class Icon(context: Context, var kind: Kind, color: Int) : View(context) {
         val s = minOf(availW, availH) / 24f
         if (s <= 0f) return
         canvas.save()
-        canvas.translate(paddingLeft + (availW - 24 * s) / 2f, paddingTop + (availV - 24 * s) / 2f)
+        canvas.translate(paddingLeft + (availW - 24 * s) / 2f, paddingTop + (availH - 24 * s) / 2f)
         canvas.scale(s, s)
         stroke.strokeWidth = Math.max(1f, Math.round(2f * s) / s)
         val p = path
