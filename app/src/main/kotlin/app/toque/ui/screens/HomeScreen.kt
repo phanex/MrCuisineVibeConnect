@@ -154,12 +154,13 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         left.addView(Ui.spacer(c, weight = 1f))
 
         // Rangée 2 : Affichage de pesée grand format (sans cadre)
-        val scaleRow = Ui.horizontal(c, Gravity.CENTER_VERTICAL).apply {
+        val scaleRow = Ui.horizontal(c, Gravity.BOTTOM).apply {
             clipChildren = false
             clipToPadding = false
         }
         scaleRow.addView(Icon(c, Icon.Kind.SCALE, Ui.TEXT2), LinearLayout.LayoutParams(Ui.u(38), Ui.u(38)).apply {
             rightMargin = Ui.u(14)
+            bottomMargin = Ui.u(-2)
         })
         val weightBox = Ui.horizontal(c, Gravity.BOTTOM).apply {
             clipChildren = false
