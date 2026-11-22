@@ -123,6 +123,8 @@ class MachineController(
     private var job: ActiveJob? = null
     private var turboStartedAt: Long? = null
     private var tarePending = false
+    private val recentWeights = ArrayDeque<Pair<Long, Int>>()
+    private var scaleStableComputed = false
 
     private var lastWire: Setting = Setting.STOP
     private var stopSinceMs: Long? = null
@@ -186,6 +188,20 @@ class MachineController(
         rxFrames++
         latest = t
         latestAtMs = now
+
+        recentWeights.addLast(now to t.weight)
+        while (recentWeights.isNotEmpty() && now - recentWeights.first().first > 800L) {
+            recentWeights.removeFirst()
+        }
+        scaleStableComputed = if (recentWeights.size >= 3) {
+            var minW = Int.MAX_VALUE
+            var maxW = Int.MIN_VALUE
+            for (w in recentWeights) {
+                if (w.second < minW) minW = w.second
+                if (w.second > maxW) maxW = w.second
+            }
+            (maxW - minW) <= 2
+        } else false
 
         when (link) {
             LinkState.OFFLINE, LinkState.LOST -> {
@@ -453,6 +469,8 @@ class MachineController(
 
     fun tare() {
         tarePending = true
+        recentWeights.clear()
+        scaleStableComputed = false
     }
 
     fun acknowledgeFault(): Verdict {
@@ -611,6 +629,10 @@ class MachineController(
         if (link == state) return
         link = state
         if (state != LinkState.ARMING) armingCount = 0
+        if (state != LinkState.READY) {
+            recentWeights.clear()
+            scaleStableComputed = false
+        }
         emit(EventType.LINK_CHANGED, state.label)
     }
 
@@ -643,7 +665,7 @@ class MachineController(
             rpm = t?.actualRpm ?: 0,
             speedLevel = t?.actualSpeedLevel ?: 0,
             weightG = t?.weight ?: 0,
-            scaleStable = t?.scaleStable ?: false,
+            scaleStable = scaleStableComputed,
             scaleState = t?.androidScaleState ?: "",
             lidOpen = t?.lidOpen ?: false,
             bowlDetected = t?.let { bowlPresent(it) } ?: false,

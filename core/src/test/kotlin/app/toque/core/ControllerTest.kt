@@ -380,4 +380,19 @@ class ControllerTest {
         assertEquals(0, b.c.tick()[4].toInt())
         assertEquals(Mcc.TX_SIZE, frame.size)
     }
+
+    @Test fun scaleStabilityIsComputedFromJitter() {
+        val b = Bench().ready()
+        b.board.contentWeightG = 0
+        b.step(1_000)
+        assertTrue(b.snap.scaleStable)
+
+        b.board.contentWeightG = 500
+        b.step(100)
+        assertFalse(b.snap.scaleStable)
+
+        b.step(2_000)
+        assertTrue(b.snap.scaleStable)
+        assertEquals(500, b.snap.weightG)
+    }
 }
