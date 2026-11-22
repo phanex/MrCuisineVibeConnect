@@ -67,7 +67,7 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
     private val handler = Handler(Looper.getMainLooper())
     private val tick = object : Runnable {
         override fun run() {
-            Ui.chipText(clock).text = MainActivity.now()
+            clock.text = MainActivity.now()
             handler.postDelayed(this, 10_000)
         }
     }
