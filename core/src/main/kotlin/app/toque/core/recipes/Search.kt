@@ -25,6 +25,7 @@ object TextNorm {
 
     fun normalize(s: String): String {
         var t = s.lowercase().replace("œ", "oe").replace("æ", "ae").replace("ß", "ss")
+            .replace("ł", "l")
             .replace("'", "").replace("’", "").replace("ʼ", "")
         t = Normalizer.normalize(t, Normalizer.Form.NFD)
         t = MARKS.replace(t, "")
@@ -168,7 +169,7 @@ class SearchIndex(recipes: List<Recipe>) {
         val c = HashMap<String, Double>()
         if (postings.containsKey(token)) c[token] = 1.0
         if (token.length >= 2) for (t in prefixMatches(token)) if (t != token) c[t] = maxOf(c[t] ?: 0.0, 0.75)
-        if (token.length >= 4) {
+        if (token.length >= 3) {
             val max = if (token.length >= 8) 2 else 1
             for (t in vocabulary) {
                 if (c.containsKey(t)) continue
