@@ -15,7 +15,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** Balance intégrée avec panneau d'historique des pesées en mémoire. */
+/** Balance intégrée avec panneau d'historique des pesées et auto-enregistrement. */
 class ScaleScreen(a: MainActivity) : Screen(a) {
     override val title = tr("Balance")
     override val keepAwake: Boolean get() = true
@@ -39,6 +39,11 @@ class ScaleScreen(a: MainActivity) : Screen(a) {
     private var lastWeightG = 0
     private var simulated = 0
 
+    // Auto-record timing
+    private var lastAutoLoggedWeight = 0
+    private var stableSinceMs = 0L
+    private var pendingAutoWeight = 0
+
     override fun build(): View {
         val root = Ui.horizontal(c, Gravity.TOP)
         root.setPadding(Ui.u(24), Ui.u(10), Ui.u(24), Ui.u(20))
@@ -51,6 +56,10 @@ class ScaleScreen(a: MainActivity) : Screen(a) {
             clipChildren = false
             clipToPadding = false
         }
+        row.addView(Icon(c, Icon.Kind.SCALE, Ui.TEXT2), LinearLayout.LayoutParams(Ui.u(44), Ui.u(44)).apply {
+            rightMargin = Ui.u(16)
+            bottomMargin = Ui.u(14)
+        })
         value = Ui.text(c, "—", 140f, Ui.TEXT, Ui.THIN).apply {
             includeFontPadding = false
         }
@@ -68,15 +77,19 @@ class ScaleScreen(a: MainActivity) : Screen(a) {
 
         val buttons = Ui.horizontal(c, Gravity.CENTER)
         val tareBtn = Ui.button(c, tr("Tare (remise à zéro)"), Ui.Style.PRIMARY, Icon.Kind.SYNC, height = 72, textSize = 22f) {
-            if (lastWeightG > 5) {
+            if (lastWeightG > 5 && lastWeightG != lastAutoLoggedWeight) {
                 recordCurrentWeight()
             }
+            lastAutoLoggedWeight = 0
+            pendingAutoWeight = 0
+            stableSinceMs = 0L
             a.machine.tare()
         }
         buttons.addView(tareBtn)
 
         val recordBtn = Ui.button(c, tr("Fixer"), Ui.Style.SECONDARY, Icon.Kind.PLUS, height = 72, textSize = 22f) {
             if (lastWeightG != 0) {
+                lastAutoLoggedWeight = lastWeightG
                 recordCurrentWeight()
             }
         }
@@ -108,11 +121,17 @@ class ScaleScreen(a: MainActivity) : Screen(a) {
         pHeader.addView(Icon(c, Icon.Kind.SCALE, Ui.COOL), LinearLayout.LayoutParams(Ui.u(22), Ui.u(22)).apply { rightMargin = Ui.u(10) })
         pHeader.addView(Ui.text(c, tr("Historique des pesées"), 18f, Ui.TEXT, Ui.MEDIUM))
         pHeader.addView(Ui.spacer(c, weight = 1f), LinearLayout.LayoutParams(0, 1, 1f))
-        clearBtn = Ui.button(c, tr("Effacer"), Ui.Style.GHOST, Icon.Kind.TRASH, height = 44, textSize = 15f) {
-            history.clear()
-            renderHistory()
+
+        val clearIcon = Icon(c, Icon.Kind.TRASH, Ui.TEXT2).apply {
+            isClickable = true
+            setOnClickListener {
+                history.clear()
+                lastAutoLoggedWeight = 0
+                renderHistory()
+            }
         }
-        pHeader.addView(clearBtn)
+        clearBtn = clearIcon
+        pHeader.addView(clearIcon, LinearLayout.LayoutParams(Ui.u(32), Ui.u(32)))
         panel.addView(pHeader, Ui.lp(b = 10))
 
         historyList = Ui.vertical(c)
@@ -129,8 +148,9 @@ class ScaleScreen(a: MainActivity) : Screen(a) {
         if (a.prefs.guidedRecipe.isBlank()) return null
         val recipe = a.app.recipes.getAdjusted(a.prefs.guidedRecipe) ?: return null
         val step = recipe.steps.getOrNull(a.prefs.guidedStep) ?: return null
-        val raw = step.weigh?.label ?: step.text
-        val trimmed = raw.trim().replace(Regex("\\s+"), " ")
+        val weighLabel = step.weigh?.label ?: return null
+        val trimmed = weighLabel.trim().replace(Regex("\\s+"), " ")
+        if (trimmed.isBlank()) return null
         return if (trimmed.length > 32) trimmed.take(30) + "…" else trimmed
     }
 
@@ -191,6 +211,8 @@ class ScaleScreen(a: MainActivity) : Screen(a) {
             value.text = "—"
             state.visibility = View.INVISIBLE
             lastWeightG = 0
+            stableSinceMs = 0L
+            pendingAutoWeight = 0
             return
         }
         state.visibility = View.VISIBLE
@@ -208,12 +230,39 @@ class ScaleScreen(a: MainActivity) : Screen(a) {
         val textView = Ui.chipText(state)
         textView.text = txt
         textView.setTextColor(col)
+
+        // --- Автоматична фіксація заміру при спокої > 2.5 сек ---
+        if (s.scaleStable && s.weightG >= 10) {
+            val now = System.currentTimeMillis()
+            if (kotlin.math.abs(s.weightG - pendingAutoWeight) > 5) {
+                pendingAutoWeight = s.weightG
+                stableSinceMs = now
+            } else if (stableSinceMs > 0L && now - stableSinceMs >= 2500L) {
+                if (kotlin.math.abs(s.weightG - lastAutoLoggedWeight) > 10) {
+                    lastAutoLoggedWeight = s.weightG
+                    recordCurrentWeight()
+                    a.weighBeep()
+                }
+                stableSinceMs = 0L
+            }
+        } else {
+            if (!s.scaleStable || s.weightG < 10) {
+                stableSinceMs = 0L
+                pendingAutoWeight = 0
+            }
+            if (kotlin.math.abs(s.weightG) < 5) {
+                lastAutoLoggedWeight = 0
+            }
+        }
     }
 
     override fun onKnobPress(): Boolean {
-        if (lastWeightG > 5) {
+        if (lastWeightG > 5 && lastWeightG != lastAutoLoggedWeight) {
             recordCurrentWeight()
         }
+        lastAutoLoggedWeight = 0
+        pendingAutoWeight = 0
+        stableSinceMs = 0L
         a.machine.tare()
         return true
     }
