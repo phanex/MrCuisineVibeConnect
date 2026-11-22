@@ -208,13 +208,13 @@ class MainActivity : Activity() {
         (v.parent as? FrameLayout)?.removeView(v)
         content.addView(v, Ui.flp())
         topBar.visibility = if (s is app.toque.ui.screens.HomeScreen) View.GONE else View.VISIBLE
-        topBar.setTitle(s.title, stack.size > 1)
+        topBar.setTitle(s.title, s.titleCounter, stack.size > 1)
         s.onShow()
         s.onSnapshot(snapshot)
     }
 
     fun refreshTitle() {
-        current?.let { topBar.setTitle(it.title, stack.size > 1) }
+        current?.let { topBar.setTitle(it.title, it.titleCounter, stack.size > 1) }
     }
 
     override fun onBackPressed() {

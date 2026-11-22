@@ -21,6 +21,7 @@ import app.toque.core.protocol.Mcc
 /** Écran de l'appli (vue construite une fois, réutilisée). */
 abstract class Screen(val a: MainActivity) {
     abstract val title: String
+    open val titleCounter: String? get() = null
     val view: View by lazy { build() }
     val c: Context get() = a
 
@@ -42,7 +43,9 @@ abstract class Screen(val a: MainActivity) {
 /** Barre supérieure : retour, titre, état de la base, heure. */
 class TopBar(private val a: MainActivity) : LinearLayout(a) {
     private val back = Icon(a, Icon.Kind.BACK, Ui.TEXT)
+    private val titleBox = Ui.horizontal(a, Gravity.CENTER_VERTICAL)
     private val titleView = Ui.ellipsize(Ui.text(a, "", 24f, Ui.TEXT, Ui.MEDIUM))
+    private val counterView = Ui.text(a, "", 18f, Ui.TEXT2, Ui.LIGHT)
     private val tempIcon = Icon(a, Icon.Kind.THERMO, Ui.TEXT2)
     private val tempText = Ui.text(a, "", 28f, Ui.TEXT, Ui.THIN)
     private val tempBox = Ui.horizontal(a, Gravity.CENTER_VERTICAL).apply {
@@ -79,7 +82,10 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
         home.setOnClickListener { a.home() }
         addView(home, LayoutParams(Ui.u(48), Ui.u(48)).apply { leftMargin = Ui.u(20) })
 
-        addView(titleView, LayoutParams(0, Ui.WRAP, 1f).apply { leftMargin = Ui.u(28) })
+        titleBox.addView(titleView)
+        titleBox.addView(counterView, LayoutParams(Ui.WRAP, Ui.WRAP).apply { leftMargin = Ui.u(12) })
+        counterView.visibility = View.GONE
+        addView(titleBox, LayoutParams(0, Ui.WRAP, 1f).apply { leftMargin = Ui.u(28) })
 
         // Indicateurs et horloge à droite
         addView(lid, Ui.lp(Ui.WRAP, Ui.WRAP, r = 16))
@@ -108,8 +114,14 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
 
     fun stopClock() = handler.removeCallbacks(tick)
 
-    fun setTitle(t: String, canGoBack: Boolean) {
+    fun setTitle(t: String, counter: String? = null, canGoBack: Boolean) {
         titleView.text = t
+        if (!counter.isNullOrBlank()) {
+            counterView.text = counter
+            counterView.visibility = View.VISIBLE
+        } else {
+            counterView.visibility = View.GONE
+        }
         back.visibility = if (canGoBack) View.VISIBLE else View.GONE
         home.visibility = if (canGoBack) View.VISIBLE else View.GONE
         // Pas de doublon d'horloge sur l'écran d'accueil qui affiche déjà l'heure en grand.

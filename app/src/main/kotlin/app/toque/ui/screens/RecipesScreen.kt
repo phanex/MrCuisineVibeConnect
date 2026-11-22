@@ -48,18 +48,17 @@ class RecipesScreen(
 
     private var recipeCount = -1
     override val title: String
-        get() {
-            val base = when {
-                favorites -> tr("Favoris")
-                initialUsage == Usage.RECENT -> tr("Récentes")
-                initialUsage == Usage.MOST -> tr("Fréquentes")
-                else -> tr("Recettes")
-            }
-            return if (recipeCount >= 0) {
-                val formatted = java.text.NumberFormat.getIntegerInstance(java.util.Locale.FRANCE).format(recipeCount).replace('\u00A0', ' ')
-                "$base [$formatted]"
-            } else base
+        get() = when {
+            favorites -> tr("Favoris")
+            initialUsage == Usage.RECENT -> tr("Récentes")
+            initialUsage == Usage.MOST -> tr("Fréquentes")
+            else -> tr("Recettes")
         }
+
+    override val titleCounter: String?
+        get() = if (recipeCount >= 0) {
+            java.text.NumberFormat.getIntegerInstance(java.util.Locale.FRANCE).format(recipeCount).replace('\u00A0', ' ')
+        } else null
 
     private var filter = RecipeFilter(favoritesOnly = favorites)
     private var usage = initialUsage
