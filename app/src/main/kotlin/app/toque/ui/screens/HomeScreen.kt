@@ -151,7 +151,30 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         shortcuts.addView(freqBtn, LinearLayout.LayoutParams(Ui.u(50), Ui.u(50)))
         left.addView(shortcuts, Ui.lp(Ui.MATCH, Ui.WRAP, t = 16))
 
-        // Рівномірний простір зверху (ваги строго по центру між пошуком і Турбо)
+        resumeCard = Ui.horizontal(c, Gravity.CENTER_VERTICAL).apply {
+            minimumHeight = Ui.u(50)
+            setPadding(Ui.u(16), 0, Ui.u(10), 0)
+            background = Ui.pressable(Ui.round(Ui.ACCENT_DIM, 22f), 22f)
+            visibility = View.GONE
+        }
+        resumeCard.addView(Icon(c, Icon.Kind.PLAY, Ui.ACCENT), LinearLayout.LayoutParams(Ui.u(24), Ui.u(24)).apply { rightMargin = Ui.u(12) })
+        resumeText = Ui.ellipsize(Ui.text(c, "", 17f, Ui.TEXT, Ui.MEDIUM), 1)
+        resumeCard.addView(resumeText, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
+        val cancel = android.widget.FrameLayout(c)
+        cancel.addView(Icon(c, Icon.Kind.CLOSE, Ui.TEXT2), Ui.flp(Ui.u(20), Ui.u(20), Gravity.CENTER))
+        cancel.background = Ui.pressable(Ui.round(0, 20f), 20f)
+        cancel.isClickable = true
+        cancel.contentDescription = tr("Abandonner la recette")
+        cancel.setOnClickListener { abandonGuided() }
+        resumeCard.addView(cancel, LinearLayout.LayoutParams(Ui.u(44), Ui.u(44)).apply { leftMargin = Ui.u(6) })
+        resumeCard.isClickable = true
+        resumeCard.setOnClickListener {
+            val r = a.app.recipes.getAdjusted(a.prefs.guidedRecipe)
+            if (r != null) a.push(CookScreen(a, r, a.prefs.guidedStep)) else { a.prefs.guidedRecipe = ""; refresh() }
+        }
+        left.addView(resumeCard, Ui.lp(Ui.MATCH, Ui.u(50), t = 16))
+
+        // Рівномірний простір зверху (ваги строго по центру між верхнім слотом і Турбо)
         left.addView(Ui.spacer(c, weight = 1f))
 
         // Rangée 2 : Affichage de pesée grand format (sans cadre)
@@ -193,37 +216,15 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         scaleRow.setOnClickListener { a.push(ScaleScreen(a)) }
         left.addView(scaleRow, Ui.lp(Ui.MATCH, Ui.WRAP))
 
-        resumeCard = Ui.horizontal(c, Gravity.CENTER_VERTICAL).apply {
-            setPadding(Ui.u(16), Ui.u(10), Ui.u(12), Ui.u(10))
-            background = Ui.pressable(Ui.round(Ui.ACCENT_DIM, 20f), 20f)
-        }
-        resumeCard.addView(Icon(c, Icon.Kind.PLAY, Ui.ACCENT), LinearLayout.LayoutParams(Ui.u(22), Ui.u(22)).apply { rightMargin = Ui.u(12) })
-        resumeText = Ui.ellipsize(Ui.text(c, "", 17f, Ui.TEXT, Ui.MEDIUM), 1)
-        resumeCard.addView(resumeText, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
-        val cancel = android.widget.FrameLayout(c)
-        cancel.addView(Icon(c, Icon.Kind.CLOSE, Ui.TEXT2), Ui.flp(Ui.u(20), Ui.u(20), Gravity.CENTER))
-        cancel.background = Ui.pressable(Ui.round(0, 20f), 20f)
-        cancel.isClickable = true
-        cancel.contentDescription = tr("Abandonner la recette")
-        cancel.setOnClickListener { abandonGuided() }
-        resumeCard.addView(cancel, LinearLayout.LayoutParams(Ui.u(44), Ui.u(44)).apply { leftMargin = Ui.u(6) })
-        resumeCard.isClickable = true
-        resumeCard.setOnClickListener {
-            val r = a.app.recipes.getAdjusted(a.prefs.guidedRecipe)
-            if (r != null) a.push(CookScreen(a, r, a.prefs.guidedStep)) else { a.prefs.guidedRecipe = ""; refresh() }
-        }
-        left.addView(resumeCard, Ui.lp(Ui.MATCH, Ui.WRAP, t = 12))
-
         // Рівномірний простір знизу (рівно 1f, як і зверху)
         left.addView(Ui.spacer(c, weight = 1f))
 
-        // Rangée 3 : Bouton Turbo instantané à maintien (calé en bas)
+        // Rangée 3 : Bouton Turbo instantané à maintien (calé en bas, flush avec les cartes de droite)
         val turbo = HoldButton(c, tr("Turbo"), onDown = {
             a.machine.turboDown(Accessory.BLADE) { v -> if (!v.ok) a.refusal(v) }
         }, onUp = { a.machine.turboUp() })
         left.addView(turbo, LinearLayout.LayoutParams(Ui.WRAP, Ui.u(54)).apply {
             gravity = Gravity.CENTER_HORIZONTAL
-            bottomMargin = Ui.u(12)
         })
         root.addView(left, LinearLayout.LayoutParams(0, Ui.MATCH, 0.42f).apply { rightMargin = Ui.u(28) })
 
