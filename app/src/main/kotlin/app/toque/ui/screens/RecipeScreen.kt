@@ -42,7 +42,6 @@ import app.toque.ui.Ui
 class RecipeScreen(a: MainActivity, val recipe: Recipe) : Screen(a) {
     override val title = recipe.title
     private lateinit var favIcon: Icon
-    private lateinit var favLabel: TextView
     private var adjustments = a.app.recipes.adjustmentsOf(recipe.id)
     /** La recette telle qu'elle est affichée et cuisinée : celle de la source + les corrections + le nombre de personnes. */
     private var shown = recipe.adjusted(adjustments)
@@ -96,8 +95,7 @@ class RecipeScreen(a: MainActivity, val recipe: Recipe) : Screen(a) {
         }, LinearLayout.LayoutParams(0, Ui.WRAP, 1f).apply { rightMargin = Ui.u(12) })
         val fav = Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.STAR, height = 66) { toggleFavorite() }
         favIcon = fav.getChildAt(0) as Icon
-        favLabel = Ui.text(c, "", 18f, Ui.TEXT, Ui.MEDIUM)
-        fav.addView(favLabel, LinearLayout.LayoutParams(Ui.WRAP, Ui.WRAP).apply { leftMargin = Ui.u(8) })
+        fav.contentDescription = tr("Favori")
         // Recette perso : la modifier. Recette Lidl : en faire sa version, modifiable.
         val mine = recipe.source == RecipeSource.USER
         val edit = Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.EDIT, height = 66) { if (mine) editMine() else makeMyVersion() }
@@ -538,7 +536,6 @@ class RecipeScreen(a: MainActivity, val recipe: Recipe) : Screen(a) {
         val f = a.app.recipes.isFavorite(recipe.id)
         favIcon.set(if (f) Icon.Kind.STAR_FILLED else Icon.Kind.STAR)
         favIcon.color = if (f) Ui.ACCENT else Ui.TEXT
-        favLabel.text = tr("Favori")
     }
 
     override fun onKnobPress(): Boolean {
