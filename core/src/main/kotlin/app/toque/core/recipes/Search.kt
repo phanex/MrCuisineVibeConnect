@@ -4,15 +4,19 @@ import java.text.Normalizer
 
 object TextNorm {
     private val MARKS = Regex("\\p{Mn}+")
-    private val NON_ALNUM = Regex("[^a-z0-9]+")
+    private val NON_ALNUM = Regex("[^\\p{L}\\p{Nd}]+")
     private val STOP = hashSetOf(
         "de", "du", "des", "la", "le", "les", "l", "d", "et", "a", "au", "aux", "en", "un", "une",
         "pour", "sur", "par", "ou", "son", "sa", "ses", "mon", "ma", "mes", "the", "of", "with", "y",
         "recette", "recettes",
+        // Ukrainian / Slavic stop words
+        "і", "й", "та", "в", "у", "на", "з", "із", "зі", "до", "для", "по", "за", "про", "від", "під", "над",
+        "як", "що", "або", "чи", "не", "це", "рецепт", "рецепти",
     )
 
     fun normalize(s: String): String {
         var t = s.lowercase().replace("œ", "oe").replace("æ", "ae").replace("ß", "ss")
+            .replace("'", "").replace("’", "").replace("ʼ", "")
         t = Normalizer.normalize(t, Normalizer.Form.NFD)
         t = MARKS.replace(t, "")
         t = NON_ALNUM.replace(t, " ")
@@ -176,7 +180,7 @@ class SearchIndex(recipes: List<Recipe>) {
         return true
     }
 
-    fun search(query: String, filter: RecipeFilter = RecipeFilter(), limit: Int = 500): List<Hit> {
+    fun search(query: String, filter: RecipeFilter = RecipeFilter(), limit: Int = 2000): List<Hit> {
         val tokens = TextNorm.tokens(query).distinct()
         if (tokens.isEmpty()) {
             return entries.filter { accepts(it, filter) }
