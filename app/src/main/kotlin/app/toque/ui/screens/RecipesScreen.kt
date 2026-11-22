@@ -40,18 +40,26 @@ import java.util.concurrent.Executors
 class RecipesScreen(
     a: MainActivity,
     private val focusSearch: Boolean = false,
-    favorites: Boolean = false,
-    initialUsage: Usage = Usage.NONE,
+    private val favorites: Boolean = false,
+    private val initialUsage: Usage = Usage.NONE,
 ) : Screen(a) {
     /** Listes tirées des cuissons : dernières recettes cuisinées, ou les plus cuisinées. */
     enum class Usage { NONE, RECENT, MOST }
 
-    override val title = when {
-        favorites -> tr("Favoris")
-        initialUsage == Usage.RECENT -> tr("Récentes")
-        initialUsage == Usage.MOST -> tr("Fréquentes")
-        else -> tr("Recettes")
-    }
+    private var recipeCount = -1
+    override val title: String
+        get() {
+            val base = when {
+                favorites -> tr("Favoris")
+                initialUsage == Usage.RECENT -> tr("Récentes")
+                initialUsage == Usage.MOST -> tr("Fréquentes")
+                else -> tr("Recettes")
+            }
+            return if (recipeCount >= 0) {
+                val formatted = java.text.NumberFormat.getIntegerInstance(java.util.Locale.FRANCE).format(recipeCount).replace('\u00A0', ' ')
+                "$base [$formatted]"
+            } else base
+        }
 
     private var filter = RecipeFilter(favoritesOnly = favorites)
     private var usage = initialUsage
@@ -61,7 +69,6 @@ class RecipesScreen(
     private lateinit var input: EditText
     private lateinit var chips: LinearLayout
     private lateinit var grid: GridView
-    private lateinit var count: TextView
     private lateinit var empty: LinearLayout
     private lateinit var emptyText: TextView
     private val adapter = Adapter()
@@ -103,8 +110,6 @@ class RecipesScreen(
         clear.setOnClickListener { input.setText("") }
         field.addView(clear, LinearLayout.LayoutParams(Ui.u(48), Ui.u(48)))
         bar.addView(field, LinearLayout.LayoutParams(0, Ui.u(64), 1f))
-        count = Ui.text(c, "", 17f, Ui.TEXT2)
-        bar.addView(count, Ui.lp(Ui.WRAP, Ui.WRAP, l = 18))
         bar.addView(Ui.button(c, tr("Nouvelle recette"), Ui.Style.SECONDARY, Icon.Kind.PLUS, height = 64, textSize = 18f) {
             a.hideKeyboard()
             a.push(RecipeEditScreen(a, UserRecipes.blank(), isNew = true))
@@ -152,15 +157,18 @@ class RecipesScreen(
 
     private fun buildChips() {
         chips.removeAllViews()
-        fun chip(label: String, selected: Boolean, f: RecipeFilter, u: Usage = Usage.NONE) {
-            chips.addView(Ui.toggleChip(c, label, selected) { filter = f; usage = u; buildChips(); search() }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
+        fun chip(label: String, selected: Boolean, f: RecipeFilter, u: Usage = Usage.NONE, icon: Icon.Kind? = null, isSpecial: Boolean = false) {
+            val specialColor = if (isSpecial) Ui.COOL else 0
+            chips.addView(Ui.toggleChip(c, label, selected, icon = icon, specialColor = specialColor) {
+                filter = f; usage = u; buildChips(); search()
+            }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
         }
         val base = RecipeFilter()
         val plain = usage == Usage.NONE
         chip(tr("Toutes"), plain && filter == base, base)
-        chip(tr("Récentes"), usage == Usage.RECENT, base, Usage.RECENT)
-        chip(tr("Fréquentes"), usage == Usage.MOST, base, Usage.MOST)
-        chip(tr("Favoris"), plain && filter.favoritesOnly, base.copy(favoritesOnly = true))
+        chip(tr("Récentes"), usage == Usage.RECENT, base, Usage.RECENT, icon = Icon.Kind.CLOCK, isSpecial = true)
+        chip(tr("Fréquentes"), usage == Usage.MOST, base, Usage.MOST, icon = Icon.Kind.FLAME, isSpecial = true)
+        chip(tr("Favoris"), plain && filter.favoritesOnly, base.copy(favoritesOnly = true), icon = Icon.Kind.STAR, isSpecial = true)
         if (filter.source == RecipeSource.USER || a.app.recipes.index.entries.any { it.source == RecipeSource.USER })
             chip(tr("Mes recettes"), plain && filter.source == RecipeSource.USER, base.copy(source = RecipeSource.USER))
         chip(tr("30 min max"), plain && filter.maxMinutes == 30, base.copy(maxMinutes = 30))
@@ -195,7 +203,8 @@ class RecipesScreen(
     private fun refreshEmpty() {
         val repo = a.app.recipes
         val none = repo.loaded && repo.count == 0
-        count.text = if (results.isEmpty()) "" else if (results.size == 1) tr("1 recette") else tr("%d recettes", results.size)
+        recipeCount = results.size
+        a.refreshTitle()
         empty.visibility = if (results.isEmpty() && repo.loaded) View.VISIBLE else View.GONE
         emptyText.text = when {
             none && a.prefs.mode == Prefs.Mode.HARDWARE ->

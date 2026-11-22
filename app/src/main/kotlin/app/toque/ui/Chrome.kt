@@ -66,18 +66,18 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
     init {
         orientation = HORIZONTAL
         setGravity(Gravity.CENTER_VERTICAL)
-        setPadding(Ui.u(24), 0, Ui.u(24), 0)
+        setPadding(Ui.u(34), 0, Ui.u(24), 0)
 
         // Cluster de navigation à gauche : [◁]   [⌂]    Titre
-        back.setPadding(Ui.u(13), Ui.u(13), Ui.u(13), Ui.u(13))
+        back.setPadding(Ui.u(10), Ui.u(10), Ui.u(10), Ui.u(10))
         back.background = Ui.pressable(Ui.round(0, 24f), 24f)
         back.setOnClickListener { a.back() }
         addView(back, LayoutParams(Ui.u(48), Ui.u(48)))
 
-        home.setPadding(Ui.u(13), Ui.u(13), Ui.u(13), Ui.u(13))
+        home.setPadding(Ui.u(10), Ui.u(10), Ui.u(10), Ui.u(10))
         home.background = Ui.pressable(Ui.round(0, 24f), 24f)
         home.setOnClickListener { a.home() }
-        addView(home, LayoutParams(Ui.u(48), Ui.u(48)).apply { leftMargin = Ui.u(24) })
+        addView(home, LayoutParams(Ui.u(48), Ui.u(48)).apply { leftMargin = Ui.u(20) })
 
         addView(titleView, LayoutParams(0, Ui.WRAP, 1f).apply { leftMargin = Ui.u(28) })
 

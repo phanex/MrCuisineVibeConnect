@@ -28,6 +28,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
     private lateinit var settingsSub: TextView
     private lateinit var resumeCard: LinearLayout
     private lateinit var resumeText: TextView
+    private lateinit var shortcuts: LinearLayout
     private lateinit var knobChip: LinearLayout
     private lateinit var weightValue: TextView
     private lateinit var tempValue: TextView
@@ -121,7 +122,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         left.addView(knobChip, Ui.lp(Ui.WRAP, Ui.WRAP, t = 12))
 
         // Rangée 1 : Champ de recherche et boutons d'accès rapide
-        val shortcuts = Ui.horizontal(c, Gravity.CENTER_VERTICAL)
+        shortcuts = Ui.horizontal(c, Gravity.CENTER_VERTICAL)
         val searchBar = Ui.horizontal(c, Gravity.CENTER_VERTICAL).apply {
             minimumHeight = Ui.u(50)
             setPadding(Ui.u(16), 0, Ui.u(16), 0)
@@ -165,6 +166,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         val weightBox = Ui.horizontal(c, Gravity.BOTTOM).apply {
             clipChildren = false
             clipToPadding = false
+            translationY = Ui.uf(16f)
         }
         weightValue = Ui.text(c, "0", 72f, Ui.TEXT, Ui.THIN).apply {
             includeFontPadding = false
@@ -175,7 +177,6 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         }
         weightBox.addView(weightUnit, LinearLayout.LayoutParams(Ui.WRAP, Ui.WRAP).apply {
             leftMargin = Ui.u(6)
-            bottomMargin = Ui.u(8)
         })
         scaleRow.addView(weightBox, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
 
@@ -192,20 +193,20 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         scaleRow.setOnClickListener { a.push(ScaleScreen(a)) }
         left.addView(scaleRow, Ui.lp(Ui.MATCH, Ui.WRAP))
 
-        resumeCard = Ui.horizontal(c)
-        resumeCard.setPadding(Ui.u(22), Ui.u(16), Ui.u(18), Ui.u(16))
-        resumeCard.background = Ui.pressable(Ui.round(Ui.ACCENT_DIM, 24f), 24f)
-        resumeCard.addView(Icon(c, Icon.Kind.PLAY, Ui.ACCENT), LinearLayout.LayoutParams(Ui.u(26), Ui.u(26)).apply { rightMargin = Ui.u(14) })
-        resumeText = Ui.ellipsize(Ui.text(c, "", 19f, Ui.TEXT, Ui.MEDIUM), 2)
+        resumeCard = Ui.horizontal(c, Gravity.CENTER_VERTICAL).apply {
+            setPadding(Ui.u(16), Ui.u(10), Ui.u(12), Ui.u(10))
+            background = Ui.pressable(Ui.round(Ui.ACCENT_DIM, 20f), 20f)
+        }
+        resumeCard.addView(Icon(c, Icon.Kind.PLAY, Ui.ACCENT), LinearLayout.LayoutParams(Ui.u(22), Ui.u(22)).apply { rightMargin = Ui.u(12) })
+        resumeText = Ui.ellipsize(Ui.text(c, "", 17f, Ui.TEXT, Ui.MEDIUM), 1)
         resumeCard.addView(resumeText, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
-        // Zone de toucher plus grande que l'icône (au doigt, sur la carte).
         val cancel = android.widget.FrameLayout(c)
-        cancel.addView(Icon(c, Icon.Kind.CLOSE, Ui.TEXT2), Ui.flp(Ui.u(24), Ui.u(24), Gravity.CENTER))
-        cancel.background = Ui.pressable(Ui.round(0, 28f), 28f)
+        cancel.addView(Icon(c, Icon.Kind.CLOSE, Ui.TEXT2), Ui.flp(Ui.u(20), Ui.u(20), Gravity.CENTER))
+        cancel.background = Ui.pressable(Ui.round(0, 20f), 20f)
         cancel.isClickable = true
         cancel.contentDescription = tr("Abandonner la recette")
         cancel.setOnClickListener { abandonGuided() }
-        resumeCard.addView(cancel, LinearLayout.LayoutParams(Ui.u(56), Ui.u(56)).apply { leftMargin = Ui.u(8) })
+        resumeCard.addView(cancel, LinearLayout.LayoutParams(Ui.u(44), Ui.u(44)).apply { leftMargin = Ui.u(6) })
         resumeCard.isClickable = true
         resumeCard.setOnClickListener {
             val r = a.app.recipes.getAdjusted(a.prefs.guidedRecipe)
@@ -316,7 +317,11 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         settingsSub.visibility = View.VISIBLE
         val guided = a.prefs.guidedRecipe
         val title = if (guided.isEmpty()) null else repo.index.entries.firstOrNull { it.id == guided }?.title
-        resumeCard.visibility = if (title != null) View.VISIBLE else View.GONE
+        val hasActiveRecipe = title != null
+        resumeCard.visibility = if (hasActiveRecipe) View.VISIBLE else View.GONE
+        if (::shortcuts.isInitialized) {
+            shortcuts.visibility = if (hasActiveRecipe) View.GONE else View.VISIBLE
+        }
         if (title != null) resumeText.text = tr("Reprendre « %s » — étape %d", title, a.prefs.guidedStep + 1)
     }
 

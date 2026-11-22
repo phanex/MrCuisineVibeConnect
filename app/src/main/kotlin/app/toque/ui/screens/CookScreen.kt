@@ -98,6 +98,16 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
         weighBar = ProgressLine(c).apply { color = Ui.COOL }
         weighBox.addView(weighBar, Ui.lp(Ui.MATCH, Ui.u(8), t = 10))
         left.addView(weighBox, Ui.lp(t = 12))
+
+        val nav = Ui.horizontal(c)
+        prevBtn = Ui.button(c, tr("Précédent"), Ui.Style.GHOST, Icon.Kind.BACK, height = 64) { go(index - 1) }
+        nav.addView(prevBtn)
+        nav.addView(Ui.spacer(c, weight = 1f), LinearLayout.LayoutParams(0, 1, 1f))
+        nextBtn = Ui.button(c, tr("Suivant"), Ui.Style.SECONDARY, Icon.Kind.FORWARD, height = 64) { next() }
+        nextLabel = nextBtn.getChildAt(1) as TextView
+        nav.addView(nextBtn)
+        left.addView(nav, Ui.lp(t = 14))
+
         body.addView(left, LinearLayout.LayoutParams(0, Ui.MATCH, 1f).apply { rightMargin = Ui.u(22) })
 
         panel = Ui.vertical(c)
@@ -105,15 +115,6 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
         panel.setPadding(Ui.u(22), Ui.u(18), Ui.u(22), Ui.u(16))
         body.addView(panel, LinearLayout.LayoutParams(Ui.u(340), Ui.MATCH))
         root.addView(body, LinearLayout.LayoutParams(Ui.MATCH, 0, 1f))
-
-        val nav = Ui.horizontal(c)
-        prevBtn = Ui.button(c, tr("Précédent"), Ui.Style.GHOST, Icon.Kind.BACK, height = 64) { go(index - 1) }
-        nav.addView(prevBtn)
-        nav.addView(Ui.spacer(c, weight = 1f), LinearLayout.LayoutParams(0, 1, 1f))
-        nextBtn = Ui.button(c, tr("Suivant"), Ui.Style.SECONDARY, Icon.Kind.CHEVRON, height = 64) { next() }
-        nextLabel = nextBtn.getChildAt(1) as TextView
-        nav.addView(nextBtn)
-        root.addView(nav, Ui.lp(t = 14))
         render()
         return root
     }

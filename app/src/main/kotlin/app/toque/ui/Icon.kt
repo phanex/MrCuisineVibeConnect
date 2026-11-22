@@ -10,7 +10,7 @@ import android.view.View
 /** Icônes vectorielles dessinées au trait (grille 24×24), sans fichier de ressources. */
 class Icon(context: Context, var kind: Kind, color: Int) : View(context) {
     enum class Kind {
-        BACK, SEARCH, PLAY, PAUSE, STOP, THERMO, SPEED, CLOCK, REVERSE, SCALE, BOOK, STAR, STAR_FILLED,
+        BACK, FORWARD, SEARCH, PLAY, PAUSE, STOP, THERMO, SPEED, CLOCK, REVERSE, SCALE, BOOK, STAR, STAR_FILLED,
         SETTINGS, PLUS, MINUS, CHECK, CLOSE, KNEAD, STEAM, FLAME, BOLT, SYNC, LID, WARNING, HOME, WHISK, BLADE,
         CHEVRON, LINK, INFO, POT, TIMER, DROP, EDIT, TRASH, PEOPLE, DOWNLOAD, UPLOAD, GLOBE, BELL,
     }
@@ -63,10 +63,24 @@ class Icon(context: Context, var kind: Kind, color: Int) : View(context) {
         p.reset()
         when (kind) {
             Kind.BACK -> {
-                p.moveTo(17f, 5.5f)
+                p.moveTo(15.5f, 6.2f)
                 p.lineTo(8.5f, 11.2f)
                 p.quadTo(7.2f, 12f, 8.5f, 12.8f)
-                p.lineTo(17f, 18.5f)
+                p.lineTo(15.5f, 17.8f)
+                p.quadTo(17f, 18.8f, 17f, 17.2f)
+                p.lineTo(17f, 6.8f)
+                p.quadTo(17f, 5.2f, 15.5f, 6.2f)
+                p.close()
+                canvas.drawPath(p, stroke)
+            }
+            Kind.FORWARD -> {
+                p.moveTo(8.5f, 6.2f)
+                p.lineTo(15.5f, 11.2f)
+                p.quadTo(16.8f, 12f, 15.5f, 12.8f)
+                p.lineTo(8.5f, 17.8f)
+                p.quadTo(7f, 18.8f, 7f, 17.2f)
+                p.lineTo(7f, 6.8f)
+                p.quadTo(7f, 5.2f, 8.5f, 6.2f)
                 p.close()
                 canvas.drawPath(p, stroke)
             }

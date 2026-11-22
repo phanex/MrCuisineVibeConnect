@@ -239,11 +239,11 @@ class ManualScreen(
         speedCard.select(selected == 2)
 
         dirRow.removeAllViews()
-        dirRow.addView(Ui.toggleChip(c, tr("Sens normal"), !reverse, minWidth = 110) { setReverse(false) }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 8))
-        dirRow.addView(Ui.toggleChip(c, tr("Inverse"), reverse, minWidth = 110) { setReverse(true) })
+        dirRow.addView(Ui.toggleChip(c, tr("Sens normal"), !reverse, minWidth = 110, height = 64) { setReverse(false) }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 8))
+        dirRow.addView(Ui.toggleChip(c, tr("Inverse"), reverse, minWidth = 110, height = 64) { setReverse(true) })
         accRow.removeAllViews()
-        accRow.addView(Ui.toggleChip(c, Accessory.BLADE.label, accessory == Accessory.BLADE, minWidth = 100) { setAccessory(Accessory.BLADE) }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 8))
-        accRow.addView(Ui.toggleChip(c, Accessory.WHISK.label, accessory == Accessory.WHISK, minWidth = 100) { setAccessory(Accessory.WHISK) })
+        accRow.addView(Ui.toggleChip(c, Accessory.BLADE.label, accessory == Accessory.BLADE, minWidth = 100, height = 64) { setAccessory(Accessory.BLADE) }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 8))
+        accRow.addView(Ui.toggleChip(c, Accessory.WHISK.label, accessory == Accessory.WHISK, minWidth = 100, height = 64) { setAccessory(Accessory.WHISK) })
 
         // Pour une étape de recette, le bol d'aujourd'hui ne compte pas.
         val bowl = if (onPick == null && a.snapshot.hasSample) a.snapshot.actualTempC else null

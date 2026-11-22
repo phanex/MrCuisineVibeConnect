@@ -203,15 +203,45 @@ object Ui {
     fun chipText(chip: LinearLayout): TextView = chip.getChildAt(chip.childCount - 1) as TextView
 
     /** Puce sélectionnable (filtres, choix). */
-    fun toggleChip(c: Context, label: String, selected: Boolean, minWidth: Int = 0, onClick: () -> Unit): TextView {
-        val t = text(c, label, 17f, if (selected) 0xFF1A0E05.toInt() else TEXT, MEDIUM)
-        t.gravity = Gravity.CENTER
-        if (minWidth > 0) t.minWidth = u(minWidth)
-        t.setPadding(u(14), u(10), u(14), u(10))
-        t.background = pressable(if (selected) round(ACCENT, 40f) else round(SURFACE2, 40f, STROKE, 1f), 40f)
-        t.isClickable = true
-        t.setOnClickListener { onClick() }
-        return t
+    fun toggleChip(
+        c: Context,
+        label: String,
+        selected: Boolean,
+        minWidth: Int = 0,
+        height: Int = 0,
+        icon: Icon.Kind? = null,
+        specialColor: Int = 0,
+        onClick: () -> Unit,
+    ): View {
+        if (icon == null && specialColor == 0) {
+            val t = text(c, label, 17f, if (selected) 0xFF1A0E05.toInt() else TEXT, MEDIUM)
+            t.gravity = Gravity.CENTER
+            if (minWidth > 0) t.minWidth = u(minWidth)
+            if (height > 0) t.height = u(height)
+            t.setPadding(u(14), u(if (height > 0) 0 else 10), u(14), u(if (height > 0) 0 else 10))
+            t.background = pressable(if (selected) round(ACCENT, 40f) else round(SURFACE2, 40f, STROKE, 1f), 40f)
+            t.isClickable = true
+            t.setOnClickListener { onClick() }
+            return t
+        }
+        val row = horizontal(c, Gravity.CENTER_VERTICAL).apply {
+            val textColor = if (selected) 0xFF1A0E05.toInt() else if (specialColor != 0) specialColor else TEXT
+            val iconColor = textColor
+            val bg = if (selected) round(ACCENT, 40f) else if (specialColor != 0) round(SURFACE2, 40f, specialColor, 1f) else round(SURFACE2, 40f, STROKE, 1f)
+            background = pressable(bg, 40f)
+            val padV = if (height > 0) 0 else 8
+            setPadding(u(12), u(padV), u(14), u(padV))
+            if (icon != null) {
+                addView(Icon(c, icon, iconColor), LinearLayout.LayoutParams(u(18), u(18)).apply { rightMargin = u(6) })
+            }
+            val t = text(c, label, 17f, textColor, MEDIUM)
+            addView(t)
+            isClickable = true
+            setOnClickListener { onClick() }
+        }
+        if (minWidth > 0) row.minimumWidth = u(minWidth)
+        if (height > 0) row.minimumHeight = u(height)
+        return row
     }
 
     fun card(c: Context, radius: Float = 24f, color: Int = SURFACE): LinearLayout = vertical(c).apply {
