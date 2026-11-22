@@ -55,6 +55,7 @@ class RecipesTest {
         assertEquals(listOf("pomme", "terre"), TextNorm.tokens("Pommes de terre"))
         assertEquals(listOf("gateau"), TextNorm.tokens("gâteaux"))
         assertEquals(listOf("тісто", "піци"), TextNorm.tokens("Тісто для піци"))
+        assertEquals(listOf("ei", "ol"), TextNorm.tokens("Ei und Öl"))
         assertEquals(1, TextNorm.distance("bechamel", "bechamle", 2))
         assertEquals(1, TextNorm.distance("risoto", "risotto", 2))
     }

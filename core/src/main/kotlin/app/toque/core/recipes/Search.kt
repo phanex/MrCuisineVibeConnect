@@ -6,10 +6,19 @@ object TextNorm {
     private val MARKS = Regex("\\p{Mn}+")
     private val NON_ALNUM = Regex("[^\\p{L}\\p{Nd}]+")
     private val STOP = hashSetOf(
+        // Français (FR)
         "de", "du", "des", "la", "le", "les", "l", "d", "et", "a", "au", "aux", "en", "un", "une",
-        "pour", "sur", "par", "ou", "son", "sa", "ses", "mon", "ma", "mes", "the", "of", "with", "y",
-        "recette", "recettes",
-        // Ukrainian / Slavic stop words
+        "pour", "sur", "par", "ou", "son", "sa", "ses", "mon", "ma", "mes", "y", "recette", "recettes",
+        // Deutsch (DE)
+        "der", "die", "das", "den", "dem", "des", "ein", "eine", "einer", "eines", "einem", "einen",
+        "und", "oder", "mit", "fur", "von", "im", "am", "an", "auf", "aus", "zu", "zum", "zur", "rezept", "rezepte",
+        // English (EN)
+        "the", "of", "with", "for", "in", "on", "at", "and", "or", "to", "by", "from", "recipe", "recipes",
+        // Español (ES)
+        "el", "los", "las", "unos", "unas", "del", "con", "por", "para", "al", "receta", "recetas",
+        // Polski (PL)
+        "w", "z", "na", "do", "dla", "i", "oraz", "o", "po", "ze", "za", "od", "pod", "nad", "przepis", "przepisy",
+        // Українська (UK)
         "і", "й", "та", "в", "у", "на", "з", "із", "зі", "до", "для", "по", "за", "про", "від", "під", "над",
         "як", "що", "або", "чи", "не", "це", "рецепт", "рецепти",
     )
@@ -180,12 +189,13 @@ class SearchIndex(recipes: List<Recipe>) {
         return true
     }
 
-    fun search(query: String, filter: RecipeFilter = RecipeFilter(), limit: Int = 2000): List<Hit> {
+    fun search(query: String, filter: RecipeFilter = RecipeFilter(), limit: Int = 0): List<Hit> {
         val tokens = TextNorm.tokens(query).distinct()
         if (tokens.isEmpty()) {
-            return entries.filter { accepts(it, filter) }
+            val list = entries.filter { accepts(it, filter) }
                 .sortedWith(compareByDescending<Entry> { it.favorite }.thenBy { it.normTitle })
-                .take(limit).map { Hit(it, 0.0, 0) }
+            val limited = if (limit > 0) list.take(limit) else list
+            return limited.map { Hit(it, 0.0, 0) }
         }
         val perToken = tokens.map { tok ->
             val scores = HashMap<Int, Double>()
@@ -218,7 +228,8 @@ class SearchIndex(recipes: List<Recipe>) {
         }
         val full = hits.filter { it.matched == tokens.size }
         val result = if (full.isNotEmpty()) full else hits
-        return result.sortedWith(compareByDescending<Hit> { it.score }.thenBy { it.entry.normTitle }).take(limit)
+        val sorted = result.sortedWith(compareByDescending<Hit> { it.score }.thenBy { it.entry.normTitle })
+        return if (limit > 0) sorted.take(limit) else sorted
     }
 
     /** « Qu'est-ce que je peux faire avec… » : classe par nombre d'ingrédients présents. */
