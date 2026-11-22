@@ -49,17 +49,25 @@ class Icon(context: Context, var kind: Kind, color: Int) : View(context) {
     }
 
     override fun onDraw(canvas: Canvas) {
-        val s = minOf(width, height) / 24f
+        val padH = paddingLeft + paddingRight
+        val padV = paddingTop + paddingBottom
+        val availW = (width - padH).toFloat()
+        val availH = (height - padV).toFloat()
+        val s = minOf(availW, availH) / 24f
         if (s <= 0f) return
         canvas.save()
-        canvas.translate((width - 24 * s) / 2f, (height - 24 * s) / 2f)
+        canvas.translate(paddingLeft + (availW - 24 * s) / 2f, paddingTop + (availV - 24 * s) / 2f)
         canvas.scale(s, s)
         stroke.strokeWidth = Math.max(1f, Math.round(2f * s) / s)
         val p = path
         p.reset()
         when (kind) {
             Kind.BACK -> {
-                p.moveTo(17f, 5.5f); p.lineTo(7.5f, 12f); p.lineTo(17f, 18.5f); p.close()
+                p.moveTo(17f, 5.5f)
+                p.lineTo(8.5f, 11.2f)
+                p.quadTo(7.2f, 12f, 8.5f, 12.8f)
+                p.lineTo(17f, 18.5f)
+                p.close()
                 canvas.drawPath(p, stroke)
             }
             Kind.CHEVRON -> { p.moveTo(9f, 5f); p.lineTo(16f, 12f); p.lineTo(9f, 19f); canvas.drawPath(p, stroke) }
@@ -151,7 +159,14 @@ class Icon(context: Context, var kind: Kind, color: Int) : View(context) {
                 canvas.drawLine(12f, 9.5f, 12f, 14f, stroke); canvas.drawCircle(12f, 17.3f, 1.2f, fill)
             }
             Kind.HOME -> {
-                p.moveTo(4.5f, 19.5f); p.lineTo(4.5f, 10.5f); p.lineTo(12f, 4.5f); p.lineTo(19.5f, 10.5f); p.lineTo(19.5f, 19.5f); p.close()
+                p.moveTo(12f, 4.5f)
+                p.lineTo(19.5f, 10.5f)
+                p.lineTo(19.5f, 16.5f)
+                p.quadTo(19.5f, 19.5f, 16.5f, 19.5f)
+                p.lineTo(7.5f, 19.5f)
+                p.quadTo(4.5f, 19.5f, 4.5f, 16.5f)
+                p.lineTo(4.5f, 10.5f)
+                p.close()
                 canvas.drawPath(p, stroke)
             }
             Kind.WHISK -> {

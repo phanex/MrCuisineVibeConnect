@@ -120,52 +120,51 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         knobChip.setOnClickListener { a.push(KnobSetupScreen(a)) }
         left.addView(knobChip, Ui.lp(Ui.WRAP, Ui.WRAP, t = 12))
 
-        // Rangée 1 : Champ de recherche et boutons d'accès rapide
-        val shortcuts = Ui.horizontal(c, Gravity.CENTER_VERTICAL)
-        val searchBar = Ui.horizontal(c, Gravity.CENTER_VERTICAL).apply {
-            minimumHeight = Ui.u(50)
-            setPadding(Ui.u(16), 0, Ui.u(16), 0)
-            background = Ui.pressable(Ui.round(Ui.SURFACE, 22f, Ui.STROKE, 1f), 22f)
-            addView(Icon(c, Icon.Kind.SEARCH, Ui.TEXT2), LinearLayout.LayoutParams(Ui.u(22), Ui.u(22)).apply { rightMargin = Ui.u(12) })
-            addView(Ui.text(c, tr("Recherche") + "...", 16f, Ui.TEXT2, Ui.REGULAR))
-            isClickable = true
-            setOnClickListener { a.push(RecipesScreen(a, focusSearch = true)) }
-        }
-        shortcuts.addView(searchBar, LinearLayout.LayoutParams(0, Ui.u(50), 1f).apply { rightMargin = Ui.u(10) })
+        // Rangée 1 : 3 boutons d'accès rapide (Recherche, Récentes, Fréquentes)
+        val shortcuts = Ui.horizontal(c, Gravity.CENTER_VERTICAL).apply {
+            val searchBtn = Ui.horizontal(c, Gravity.CENTER).apply {
+                background = Ui.pressable(Ui.round(Ui.SURFACE, 20f, Ui.STROKE, 1f), 20f)
+                addView(Icon(c, Icon.Kind.SEARCH, Ui.TEXT), LinearLayout.LayoutParams(Ui.u(24), Ui.u(24)))
+                isClickable = true
+                contentDescription = tr("Recherche")
+                setOnClickListener { a.push(RecipesScreen(a, focusSearch = true)) }
+            }
+            addView(searchBtn, LinearLayout.LayoutParams(Ui.u(54), Ui.u(54)).apply { rightMargin = Ui.u(14) })
 
-        val recentBtn = Ui.horizontal(c, Gravity.CENTER).apply {
-            background = Ui.pressable(Ui.round(Ui.SURFACE2, 22f, Ui.STROKE, 1f), 22f)
-            addView(Icon(c, Icon.Kind.CLOCK, Ui.TEXT), LinearLayout.LayoutParams(Ui.u(24), Ui.u(24)))
-            isClickable = true
-            setOnClickListener { a.push(RecipesScreen(a, initialUsage = RecipesScreen.Usage.RECENT)) }
-        }
-        shortcuts.addView(recentBtn, LinearLayout.LayoutParams(Ui.u(50), Ui.u(50)).apply { rightMargin = Ui.u(8) })
+            val recentBtn = Ui.horizontal(c, Gravity.CENTER).apply {
+                background = Ui.pressable(Ui.round(Ui.SURFACE, 20f, Ui.STROKE, 1f), 20f)
+                addView(Icon(c, Icon.Kind.CLOCK, Ui.TEXT), LinearLayout.LayoutParams(Ui.u(24), Ui.u(24)))
+                isClickable = true
+                contentDescription = tr("Récentes")
+                setOnClickListener { a.push(RecipesScreen(a, initialUsage = RecipesScreen.Usage.RECENT)) }
+            }
+            addView(recentBtn, LinearLayout.LayoutParams(Ui.u(54), Ui.u(54)).apply { rightMargin = Ui.u(14) })
 
-        val freqBtn = Ui.horizontal(c, Gravity.CENTER).apply {
-            background = Ui.pressable(Ui.round(Ui.SURFACE2, 22f, Ui.STROKE, 1f), 22f)
-            addView(Icon(c, Icon.Kind.FLAME, Ui.TEXT), LinearLayout.LayoutParams(Ui.u(24), Ui.u(24)))
-            isClickable = true
-            setOnClickListener { a.push(RecipesScreen(a, initialUsage = RecipesScreen.Usage.MOST)) }
+            val freqBtn = Ui.horizontal(c, Gravity.CENTER).apply {
+                background = Ui.pressable(Ui.round(Ui.SURFACE, 20f, Ui.STROKE, 1f), 20f)
+                addView(Icon(c, Icon.Kind.FLAME, Ui.TEXT), LinearLayout.LayoutParams(Ui.u(24), Ui.u(24)))
+                isClickable = true
+                contentDescription = tr("Fréquentes")
+                setOnClickListener { a.push(RecipesScreen(a, initialUsage = RecipesScreen.Usage.MOST)) }
+            }
+            addView(freqBtn, LinearLayout.LayoutParams(Ui.u(54), Ui.u(54)))
         }
-        shortcuts.addView(freqBtn, LinearLayout.LayoutParams(Ui.u(50), Ui.u(50)))
-        left.addView(shortcuts, Ui.lp(Ui.MATCH, Ui.WRAP, t = 20))
+        left.addView(shortcuts, Ui.lp(Ui.WRAP, Ui.WRAP, t = 16))
 
-        // Рівномірний простір зверху (ваги строго по центру між пошуком і Турбо)
+        // Рівномірний простір зверху (ваги строго по центру між 3 кнопками і Турбо)
         left.addView(Ui.spacer(c, weight = 1f))
 
-        // Rangée 2 : Affichage de pesée grand format (sans cadre) avec compensation de descente de police (+16dp)
-        val scaleRow = Ui.horizontal(c, Gravity.BOTTOM).apply {
+        // Rangée 2 : Affichage de pesée grand format (sans cadre)
+        val scaleRow = Ui.horizontal(c, Gravity.CENTER_VERTICAL).apply {
             clipChildren = false
             clipToPadding = false
         }
         scaleRow.addView(Icon(c, Icon.Kind.SCALE, Ui.TEXT2), LinearLayout.LayoutParams(Ui.u(38), Ui.u(38)).apply {
             rightMargin = Ui.u(14)
-            bottomMargin = Ui.u(-2)
         })
         val weightBox = Ui.horizontal(c, Gravity.BOTTOM).apply {
             clipChildren = false
             clipToPadding = false
-            translationY = Ui.uf(16f)
         }
         weightValue = Ui.text(c, "0", 72f, Ui.TEXT, Ui.THIN).apply {
             includeFontPadding = false
@@ -176,6 +175,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         }
         weightBox.addView(weightUnit, LinearLayout.LayoutParams(Ui.WRAP, Ui.WRAP).apply {
             leftMargin = Ui.u(6)
+            bottomMargin = Ui.u(8)
         })
         scaleRow.addView(weightBox, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
 
@@ -222,6 +222,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         }, onUp = { a.machine.turboUp() })
         left.addView(turbo, LinearLayout.LayoutParams(Ui.WRAP, Ui.u(54)).apply {
             gravity = Gravity.CENTER_HORIZONTAL
+            bottomMargin = Ui.u(8)
         })
         root.addView(left, LinearLayout.LayoutParams(0, Ui.MATCH, 0.42f).apply { rightMargin = Ui.u(28) })
 
