@@ -110,7 +110,7 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         }, Ui.lp(Ui.MATCH, Ui.u(58), t = 8))
 
         // ---- Langue (titre bilingue : trouvable quelle que soit la langue affichée)
-        val language = section(right, "Langue · Language", Icon.Kind.INFO)
+        val language = section(right, tr("Langue · Language"), Icon.Kind.INFO)
         val options = listOf(I18n.AUTO to tr("Automatique (langue du système)")) + I18n.languages.map { it.code to it.name }
         language.addView(dropdown(options, a.prefs.language) { code ->
             a.prefs.language = code

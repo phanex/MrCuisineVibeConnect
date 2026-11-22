@@ -33,12 +33,13 @@ class ValueCard(c: Context, label: String, icon: Icon.Kind) : LinearLayout(c) {
         head.addView(iconView, LayoutParams(Ui.u(24), Ui.u(24)).apply { rightMargin = Ui.u(8) })
         head.addView(Ui.text(c, label.uppercase(), 15f, Ui.TEXT2, Ui.MEDIUM).apply { letterSpacing = 0.08f })
         addView(head)
+        addView(Ui.spacer(c, h = 0, weight = 1f))
         val row = Ui.horizontal(c, Gravity.BOTTOM)
         row.addView(valueView)
         row.addView(unitView, Ui.lp(Ui.WRAP, Ui.WRAP, l = 6, b = 10))
-        addView(row, Ui.lp(t = 10))
-        addView(subView, Ui.lp(t = 2))
-        addView(Ui.spacer(c, h = 0, weight = 1f))
+        addView(row)
+        addView(subView, Ui.lp(t = 4))
+        addView(Ui.spacer(c, h = 0, weight = 1.2f))
         val buttons = Ui.horizontal(c)
         minus = Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.MINUS, height = 60) { onSelect(); onMinus() }
         plus = Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.PLUS, height = 60) { onSelect(); onPlus() }
@@ -157,7 +158,8 @@ class TempRing(c: Context) : View(c) {
         val gap = size * 0.018f
         val total = 10 * bw + 9 * gap
         var x = cx - total / 2
-        val base = cy + size * 0.40f
+        val maxH = size * (0.03f + 0.006f * 10)
+        val base = cy + size * 0.40f + maxH
         for (i in 1..10) {
             arc.style = Paint.Style.FILL
             arc.color = if (i <= rpmLevel) Ui.COOL else Ui.SURFACE3

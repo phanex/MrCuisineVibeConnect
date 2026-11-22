@@ -258,7 +258,10 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         t.background = Ui.pressable(Ui.round(Ui.SURFACE, 26f, Ui.STROKE, 1f), 26f)
 
         // Secteur supérieur : pastille 84x84 strictement centrée entre le bord haut et le titre
-        val topSector = android.widget.FrameLayout(c)
+        // Le padding bas de 14dp compense le padding haut de la tuile (14dp), garantissant une équidistance optique parfaite.
+        val topSector = android.widget.FrameLayout(c).apply {
+            setPadding(0, 0, 0, Ui.u(14))
+        }
         val badge = android.widget.FrameLayout(c)
         badge.background = Ui.round(Ui.ACCENT_DIM, 44f)
         badge.addView(Icon(c, icon, Ui.ACCENT), Ui.flp(Ui.u(48), Ui.u(48), Gravity.CENTER))

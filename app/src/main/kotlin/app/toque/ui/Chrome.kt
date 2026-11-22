@@ -43,10 +43,10 @@ abstract class Screen(val a: MainActivity) {
 class TopBar(private val a: MainActivity) : LinearLayout(a) {
     private val back = Icon(a, Icon.Kind.BACK, Ui.TEXT)
     private val titleView = Ui.ellipsize(Ui.text(a, "", 24f, Ui.TEXT, Ui.MEDIUM))
-    private val temp = Ui.chip(a, "", Icon.Kind.THERMO, Ui.TEXT2)
+    private val temp = Ui.chip(a, "", Icon.Kind.THERMO, Ui.TEXT2, size = 18f)
     private val lid = Ui.chip(a, tr("Couvercle ouvert"), Icon.Kind.LID, Ui.WARN, 0x33FFC14D)
     private val link = Ui.chip(a, "", Icon.Kind.LINK, Ui.TEXT2)
-    private val clock = Ui.text(a, "", 26f, Ui.TEXT, Ui.MEDIUM)
+    private val clock = Ui.text(a, "", 28f, Ui.TEXT, Ui.THIN)
     private val home = Icon(a, Icon.Kind.HOME, Ui.TEXT2)
     private val handler = Handler(Looper.getMainLooper())
     private val tick = object : Runnable {
@@ -61,24 +61,24 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
     init {
         orientation = HORIZONTAL
         setGravity(Gravity.CENTER_VERTICAL)
-        setPadding(Ui.u(16), 0, Ui.u(16), 0)
+        setPadding(Ui.u(24), 0, Ui.u(24), 0)
 
-        // Cluster de navigation à gauche : [←] [⌂]  Titre
-        back.setPadding(Ui.u(12), Ui.u(12), Ui.u(12), Ui.u(12))
-        back.background = Ui.pressable(Ui.round(0, 28f), 28f)
+        // Cluster de navigation à gauche : [◁] [⌂]  Titre
+        back.setPadding(Ui.u(10), Ui.u(10), Ui.u(10), Ui.u(10))
+        back.background = Ui.pressable(Ui.round(0, 24f), 24f)
         back.setOnClickListener { a.back() }
-        addView(back, LayoutParams(Ui.u(54), Ui.u(54)))
+        addView(back, LayoutParams(Ui.u(48), Ui.u(48)))
 
-        home.setPadding(Ui.u(12), Ui.u(12), Ui.u(12), Ui.u(12))
-        home.background = Ui.pressable(Ui.round(0, 28f), 28f)
+        home.setPadding(Ui.u(10), Ui.u(10), Ui.u(10), Ui.u(10))
+        home.background = Ui.pressable(Ui.round(0, 24f), 24f)
         home.setOnClickListener { a.home() }
-        addView(home, LayoutParams(Ui.u(54), Ui.u(54)).apply { leftMargin = Ui.u(4) })
+        addView(home, LayoutParams(Ui.u(48), Ui.u(48)).apply { leftMargin = Ui.u(12) })
 
-        addView(titleView, LayoutParams(0, Ui.WRAP, 1f).apply { leftMargin = Ui.u(12) })
+        addView(titleView, LayoutParams(0, Ui.WRAP, 1f).apply { leftMargin = Ui.u(16) })
 
         // Indicateurs et horloge à droite
-        addView(lid, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
-        addView(temp, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
+        addView(lid, Ui.lp(Ui.WRAP, Ui.WRAP, r = 12))
+        addView(temp, Ui.lp(Ui.WRAP, Ui.WRAP, r = 12))
         addView(link, Ui.lp(Ui.WRAP, Ui.WRAP, r = 16))
         addView(clock, Ui.lp(Ui.WRAP, Ui.WRAP))
 
@@ -121,23 +121,27 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
         } else temp.visibility = View.GONE
         val mode = a.prefs.mode
         val simulated = mode != Prefs.Mode.HARDWARE
-        val (label, color) = when {
-            s.hasFault -> tr("Alerte") to Ui.DANGER
-            s.link == LinkState.READY -> {
-                val label = when (mode) {
-                    Prefs.Mode.DEMO -> tr("Démo · Prête")
-                    Prefs.Mode.TWIN -> tr("Jumeau · Prête")
-                    Prefs.Mode.HARDWARE -> tr("Prête")
+        val showLink = s.hasFault || s.link != LinkState.READY || simulated
+        link.visibility = if (showLink) View.VISIBLE else View.GONE
+        if (showLink) {
+            val (label, color) = when {
+                s.hasFault -> tr("Alerte") to Ui.DANGER
+                s.link == LinkState.READY -> {
+                    val label = when (mode) {
+                        Prefs.Mode.DEMO -> tr("Démo")
+                        Prefs.Mode.TWIN -> tr("Jumeau")
+                        Prefs.Mode.HARDWARE -> tr("Prête")
+                    }
+                    label to (if (simulated) Ui.COOL else Ui.OK)
                 }
-                label to (if (simulated) Ui.COOL else Ui.OK)
+                s.link == LinkState.ARMING -> tr("Connexion…") to Ui.WARN
+                s.link == LinkState.LOST -> tr("Liaison perdue") to Ui.DANGER
+                else -> tr("Base absente") to Ui.TEXT3
             }
-            s.link == LinkState.ARMING -> tr("Connexion…") to Ui.WARN
-            s.link == LinkState.LOST -> tr("Liaison perdue") to Ui.DANGER
-            else -> tr("Base absente") to Ui.TEXT3
+            Ui.chipText(link).text = label
+            Ui.chipText(link).setTextColor(color)
+            (link.getChildAt(0) as Icon).color = color
         }
-        Ui.chipText(link).text = label
-        Ui.chipText(link).setTextColor(color)
-        (link.getChildAt(0) as Icon).color = color
     }
 }
 
