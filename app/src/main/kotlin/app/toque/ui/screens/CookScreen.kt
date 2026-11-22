@@ -30,7 +30,7 @@ import app.toque.ui.Ui
  * eux partent ensemble, en un seul programme : la machine passe de l'un à l'autre sans arrêter
  * la lame (sauf changement de sens). La progression est mémorisée (reprise après coupure).
  */
-class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : Screen(a) {
+class CookScreen(a: MainActivity, private var recipe: Recipe, startStep: Int) : Screen(a) {
     override val title = recipe.title
     private var index = startStep.coerceIn(0, maxOf(0, recipe.steps.size - 1))
     private val reviewed = HashSet<Int>().apply {
@@ -286,13 +286,35 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
             startBtn = Ui.button(c, tr("Lancer"), Ui.Style.PRIMARY, Icon.Kind.PLAY, height = 66, textSize = 23f) { launch() }
             panel.addView(startBtn)
         }
-        if (m.program == StepProgram.MANUAL) {
-            panel.addView(Ui.button(c, tr("Ajuster à la main"), Ui.Style.GHOST, height = 46, textSize = 16f) {
-                a.push(ManualScreen(a, m))
-            }, Ui.lp(t = 6))
-        }
         val blocked = violations.isNotEmpty() || (step.needsReview && index !in reviewed)
         Ui.setButtonEnabled(startBtn, !blocked)
+
+        if (violations.isNotEmpty() || m.program == StepProgram.MANUAL) {
+            val adjustLabel = if (violations.isNotEmpty()) tr("Corriger le réglage") else tr("Ajuster à la main")
+            val adjustStyle = if (violations.isNotEmpty()) Ui.Style.SECONDARY else Ui.Style.GHOST
+            panel.addView(Ui.button(c, adjustLabel, adjustStyle, height = 48, textSize = 16f) {
+                if (m.program == StepProgram.MANUAL) {
+                    a.push(ManualScreen(a, m) { picked ->
+                        updateStepMachine(picked)
+                    })
+                } else {
+                    a.push(RecipeStepScreen(a, recipe, index) { updatedRecipe ->
+                        recipe = updatedRecipe
+                        buildPanel()
+                        onSnapshot(a.snapshot)
+                    })
+                }
+            }, Ui.lp(t = 8))
+        }
+    }
+
+    private fun updateStepMachine(newMachine: StepMachine) {
+        val oldSteps = recipe.steps.toMutableList()
+        val curStep = oldSteps[index]
+        oldSteps[index] = curStep.copy(machine = newMachine)
+        recipe = recipe.copy(steps = oldSteps)
+        buildPanel()
+        onSnapshot(a.snapshot)
     }
 
     private fun launch() {
