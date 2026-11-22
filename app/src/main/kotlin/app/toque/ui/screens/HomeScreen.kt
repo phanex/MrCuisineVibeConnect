@@ -165,7 +165,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         val weightBox = Ui.horizontal(c, Gravity.BOTTOM).apply {
             clipChildren = false
             clipToPadding = false
-            translationY = Ui.uf(16)
+            translationY = Ui.uf(16f)
         }
         weightValue = Ui.text(c, "0", 72f, Ui.TEXT, Ui.THIN).apply {
             includeFontPadding = false
