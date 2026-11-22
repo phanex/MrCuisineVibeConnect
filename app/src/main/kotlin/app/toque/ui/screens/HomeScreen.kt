@@ -47,7 +47,10 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         val root = Ui.horizontal(c, Gravity.TOP)
         root.setPadding(Ui.u(28), Ui.u(20), Ui.u(24), Ui.u(24))
 
-        val left = Ui.vertical(c)
+        val left = Ui.vertical(c).apply {
+            clipChildren = false
+            clipToPadding = false
+        }
         val headerRow = Ui.horizontal(c, Gravity.CENTER_VERTICAL).apply {
             minimumHeight = Ui.u(38)
         }
@@ -150,13 +153,20 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         // Espace supérieur pour centrer le widget de pesée entre la recherche et Turbo
         left.addView(Ui.spacer(c, weight = 1f))
 
-        // Rangée 2 : Affichage de pesée grand format (sans cadre) calé sur le niveau de la tare
-        val scaleRow = Ui.horizontal(c, Gravity.BOTTOM)
+        // Rangée 2 : Affichage de pesée grand format (sans cadre) avec compensation de descente de police (+16dp)
+        val scaleRow = Ui.horizontal(c, Gravity.BOTTOM).apply {
+            clipChildren = false
+            clipToPadding = false
+        }
         scaleRow.addView(Icon(c, Icon.Kind.SCALE, Ui.TEXT2), LinearLayout.LayoutParams(Ui.u(38), Ui.u(38)).apply {
             rightMargin = Ui.u(14)
             bottomMargin = Ui.u(-2)
         })
-        val weightBox = Ui.horizontal(c, Gravity.BOTTOM)
+        val weightBox = Ui.horizontal(c, Gravity.BOTTOM).apply {
+            clipChildren = false
+            clipToPadding = false
+            translationY = Ui.uf(16)
+        }
         weightValue = Ui.text(c, "0", 72f, Ui.TEXT, Ui.THIN).apply {
             includeFontPadding = false
         }
