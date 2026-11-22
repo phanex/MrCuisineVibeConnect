@@ -33,6 +33,8 @@ class HomeScreen(a: MainActivity) : Screen(a) {
     private lateinit var tempValue: TextView
     private lateinit var tempIcon: Icon
     private lateinit var lidIcon: Icon
+    private lateinit var faultIcon: Icon
+    private lateinit var modeIcon: Icon
     private var unsub: (() -> Unit)? = null
     private val tick = object : Runnable {
         override fun run() {
@@ -69,6 +71,38 @@ class HomeScreen(a: MainActivity) : Screen(a) {
             visibility = View.GONE
         }
         statusCluster.addView(lidIcon, LinearLayout.LayoutParams(Ui.u(24), Ui.u(24)).apply { leftMargin = Ui.u(8) })
+
+        faultIcon = Icon(c, Icon.Kind.WARNING, Ui.DANGER).apply {
+            visibility = View.GONE
+            isClickable = true
+            setOnClickListener {
+                val s = a.snapshot
+                val msg = if (s.hasFault) s.faultMessage else when (s.link) {
+                    app.toque.core.machine.LinkState.LOST -> tr("Connexion perdue")
+                    app.toque.core.machine.LinkState.OFFLINE -> tr("Base non connectée")
+                    app.toque.core.machine.LinkState.ARMING -> tr("Connexion…")
+                    else -> tr("Alerte")
+                }
+                a.toast(msg, if (s.link == app.toque.core.machine.LinkState.ARMING) Ui.WARN else Ui.DANGER)
+            }
+        }
+        statusCluster.addView(faultIcon, LinearLayout.LayoutParams(Ui.u(24), Ui.u(24)).apply { leftMargin = Ui.u(8) })
+
+        modeIcon = Icon(c, Icon.Kind.INFO, Ui.COOL).apply {
+            visibility = View.GONE
+            isClickable = true
+            setOnClickListener {
+                val mode = a.prefs.mode
+                val msg = when (mode) {
+                    app.toque.Prefs.Mode.DEMO -> tr("Mode démo")
+                    app.toque.Prefs.Mode.TWIN -> tr("Mode jumeau (externe)")
+                    else -> tr("Mode combiné")
+                }
+                a.toast(msg, Ui.COOL)
+            }
+        }
+        statusCluster.addView(modeIcon, LinearLayout.LayoutParams(Ui.u(24), Ui.u(24)).apply { leftMargin = Ui.u(8) })
+
         headerRow.addView(statusCluster, LinearLayout.LayoutParams(Ui.WRAP, Ui.u(38)))
         left.addView(headerRow, Ui.lp(Ui.MATCH, Ui.WRAP, t = 4))
 
@@ -116,7 +150,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         // Espace supérieur pour centrer le widget de pesée entre la recherche et Turbo
         left.addView(Ui.spacer(c, weight = 1f))
 
-        // Rangée 2 : Affichage de pesée grand format (sans cadre) calé sur la ligne de base
+        // Rangée 2 : Affichage de pesée grand format (sans cadre) calé sur le niveau de la tare
         val scaleRow = Ui.horizontal(c, Gravity.BOTTOM)
         scaleRow.addView(Icon(c, Icon.Kind.SCALE, Ui.TEXT2), LinearLayout.LayoutParams(Ui.u(38), Ui.u(38)).apply {
             rightMargin = Ui.u(14)
@@ -314,6 +348,36 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         }
         if (::lidIcon.isInitialized) {
             lidIcon.visibility = if (s.hasSample && s.lidOpen) View.VISIBLE else View.GONE
+        }
+        if (::faultIcon.isInitialized) {
+            val hasFaultOrLost = s.hasFault || s.link == app.toque.core.machine.LinkState.LOST || s.link == app.toque.core.machine.LinkState.OFFLINE
+            val arming = s.link == app.toque.core.machine.LinkState.ARMING
+            if (hasFaultOrLost) {
+                faultIcon.color = Ui.DANGER
+                faultIcon.visibility = View.VISIBLE
+            } else if (arming) {
+                faultIcon.color = Ui.WARN
+                faultIcon.visibility = View.VISIBLE
+            } else {
+                faultIcon.visibility = View.GONE
+            }
+        }
+        if (::modeIcon.isInitialized) {
+            when (a.prefs.mode) {
+                app.toque.Prefs.Mode.DEMO -> {
+                    modeIcon.set(Icon.Kind.INFO)
+                    modeIcon.color = Ui.COOL
+                    modeIcon.visibility = View.VISIBLE
+                }
+                app.toque.Prefs.Mode.TWIN -> {
+                    modeIcon.set(Icon.Kind.LINK)
+                    modeIcon.color = Ui.COOL
+                    modeIcon.visibility = View.VISIBLE
+                }
+                app.toque.Prefs.Mode.HARDWARE -> {
+                    modeIcon.visibility = View.GONE
+                }
+            }
         }
     }
 }
