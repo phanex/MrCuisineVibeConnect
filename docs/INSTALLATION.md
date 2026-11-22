@@ -48,6 +48,16 @@ Menu names below are those of the English interface (*Settings › Langue · Lan
    `0x1000000`, region `EMMC_USER`) and `recovery` (start `0x2d20000`, length `0x1000000`), click
    **Read Back**, then switch the robot on. You get `boot-original.img` and
    `recovery-original.img` (16 MB each): **keep them safe, they are your only way back.**
+
+   > **SKMC 1100 A1** (label under the robot, system image `v4.3a_2022-09-15`): the TWRP of the
+   > reference guide carries a 2018 kernel and this robot runs a 2022 one. Before step 4, rebuild
+   > TWRP around your own kernel: put the two backups in `C:\Toque\backup\`, then run
+   > [`tools\setup\toque-setup.ps1`](../tools/setup/toque-setup.ps1) with `-Step prepare` (it
+   > fetches and checks the TWRP image; its remarks about the driver and SP Flash Tool do not
+   > matter if you already have them), `-Step backup` (with the files already there it only checks
+   > them) and `-Step own-twrp`. These commands send nothing to the robot. Use the resulting
+   > `C:\Toque\twrp-own-kernel.img` wherever this page says `hacks/recovery.img` (step 4 below, and
+   > step 2 of the next section).
 4. **Download** tab, *Download Only*: tick only `boot`, with `hacks/recovery.img` (TWRP). Click
    **Download**, then switch the robot off and on again.
 5. Switch the robot off, unplug the cable, switch it on: **TWRP** starts. Plug the cable back in:
@@ -94,8 +104,9 @@ Only do this on your home network: anyone on it could then connect to the robot.
 2. `powershell -ExecutionPolicy Bypass -File tools\install-robot.ps1`
    (over Wi-Fi: add `-Ip <robot IP address>`).
 3. The script also allows Toque in Magisk (no prompt on the robot: Magisk's prompt closes by
-   itself after 10 s and then refuses for good) and checks that Magisk's busybox, which Toque
-   needs for the serial port, is in place.
+   itself after 10 s and then refuses), installs a boot script that allows it again at every
+   start (Magisk 31 forgets the permission of every app each time an Android 6 device starts),
+   and checks that Magisk's busybox, which Toque needs for the serial port, is in place.
 
 ## 4. First run — EMPTY bowl
 

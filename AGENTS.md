@@ -38,9 +38,10 @@ with exactly these files; total time 1–2 hours, most of it waiting for the per
 - When a step prints `STOP:`, do not improvise a workaround on the robot: read the cause, fix it
   on the PC side or ask the person, then run the step again.
 - Check the model on the label under the robot. **SKMC 1200**, revisions A1, B2 and C3, have been
-  installed with this procedure. An **SKMC 1100 A1** runs Toque too, but its owner needed a
-  recovery adapted to its newer kernel (issue #10): stop and say this guide does not cover it
-  yet. A Monsieur Cuisine **Smart** (SKMS 1200) is different hardware: stop.
+  installed with this procedure. An **SKMC 1100 A1** needs TWRP rebuilt around its own, newer
+  kernel (issue #10): one more step, `own-twrp`, right after `backup` (see *SKMC 1100 A1* below);
+  everything else is the same. A Monsieur Cuisine **Smart** (SKMS 1200) is different hardware:
+  stop.
 - The SP Flash Tool archive has a public password printed on its download page; typing it to
   extract the archive is fine. Any other password: never.
 
@@ -81,6 +82,7 @@ A log is kept in `C:\Toque\setup-log.txt`, state in `C:\Toque\state.json`.
 | 1b | (browser) | agent + person | Two files need a browser, see *Manual downloads*. Then `prepare` again. |
 | 2 | `driver` | agent + person | Installs the MediaTek PreLoader USB VCOM driver (UAC prompt). May ask to turn memory integrity off and restart. |
 | 3 | `backup` | person, then agent | Cover off, cable in the **right-hand "Android USB" port**, robot off; the script reads `boot` and `recovery`; the person switches the robot on when told. Verifies two 16 MiB Android images. |
+| 3b | `own-twrp` | agent | **SKMC 1100 A1 only.** Builds `C:\Toque\twrp-own-kernel.img` on the PC: the TWRP of this guide with the robot's own kernel, taken from the `boot` backup. Nothing is sent to the robot; `flash-twrp` and `flash-root` then write that image. |
 | 4 | `flash-twrp` | agent + person | Writes TWRP into `boot` (Download Only). The person power-cycles: off, **unplug**, on, plug back → TWRP. |
 | 5 | `root` | agent | In TWRP: patches the *original* boot with Magisk, enables ADB in Android, authorizes the PC's ADB key, pulls `boot-magisk.img`. |
 | 6 | `flash-root` | agent + person | Writes `boot-magisk.img` into `boot` and TWRP into `recovery`. Power cycle as above → stock app. |
@@ -93,6 +95,35 @@ A log is kept in `C:\Toque\setup-log.txt`, state in `C:\Toque\state.json`.
 Then: Toque › Settings › Lidl recipes › **Sync** (about 15 minutes the first time). The recipe count
 stays at 0 and "never synced" stays shown until every recipe has been fetched: that is normal, do not
 restart the sync.
+
+### SKMC 1100 A1: TWRP with the robot's own kernel
+
+The TWRP image of this guide carries a kernel built in April 2018. An SKMC 1100 A1 (system image
+`v4.3a_2022-09-15`, stock app 1.1.28) runs a kernel built in September 2022, so its TWRP is rebuilt
+around that kernel:
+
+- Run `-Step own-twrp` once, after `backup` and before `flash-twrp`. It prints both kernel
+  versions, takes the kernel and device tree from `C:\Toque\backup\boot-original.img` and
+  everything else (TWRP itself, the header) from `C:\Toque\hack\recovery.img`, writes
+  `C:\Toque\twrp-own-kernel.img`, reads it back and records its SHA-256 in `state.json`. It
+  downloads nothing, sends nothing to the robot, and refuses to build if the two images do not
+  share the same layout.
+- `flash-twrp` and `flash-root` then write that image instead of `hack\recovery.img`;
+  `-Step status` says which one is selected. To go back to the guide's image, delete the
+  `twrp-own-kernel-sha256` line from `C:\Toque\state.json`.
+
+Done end to end on one SKMC 1100 A1 in November 2026: TWRP started with a stable picture and
+working touch, then `root`, `flash-root` (10.98 MB and 26.98 MB sent in console mode), `android`,
+`install` and the first run went as on an SKMC 1200. The rest of this guide applies unchanged,
+including TWRP restarting after 6 min 40 s and the reversed bowl sensor. On that robot the tablet
+restarted by itself after each flash, straight into TWRP and then into Android with the cable
+still plugged in: when `adb devices` already shows the robot, the power cycle is not needed.
+
+After the install, `adb reboot recovery` starts the same TWRP from the `recovery` partition (done
+twice on that robot: adb in `recovery` after 15 s, working touch) and `adb reboot` returns to
+Android. Started that way TWRP is not restarted after 6 min 40 s: the kernel logs
+`init_wdt:RECOVERY_BOOT` instead of `init_wdt:NORMAL_BOOT` and does not count, and TWRP was still
+running after 7 minutes.
 
 ### Power-on rules (the source of most confusion)
 
@@ -157,7 +188,9 @@ operation in the window — with a computer-use tool, or by guiding the person:
 2. Untick every row, then tick only:
    - `flash-twrp`: **boot** = `C:\Toque\hack\recovery.img`;
    - `flash-root`: **boot** = `C:\Toque\boot-magisk.img` and **recovery** = `C:\Toque\hack\recovery.img`.
-   Double-click the *Location* cell to choose the file. Check that no other row is ticked.
+   After `own-twrp` (SKMC 1100 A1), use `C:\Toque\twrp-own-kernel.img` in place of
+   `hack\recovery.img` in both. Double-click the *Location* cell to choose the file. Check that no
+   other row is ticked.
 3. Robot off, cable in. Click **Download**, then switch the robot on. Wait for the green tick.
 4. Continue with the next step (`root` after `flash-twrp`, `android` after `flash-root`). Those
    steps check the robot itself, so they work the same after a GUI flash.
@@ -173,6 +206,7 @@ operation in the window — with a computer-use tool, or by guiding the person:
 | `root` fails during the Magisk patch | Not the original boot, or a corrupt backup | Nothing was flashed. Check `C:\Toque\backup`, redo `backup` |
 | `android`: `su` returns nothing | The Magisk prompt was missed (it closes after 10 s and then refuses) | Person taps **Grant** quickly; if refused for good: Magisk app › Superuser › Shell › allow |
 | Toque shows "Base absente" / no motor link | Magisk busybox missing | `install` again (it runs `tools/robot/setup-root.sh`) |
+| After every restart Magisk asks again to allow Toque; left unanswered, Toque shows "Base absente" and its journal repeats *Accès root refusé* until the next restart | Magisk 31 forgets the permission of every app each time the robot starts (Android 6), and this robot was installed before `install` added the boot script that gives Toque's back | `install` again: it writes `/data/adb/service.d/toque-su.sh`, which allows Toque at every start |
 | Stuck in the stock app (no Home/Back buttons on this robot) | Normal | Floating **Back to Toque** button, or `adb shell am start -n app.toque/.ui.MainActivity` |
 | `Toque s'est vu refuser les droits` toasts | Magisk policy | `install` again (it allows Toque in Magisk's database) |
 | `root`: `can't create /proc/self/fd/` and `Failed to patch` after `Loading dtbs` | Magisk's installer messages outside its UI; no fstab in the device tree on Android 6 | Harmless if the step ends with `== Done` |

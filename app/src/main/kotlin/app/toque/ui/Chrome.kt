@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.drawable.InsetDrawable
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
@@ -66,7 +67,7 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
     private val handler = Handler(Looper.getMainLooper())
     private val tick = object : Runnable {
         override fun run() {
-            clock.text = MainActivity.now()
+            Ui.chipText(clock).text = MainActivity.now()
             handler.postDelayed(this, 10_000)
         }
     }
@@ -102,7 +103,6 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
         addView(tempBox, Ui.lp(Ui.WRAP, Ui.WRAP, r = 20))
         addView(linkIcon, Ui.lp(Ui.u(20), Ui.u(20), r = 16))
         addView(clock, Ui.lp(Ui.WRAP, Ui.WRAP))
-
         lid.visibility = View.GONE
         tempBox.visibility = View.GONE
         linkIcon.visibility = View.GONE
@@ -115,6 +115,14 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
                 a.openAndroidSettings()
             }
         }
+    }
+
+    /** Bouton rond de 44 au centre d'une zone tactile de 52, de la même famille que les pastilles ; l'icône fait 26. */
+    private fun roundButton(icon: Icon, onClick: () -> Unit) {
+        icon.background = InsetDrawable(Ui.pressable(Ui.round(Ui.SURFACE2, 22f, Ui.STROKE, 1f), 22f), Ui.u(4))
+        // Après le fond : un fond qui porte une marge impose sinon la sienne à la vue.
+        icon.setPadding(Ui.u(13), Ui.u(13), Ui.u(13), Ui.u(13))
+        icon.setOnClickListener { onClick() }
     }
 
     fun startClock() {
@@ -312,8 +320,13 @@ class MachineBar(private val a: MainActivity) : FrameLayout(a) {
         progress.progress = if (s.totalMs > 0) s.elapsedMs.toFloat() / s.totalMs else 0f
         progress.color = if (s.jobTempLevel > 0) Ui.ACCENT else Ui.COOL
         val isSteam = s.jobKind == "STEAM"
+        val noStir = s.jobKind == "MANUAL" && s.jobSpeed == 0
         (speedChip.getChildAt(0) as Icon).set(if (isSteam) Icon.Kind.STEAM else Icon.Kind.SPEED)
-        Ui.chipText(speedChip).text = if (isSteam) tr("Vapeur") else tr("Vitesse %d", s.jobSpeed)
+        Ui.chipText(speedChip).text = when {
+            isSteam -> tr("Vapeur")
+            noStir -> tr("Sans mélange")
+            else -> tr("Vitesse %d", s.jobSpeed)
+        }
         tempChip.visibility = if (s.jobTempLevel > 0) View.VISIBLE else View.GONE
         Ui.chipText(tempChip).text = "${Mcc.celsiusForLevel(s.jobTempLevel)} °C"
         dirChip.visibility = if (s.jobReverse && s.jobKind == "MANUAL") View.VISIBLE else View.GONE

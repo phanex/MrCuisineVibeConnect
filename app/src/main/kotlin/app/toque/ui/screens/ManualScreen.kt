@@ -1,5 +1,6 @@
 package app.toque.ui.screens
 
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
@@ -40,7 +41,8 @@ class ManualScreen(
 
     private var seconds = preset?.seconds?.takeIf { it > 0 } ?: 60
     private var tempLevel = preset?.temperatureLevel ?: 0
-    private var speed = preset?.speed?.coerceIn(1, 10) ?: 2
+    // Vitesse 0 = chauffe sans mélange : seulement avec une température.
+    private var speed = (preset?.speed ?: 2).coerceIn(if (tempLevel > 0) 0 else 1, 10)
     private var reverse = preset?.reverse ?: false
     private var accessory = preset?.accessory ?: Accessory.BLADE
     private var selected = 0
@@ -63,6 +65,8 @@ class ManualScreen(
     private var timeEdited = false
     private var configuredSeconds = seconds
     private val pushLive = Runnable { sendAdjust() }
+    /** Jusqu'à cette heure, l'anneau montre la consigne réglée ici plutôt que celle du programme en cours. */
+    private var ownTargetUntil = 0L
 
     override fun build(): View {
         val root = Ui.horizontal(c, Gravity.TOP)
@@ -141,6 +145,11 @@ class ManualScreen(
                     speed = Limits.MAX_SPEED_HEATED
                     a.toast(tr("En chauffe, vitesse %d maximum", Limits.MAX_SPEED_HEATED))
                 }
+                if (tempLevel == 0 && speed == 0) {
+                    speed = 1
+                    a.toast(tr("Sans chauffe, vitesse 1 minimum"))
+                }
+                capNoStirTemperature()
             }
             2 -> {
                 var max = 10
@@ -148,22 +157,40 @@ class ManualScreen(
                 if (tempLevel > 0) { max = Limits.MAX_SPEED_HEATED; why = trKey("En chauffe, vitesse %d maximum") }
                 if (reverse && max > Limits.MAX_SPEED_REVERSE) { max = Limits.MAX_SPEED_REVERSE; why = trKey("En sens inverse, vitesse %d maximum") }
                 if (accessory.maxSpeed < max) { max = accessory.maxSpeed; why = trKey("Avec le fouet, vitesse %d maximum") }
-                val next = (speed + dir).coerceIn(1, 10)
+                // En chauffe, la vitesse descend jusqu'à 0 : la lame reste à l'arrêt.
+                val min = if (tempLevel > 0) 0 else 1
+                val next = (speed + dir).coerceIn(min, 10)
+                if (dir < 0 && speed == min && min == 1) a.toast(tr("Sans chauffe, vitesse 1 minimum"))
                 if (next > max) a.toast(tr(why, max)) else speed = next
+                capNoStirTemperature()
             }
         }
         val maxS = ((if (speed > 6) Limits.MAX_MS_HIGH_SPEED else Limits.MAX_MS_DEFAULT) / 1000).toInt()
         if (seconds > maxS) seconds = maxS
-        refresh()
-        if (live && s.kind?.name == "MANUAL") {
+        val liveEdit = live && s.kind?.name == "MANUAL"
+        if (liveEdit) {
             if (card == 0) timeEdited = true
             pendingEdit = true
+            // Le temps que la base applique le réglage et le renvoie dans son état.
+            ownTargetUntil = SystemClock.uptimeMillis() + 1_500
+        }
+        refresh()
+        if (liveEdit) {
             view.removeCallbacks(pushLive)
             view.postDelayed(pushLive, 350)
         }
     }
 
+    /** Sans mélange, la base chauffe par l'opération vapeur : 120 °C au plus, comme le programme Vapeur. */
+    private fun capNoStirTemperature() {
+        if (speed == 0 && tempLevel > Limits.MAX_TEMP_LEVEL_NO_STIR) {
+            tempLevel = Limits.MAX_TEMP_LEVEL_NO_STIR
+            a.toast(tr("Sans mélange, %d °C maximum", Mcc.celsiusForLevel(tempLevel)))
+        }
+    }
+
     private fun setReverse(r: Boolean) {
+        if (speed == 0) return // sans mélange, pas de sens de rotation
         if (r && speed > Limits.MAX_SPEED_REVERSE) {
             speed = Limits.MAX_SPEED_REVERSE
             a.toast(tr("En sens inverse, vitesse %d maximum", Limits.MAX_SPEED_REVERSE))
@@ -191,7 +218,7 @@ class ManualScreen(
     private fun start() {
         onPick?.let { pick ->
             pick(app.toque.core.recipes.StepMachine(seconds = seconds, speed = speed, tempC = Mcc.celsiusForLevel(tempLevel),
-                reverse = reverse, accessory = accessory))
+                reverse = reverse && speed > 0, accessory = accessory))
             a.back()
             return
         }
@@ -229,16 +256,18 @@ class ManualScreen(
             tempCard.set("$t", "°C", if (t >= 100) tr("Ébullition") else if (t >= 60) tr("Cuisson") else tr("Tiédir"), Ui.tempColor(t))
         }
         speedCard.set("$speed", "", when (speed) {
+            0 -> tr("Sans mélange")
             1 -> tr("Mijoter")
             2, 3 -> tr("Mélanger")
             in 4..6 -> tr("Hacher")
             else -> tr("Mixer")
-        } + if (reverse) " · " + tr("inverse") else "")
+        } + if (reverse && speed > 0) " · " + tr("inverse") else "")
         timeCard.select(selected == 0)
         tempCard.select(selected == 1)
         speedCard.select(selected == 2)
 
         dirRow.removeAllViews()
+        dirRow.alpha = if (speed == 0) 0.35f else 1f
         dirRow.addView(Ui.toggleChip(c, tr("Sens normal"), !reverse, minWidth = 110, height = 64) { setReverse(false) }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 8))
         dirRow.addView(Ui.toggleChip(c, tr("Inverse"), reverse, minWidth = 110, height = 64) { setReverse(true) })
         accRow.removeAllViews()
@@ -248,13 +277,24 @@ class ManualScreen(
         // Pour une étape de recette, le bol d'aujourd'hui ne compte pas.
         val bowl = if (onPick == null && a.snapshot.hasSample) a.snapshot.actualTempC else null
         val v = SafetyPolicy.checkJob(spec(), bowl).filter { it.code != SafetyPolicy.HOT_BLEND }
-        hint.text = v.firstOrNull()?.message ?: if (onPick == null && a.snapshot.hot && speed >= 4) tr("Contenu chaud : confirmation demandée") else ""
+        hint.text = v.firstOrNull()?.message ?: if (onPick == null && a.snapshot.hot && speed >= 4) tr("Contenu chaud : confirmation demandée") else idleHint()
         Ui.setButtonEnabled(startBtn, v.isEmpty())
+        showRing(a.snapshot)
+    }
+
+    /**
+     * Anneau : température mesurée et repère de consigne. Le repère suit la carte Température dès
+     * l'appui, sans attendre la prochaine trame de la base (jusqu'à une seconde au repos) ; en
+     * cuisson, il revient à la consigne du programme une fois le réglage appliqué.
+     */
+    private fun showRing(s: Snapshot) {
+        val editing = pendingEdit || SystemClock.uptimeMillis() < ownTargetUntil
+        val level = if (s.jobActive && s.jobTempLevel > 0 && !editing) s.jobTempLevel else tempLevel
+        ring.set(if (s.hasSample) s.actualTempC else 0, if (level > 0) Mcc.celsiusForLevel(level) else 0, s.speedLevel)
     }
 
     override fun onSnapshot(s: Snapshot) {
-        ring.set(if (s.hasSample) s.actualTempC else 0, if (s.jobActive && s.jobTempLevel > 0) Mcc.celsiusForLevel(s.jobTempLevel) else
-            if (tempLevel > 0) Mcc.celsiusForLevel(tempLevel) else 0, s.speedLevel)
+        showRing(s)
         if (s.hasSample) {
             val w = s.weightG
             val sign = if (w < 0) "- " else ""
@@ -299,9 +339,12 @@ class ManualScreen(
     private fun refreshHintOnly() {
         val v = SafetyPolicy.checkJob(spec(), if (a.snapshot.hasSample) a.snapshot.actualTempC else null)
             .filter { it.code != SafetyPolicy.HOT_BLEND }
-        hint.text = v.firstOrNull()?.message ?: if (a.snapshot.hot && speed >= 4) tr("Contenu chaud : confirmation demandée") else ""
+        hint.text = v.firstOrNull()?.message ?: if (a.snapshot.hot && speed >= 4) tr("Contenu chaud : confirmation demandée") else idleHint()
         hint.setTextColor(Ui.WARN)
     }
+
+    /** Rappel affiché quand rien ne s'oppose au démarrage : sans mélange, rien ne décolle le fond du bol. */
+    private fun idleHint(): String = if (speed == 0 && tempLevel > 0) tr("Sans mélange : surveillez la cuisson") else ""
 
     override fun onKnob(delta: Int): Boolean {
         change(selected, delta)

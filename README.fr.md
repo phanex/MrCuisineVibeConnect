@@ -7,10 +7,11 @@ qui remplace l'appli d'origine sur la tablette du robot tout en gardant **les re
 
 > Projet indépendant, non affilié à Lidl, SilverCrest ni Hoyer. Le pilotage du moteur repose
 > sur une analyse publique du protocole. Depuis octobre 2026, Toque tourne sur des SKMC 1200
-> (révisions A1, B2 et C3) en France et en Espagne, et sur un SKMC 1100 A1 (avec un recovery
-> adapté, voir #10). À utiliser à vos risques, en suivant la procédure de premier essai.
+> (révisions A1, B2 et C3) en France et en Espagne, et sur des SKMC 1100 A1 (TWRP reconstruit
+> autour de leur propre noyau : étape `own-twrp` du guide d'installation, voir #10). À utiliser à
+> vos risques, en suivant la procédure de premier essai.
 >
-> L'interface existe en **français**, **anglais**, **allemand** et **espagnol** (*Réglages › Langue · Language*).
+> L'interface existe en **français**, **anglais**, **allemand**, **espagnol** et **catalan** (*Réglages › Langue · Language*).
 
 ## Installer avec un agent IA
 
@@ -82,6 +83,8 @@ Comptez 1 à 2 heures. Sans agent : [docs/INSTALLATION.fr.md](docs/INSTALLATION.
   vérifié (« J'ai vérifié ce réglage ») est mémorisé pour les prochaines fois.
 - **Cuisson manuelle**, programmes **Pétrir / Vapeur / Rissoler / Nettoyage**, **Turbo**, **balance**.
   Nettoyage : 1 L d'eau chaude et une goutte de liquide vaisselle, vitesse de 4 à 10, sans chauffe.
+  La cuisson manuelle peut aussi **chauffer sans mélanger** : avec une température réglée (120 °C
+  au plus), la vitesse descend jusqu'à 0.
 - **Hors ligne** : tout fonctionne sans réseau (plus de « serveur injoignable » au démarrage).
 - **Heure toujours juste** : le fuseau horaire est trouvé d'après la connexion Internet et l'heure
   vient du réseau (le robot n'a pas de pile d'horloge). Juste après l'allumage, l'horloge est réglée
@@ -204,8 +207,10 @@ synchronisation des recettes, retour à l'appli d'origine.
 - Accès au robot : [Monsieur-Cuisine-Connect-Hack](https://github.com/EliasKotlyar/Monsieur-Cuisine-Connect-Hack).
 - Contributions : @pierok13 (veille, notes et quantités, paliers, sons, récentes, certificats Android 6,
   capteur du bol), @lucasbraud, @OUTSIDE2k8 (traduction espagnole), @Locodice67 (traduction allemande,
-  script d'installation), @baptiste-gislot, @florentdestremau (bouton rotatif), et tous ceux qui ont
-  testé leur robot et signalé des bugs.
+  script d'installation), @baptiste-gislot, @florentdestremau (bouton rotatif), @maximehuran (lumière
+  du bouton en veille), @badrbelhaj1 (Magisk au redémarrage, TWRP du SKMC 1100 A1, chauffe sans
+  mélange, corrections d'interface), @meuca1 (traduction catalane), et tous ceux qui ont testé leur
+  robot et signalé des bugs.
 
 Licence MIT. Ce dépôt ne contient aucune recette, image ni code de Lidl : chaque robot télécharge
 lui-même les recettes sur monsieur-cuisine.com, pour l'usage personnel de son propriétaire.

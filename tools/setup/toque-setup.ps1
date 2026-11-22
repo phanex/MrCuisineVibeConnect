@@ -7,8 +7,9 @@
 # install, wifi, cleanup. Lines starting with "HUMAN:" are actions only a person can do
 # (unscrewing, cables, power switch, Windows security prompts, a tap on the robot's screen).
 # A step that needs one stops and says so; run it again once the person is done.
+# SKMC 1100 A1 only: one more step, own-twrp, right after backup (see AGENTS.md).
 param(
-    [ValidateSet("status", "prepare", "driver", "backup", "flash-twrp", "root", "flash-root", "android", "install", "wifi", "cleanup")]
+    [ValidateSet("status", "prepare", "driver", "backup", "own-twrp", "flash-twrp", "root", "flash-root", "android", "install", "wifi", "cleanup")]
     [string]$Step = "status",
     [string]$Work = "C:\Toque",
     [string]$Apk = "",
@@ -147,6 +148,95 @@ function Test-BootImage([string]$path, [string]$what) {
     if ([Text.Encoding]::ASCII.GetString($head) -ne "ANDROID!") { Fail "$what is not an Android boot image (no ANDROID! header): do not continue." }
 }
 
+function Copy-Bytes([byte[]]$src, [long]$offset, [long]$count) {
+    $out = New-Object byte[] $count
+    [Array]::Copy($src, $offset, $out, 0, $count)
+    return , $out
+}
+
+function Get-BytesSha([byte[]]$bytes) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash($bytes)) -replace "-", "").ToLowerInvariant() }
+    finally { $sha.Dispose() }
+}
+
+# Parses an Android boot image (header version 0: boot, recovery and the TWRP image all use it).
+function Read-BootImage([string]$path, [string]$what) {
+    $b = [IO.File]::ReadAllBytes($path)
+    if ($b.Length -lt 4096 -or [Text.Encoding]::ASCII.GetString($b, 0, 8) -ne "ANDROID!") { Fail "$what is not an Android boot image: $path" }
+    $kSize = [long][BitConverter]::ToUInt32($b, 8)
+    $rSize = [long][BitConverter]::ToUInt32($b, 16)
+    $page = [long][BitConverter]::ToUInt32($b, 36)
+    if ($page -lt 2048 -or $page -gt 16384 -or ($page -band ($page - 1)) -ne 0) { Fail "$what has an unexpected page size ($page)." }
+    $kOff = $page
+    $rOff = $kOff + [long][Math]::Ceiling($kSize / $page) * $page
+    if ($kSize -le 0 -or $rSize -le 0 -or ($rOff + $rSize) -gt $b.Length) { Fail "$what is truncated or its header is invalid." }
+    return [pscustomobject]@{
+        Bytes       = $b
+        PageSize    = $page
+        KernelAddr  = [BitConverter]::ToUInt32($b, 12)
+        RamdiskAddr = [BitConverter]::ToUInt32($b, 20)
+        SecondSize  = [BitConverter]::ToUInt32($b, 24)
+        SecondAddr  = [BitConverter]::ToUInt32($b, 28)
+        TagsAddr    = [BitConverter]::ToUInt32($b, 32)
+        DtSize      = [BitConverter]::ToUInt32($b, 40)
+        Kernel      = (Copy-Bytes $b $kOff $kSize)
+        Ramdisk     = (Copy-Bytes $b $rOff $rSize)
+    }
+}
+
+# The id mkbootimg stores in the header: SHA-1 over each part followed by its 32-bit size.
+function Get-BootImageId([byte[]]$kernel, [byte[]]$ramdisk) {
+    $sha = [Security.Cryptography.SHA1]::Create()
+    try {
+        foreach ($part in @($kernel, $ramdisk, (New-Object byte[] 0))) {
+            if ($part.Length -gt 0) { [void]$sha.TransformBlock($part, 0, $part.Length, $null, 0) }
+            [void]$sha.TransformBlock([BitConverter]::GetBytes([uint32]$part.Length), 0, 4, $null, 0)
+        }
+        [void]$sha.TransformFinalBlock((New-Object byte[] 0), 0, 0)
+        return , $sha.Hash
+    } finally { $sha.Dispose() }
+}
+
+# "Linux version ..." line of a kernel taken from a boot image (zImage with a gzip payload).
+function Get-KernelVersion([byte[]]$kernel) {
+    $buf = New-Object byte[] (32MB)
+    $limit = [Math]::Min($kernel.Length - 3, 131072)
+    for ($i = 0; $i -lt $limit; $i++) {
+        if ($kernel[$i] -ne 0x1F -or $kernel[$i + 1] -ne 0x8B -or $kernel[$i + 2] -ne 8) { continue }
+        $n = 0
+        $ms = New-Object IO.MemoryStream -ArgumentList @($kernel, $i, ($kernel.Length - $i), $false)
+        $gz = New-Object IO.Compression.GZipStream -ArgumentList @($ms, [IO.Compression.CompressionMode]::Decompress)
+        try {
+            while ($n -lt $buf.Length) {
+                $r = $gz.Read($buf, $n, $buf.Length - $n)
+                if ($r -le 0) { break }
+                $n += $r
+            }
+        } catch {} finally { $gz.Dispose(); $ms.Dispose() }
+        if ($n -gt 0) {
+            $m = [regex]::Match([Text.Encoding]::ASCII.GetString($buf, 0, $n), "Linux version [\x20-\x7e]+")
+            if ($m.Success) { return $m.Value }
+        }
+    }
+    return "(version not found)"
+}
+
+# The TWRP image the flash steps write: the guide's, or the one built by 'own-twrp'.
+function Get-TwrpImage {
+    $s = Get-State
+    if ($s.ContainsKey("twrp-own-kernel-sha256")) {
+        $own = Join-Path $Work "twrp-own-kernel.img"
+        if (-not (Test-Path $own)) { Fail "twrp-own-kernel.img is missing: run 'own-twrp' again." }
+        if ((Sha $own) -ne $s["twrp-own-kernel-sha256"]) { Fail "twrp-own-kernel.img does not match the checksum recorded by 'own-twrp': run 'own-twrp' again." }
+        return $own
+    }
+    $twrp = Join-Path $Work "hack\recovery.img"
+    if (-not (Test-Path $twrp)) { Fail "TWRP missing: run 'prepare'." }
+    if ((Sha $twrp) -ne $Known.Twrp.Sha) { Fail "TWRP checksum mismatch." }
+    return $twrp
+}
+
 function Get-FlashTool {
     $exe = Get-ChildItem -Path $Work -Filter flash_tool.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $exe) { return $null }
@@ -229,6 +319,7 @@ function Step-Status {
     Say ("MediaTek driver installed: " + $(if (Test-MtkDriver) { "yes" } else { "no" }))
     $tool = Get-FlashTool
     Say ("SP Flash Tool: " + $(if ($tool) { $tool } else { "missing" }))
+    Say ("TWRP image for the flash steps: " + $(if ($s.ContainsKey("twrp-own-kernel-sha256")) { "twrp-own-kernel.img (built by 'own-twrp' around this robot's kernel)" } else { "hack\recovery.img (the guide's)" }))
     $adb = $null
     try { $adb = Get-Adb } catch {}
     if ($adb) { Say ("adb state: " + $(Get-AdbState)) }
@@ -365,12 +456,72 @@ function Step-Backup {
     Ok "backup done. Next: flash-twrp"
 }
 
+# SKMC 1100 A1: its kernel (2022) is newer than the one inside the guide's TWRP (2018). This step
+# builds, on the PC, a TWRP image made of the guide's TWRP (header and ramdisk, unchanged) and the
+# robot's own kernel and device tree, taken from the boot backup. Nothing is sent to the robot;
+# flash-twrp and flash-root then write this image instead of hack\recovery.img.
+function Step-OwnTwrp {
+    $s = Get-State
+    if (-not $s.ContainsKey("done-backup")) { Fail "Run 'backup' first: the image is built from the robot's own boot backup." }
+    $boot = Join-Path $Backup "boot-original.img"
+    Test-BootImage $boot "boot-original.img"
+    if ((Sha $boot) -ne $s["boot-original-sha256"]) { Fail "boot-original.img no longer matches the checksum recorded by 'backup': do not continue." }
+    $twrp = Join-Path $Work "hack\recovery.img"
+    if (-not (Test-Path $twrp)) { Fail "TWRP missing: run 'prepare'." }
+    if ((Sha $twrp) -ne $Known.Twrp.Sha) { Fail "TWRP checksum mismatch." }
+
+    $r = Read-BootImage $boot "boot-original.img"
+    $t = Read-BootImage $twrp "TWRP"
+    Say ("Robot kernel: " + (Get-KernelVersion $r.Kernel))
+    Say ("TWRP kernel : " + (Get-KernelVersion $t.Kernel))
+    if ((Get-BytesSha $r.Kernel) -eq (Get-BytesSha $t.Kernel)) {
+        Ok "The guide's TWRP already carries this robot's kernel: nothing to build. Next: flash-twrp"
+        return
+    }
+    # Both images must share the same layout, or the robot's bootloader would not load the result.
+    foreach ($f in "PageSize", "KernelAddr", "RamdiskAddr", "SecondAddr", "TagsAddr") {
+        if ($r.$f -ne $t.$f) { Fail ("The robot's boot image and TWRP differ on {0} (0x{1:x} / 0x{2:x}): not building. Report this robot's model and image version." -f $f, $r.$f, $t.$f) }
+    }
+    if ($r.SecondSize -ne 0 -or $t.SecondSize -ne 0 -or $r.DtSize -ne 0 -or $t.DtSize -ne 0) { Fail "A second stage or a separate device tree is present: not handled, not building." }
+    foreach ($p in $r.Kernel, $r.Ramdisk, $t.Kernel, $t.Ramdisk) {
+        if ([BitConverter]::ToUInt32($p, 0) -eq 0x58881688) { Fail "MediaTek sub-header found in one of the images: not handled, not building." }
+    }
+    if ([BitConverter]::ToUInt32($r.Kernel, 0x24) -ne 0x016F2818) { Fail "The robot's kernel is not an ARM zImage: not building." }
+    if ($t.Ramdisk[0] -ne 0x1F -or $t.Ramdisk[1] -ne 0x8B) { Fail "TWRP's ramdisk is not gzip: not building." }
+
+    $page = $t.PageSize
+    $kPad = [long][Math]::Ceiling($r.Kernel.Length / $page) * $page
+    $rPad = [long][Math]::Ceiling($t.Ramdisk.Length / $page) * $page
+    $size = $page + $kPad + $rPad
+    if ($size -gt $PartitionSize) { Fail ("The result would be {0} bytes: larger than the partition." -f $size) }
+    $img = New-Object byte[] $size
+    [Array]::Copy($t.Bytes, 0, $img, 0, $page)                                           # TWRP's header: command line, load addresses
+    [Array]::Copy([BitConverter]::GetBytes([uint32]$r.Kernel.Length), 0, $img, 8, 4)     # kernel_size
+    [Array]::Copy([BitConverter]::GetBytes([uint32]$t.Ramdisk.Length), 0, $img, 16, 4)   # ramdisk_size
+    [Array]::Clear($img, 576, 32)
+    [Array]::Copy((Get-BootImageId $r.Kernel $t.Ramdisk), 0, $img, 576, 20)              # id
+    [Array]::Copy($r.Kernel, 0, $img, $page, $r.Kernel.Length)                           # the robot's kernel and device tree
+    [Array]::Copy($t.Ramdisk, 0, $img, $page + $kPad, $t.Ramdisk.Length)                 # TWRP itself
+    $out = Join-Path $Work "twrp-own-kernel.img"
+    [IO.File]::WriteAllBytes($out, $img)
+
+    # Read the result back from disk and compare each part with its source.
+    $o = Read-BootImage $out "twrp-own-kernel.img"
+    if ((Get-BytesSha $o.Kernel) -ne (Get-BytesSha $r.Kernel) -or (Get-BytesSha $o.Ramdisk) -ne (Get-BytesSha $t.Ramdisk)) {
+        Remove-Item -Force $out
+        Fail "The image written does not read back correctly: nothing to flash."
+    }
+    Set-State "twrp-own-kernel-sha256" (Sha $out)
+    Set-State "done-own-twrp" (Get-Date).ToString("s")
+    Ok ("TWRP with this robot's own kernel: $out ({0} bytes). 'flash-twrp' and 'flash-root' will write it instead of hack\recovery.img." -f $size)
+    Ok "own-twrp done. Next: flash-twrp"
+}
+
 function Step-FlashTwrp {
     if (-not (Get-State).ContainsKey("done-backup")) { Fail "Run 'backup' first: never flash without the backups." }
-    $twrp = Join-Path $Work "hack\recovery.img"
-    if ((Sha $twrp) -ne $Known.Twrp.Sha) { Fail "TWRP checksum mismatch." }
+    $twrp = Get-TwrpImage
     $cfg = Write-DownloadConfig "flash-twrp" $twrp ""
-    $code = Invoke-FlashTool $cfg "TWRP into boot"
+    $code = Invoke-FlashTool $cfg ("TWRP into boot (" + (Split-Path $twrp -Leaf) + ")")
     if ($code -ne 0) { Fail ("SP Flash Tool reported an error ($code). Use the GUI: AGENTS.md, 'GUI fallback: Download Only' with boot = $twrp only.") }
     Set-State "done-flash-twrp" (Get-Date).ToString("s")
     Human "Switch the robot OFF, UNPLUG the USB cable, switch it ON: TWRP (a blue/black recovery screen) appears. Then plug the cable back in. (Switched on with the cable in, the robot stops on a battery screen.)"
@@ -417,9 +568,9 @@ function Step-FlashRoot {
     if (-not (Get-State).ContainsKey("done-root")) { Fail "Run 'root' first." }
     $patched = Join-Path $Work "boot-magisk.img"
     Test-BootImage $patched "boot-magisk.img"
-    $twrp = Join-Path $Work "hack\recovery.img"
+    $twrp = Get-TwrpImage
     $cfg = Write-DownloadConfig "flash-root" $patched $twrp
-    $code = Invoke-FlashTool $cfg "Magisk boot into boot, TWRP into recovery"
+    $code = Invoke-FlashTool $cfg ("Magisk boot into boot, TWRP into recovery (" + (Split-Path $twrp -Leaf) + ")")
     if ($code -ne 0) { Fail ("SP Flash Tool reported an error ($code). Use the GUI: AGENTS.md, 'GUI fallback: Download Only' with boot = $patched and recovery = $twrp.") }
     Set-State "done-flash-root" (Get-Date).ToString("s")
     Human "Switch the robot OFF, UNPLUG the USB cable, switch it ON: the stock Monsieur Cuisine app starts. Then plug the cable back in."
@@ -547,6 +698,7 @@ switch ($Step) {
     "prepare" { Step-Prepare }
     "driver" { Step-Driver }
     "backup" { Step-Backup }
+    "own-twrp" { Step-OwnTwrp }
     "flash-twrp" { Step-FlashTwrp }
     "root" { Step-Root }
     "flash-root" { Step-FlashRoot }

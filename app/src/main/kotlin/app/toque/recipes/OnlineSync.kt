@@ -13,6 +13,7 @@ import app.toque.core.json.obj
 import app.toque.core.json.str
 import app.toque.core.recipes.McOnline
 import app.toque.core.recipes.Recipe
+import app.toque.core.recipes.UserRecipes
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -39,14 +40,36 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
 
     fun sync(progress: (String) -> Unit = {}): LidlSync.Report {
         if (!running.compareAndSet(false, true)) return LidlSync.Report(false, tr("Synchronisation déjà en cours"))
+        // L'avancement est aussi publié pour l'écran des Réglages, qu'il ait lancé cette synchro ou non (synchro de nuit).
+        val both: (String) -> Unit = { SyncProgress.report(it); progress(it) }
         try {
-            return finish(run(progress))
+            return finish(run(both))
+        } catch (e: Stopped) {
+            // Ce qui est fait est gardé et la prochaine synchro reprend là. L'heure de la dernière synchro
+            // n'est pas touchée, pour que celle de la nuit termine le travail.
+            val r = LidlSync.Report(false, tr("Synchronisation arrêtée"))
+            // Des fiches ont été enregistrées sans recharger le catalogue : le faire maintenant, sans attendre.
+            if (dirty) repo.load()
+            prefs.lastSyncResult = SimpleDateFormat(tr("dd/MM à HH:mm"), I18n.locale).format(Date()) + " : " + r.message
+            log.write("synchro", r.message)
+            return r
         } catch (e: Exception) {
             log.crash("synchro", e)
             return finish(LidlSync.Report(false, tr("Synchronisation impossible : %s", e.message ?: e.toString())))
         } finally {
             running.set(false)
+            SyncProgress.finished()
         }
+    }
+
+    /** Arrêt demandé depuis les Réglages (bouton Arrêter). */
+    private class Stopped : Exception()
+
+    /** Des recettes ont été enregistrées pendant cette synchronisation. */
+    private var dirty = false
+
+    private fun checkStop() {
+        if (SyncProgress.stopRequested) throw Stopped()
     }
 
     private fun run(progress: (String) -> Unit): LidlSync.Report {
@@ -91,6 +114,10 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
         val todoIds = todo.map { it.apiId }.toHashSet()
         val rescored = ArrayList<Recipe>()
         for (e in entries) {
+            if (SyncProgress.stopRequested) {
+                save(rescored, index, language)
+                throw Stopped()
+            }
             val key = e.apiId.toString()
             if (e.apiId in todoIds || index[key] == e.stamp) continue
             val r = repo.get(McOnline.toqueId(e.apiId)) ?: continue
@@ -103,6 +130,10 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
         var failures = 0
         var inARow = 0
         for ((i, e) in todo.withIndex()) {
+            if (SyncProgress.stopRequested) {
+                save(batch, index, language)
+                throw Stopped()
+            }
             progress(tr("Recettes : %d / %d", i + 1, todo.size))
             try {
                 val lang = e.language.ifBlank { language }
@@ -123,16 +154,20 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
             pause(250)
         }
         save(batch, index, language)
+        checkStop()
 
         // 3. Le catalogue suit la liste du site (recettes retirées supprimées). Les recettes perso
         // ne sont jamais touchées (voir RecipeRepo.removeAllExcept).
         val kept = entries.map { it.apiId.toString() }.toHashSet()
         if (foreignFailed) kept += stored.recipes.keys
         val keep = kept.mapNotNull { it.toLongOrNull()?.let(McOnline::toqueId) }.toHashSet()
+        val removes = present.any { it !in keep && !UserRecipes.isUser(it) }
         repo.removeAllExcept(keep, rebuild = false)
         index.keys.retainAll(kept)
         writeIndex(language, index)
-        repo.refresh()
+        // Rien d'enregistré ni de retiré : le catalogue en mémoire est déjà le bon. Le recharger prend une
+        // vingtaine de secondes sur le robot, pendant lesquelles un arrêt demandé ne peut pas être pris en compte.
+        if (dirty || removes) repo.refresh()
 
         // 4. Photos manquantes.
         photos(keep, progress)
@@ -154,6 +189,7 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
             pages = p.totalPages.coerceIn(1, 1000)
             out += p.entries
             progress(page, pages)
+            checkStop()
             page++
             pause(300)
         }
@@ -161,7 +197,10 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
     }
 
     private fun save(batch: MutableList<Recipe>, index: Map<String, String>, language: String) {
-        if (batch.isNotEmpty()) repo.upsertAll(ArrayList(batch), rebuild = false)
+        if (batch.isNotEmpty()) {
+            repo.upsertAll(ArrayList(batch), rebuild = false)
+            dirty = true
+        }
         batch.clear()
         writeIndex(language, index)
     }
@@ -169,11 +208,13 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
     private fun photos(ids: Collection<String>, progress: (String) -> Unit) {
         val missing = ArrayList<String>()
         for (id in ids) {
+            checkStop()
             val url = repo.get(id)?.image ?: continue
             if (url.startsWith("http") && repo.imageFile(url) == null) missing += url
         }
         var inARow = 0
         for ((i, url) in missing.withIndex()) {
+            checkStop()
             progress(tr("Photos : %d / %d", i + 1, missing.size))
             try {
                 savePhoto(url)

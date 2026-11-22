@@ -58,8 +58,11 @@ object Ui {
 
     fun round(color: Int, radius: Float, strokeColor: Int = 0, strokeWidth: Float = 0f): GradientDrawable =
         GradientDrawable().apply {
-            setColor(color)
+            // Le rayon avant la couleur : sous Android 6, setCornerRadius ne recalcule pas l'opacité.
+            // Dans l'autre ordre, la forme se dit opaque sur tout son rectangle, et l'effet d'appui
+            // dont elle est le masque (voir pressable) éclaire un carré au lieu du bouton arrondi.
             setCornerRadius(uf(radius))
+            setColor(color)
             if (strokeWidth > 0) setStroke(u(strokeWidth), strokeColor)
         }
 
