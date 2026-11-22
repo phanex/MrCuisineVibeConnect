@@ -16,7 +16,7 @@ import java.util.Date
 import java.util.Locale
 
 /** Balance intégrée avec panneau d'historique des pesées et auto-enregistrement. */
-class ScaleScreen(a: MainActivity) : Screen(a) {
+class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null) : Screen(a) {
     override val title = tr("Balance")
     override val keepAwake: Boolean get() = true
 
@@ -144,15 +144,7 @@ class ScaleScreen(a: MainActivity) : Screen(a) {
         return root
     }
 
-    private fun currentIngredient(): String? {
-        if (a.prefs.guidedRecipe.isBlank()) return null
-        val recipe = a.app.recipes.getAdjusted(a.prefs.guidedRecipe) ?: return null
-        val step = recipe.steps.getOrNull(a.prefs.guidedStep) ?: return null
-        val weighLabel = step.weigh?.label ?: return null
-        val trimmed = weighLabel.trim().replace(Regex("\\s+"), " ")
-        if (trimmed.isBlank()) return null
-        return if (trimmed.length > 32) trimmed.take(30) + "…" else trimmed
-    }
+    private fun currentIngredient(): String? = forcedIngredient
 
     private fun recordCurrentWeight() {
         if (lastWeightG == 0) return
@@ -183,8 +175,17 @@ class ScaleScreen(a: MainActivity) : Screen(a) {
             item.setPadding(Ui.u(14), Ui.u(10), Ui.u(14), Ui.u(10))
 
             if (!entry.ingredient.isNullOrBlank()) {
-                val chip = Ui.chip(c, entry.ingredient, Icon.Kind.POT, Ui.WARN, 0x26FFC14D.toInt(), 13f)
-                item.addView(chip, Ui.lp(Ui.WRAP, Ui.WRAP, b = 6))
+                val banner = Ui.horizontal(c, Gravity.CENTER_VERTICAL).apply {
+                    background = Ui.round(0x26FFC14D.toInt(), 10f)
+                    setPadding(Ui.u(10), Ui.u(4), Ui.u(10), Ui.u(4))
+                }
+                banner.addView(Icon(c, Icon.Kind.POT, Ui.WARN), LinearLayout.LayoutParams(Ui.u(16), Ui.u(16)).apply { rightMargin = Ui.u(8) })
+                val ingText = Ui.text(c, entry.ingredient, 13f, Ui.WARN, Ui.MEDIUM).apply {
+                    setSingleLine(true)
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                }
+                banner.addView(ingText, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
+                item.addView(banner, LinearLayout.LayoutParams(Ui.MATCH, Ui.WRAP).apply { bottomMargin = Ui.u(8) })
             }
 
             val r = Ui.horizontal(c, Gravity.CENTER_VERTICAL)

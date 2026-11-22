@@ -88,7 +88,10 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
         weighBox.background = Ui.round(Ui.SURFACE, 22f)
         weighBox.setPadding(Ui.u(20), Ui.u(14), Ui.u(16), Ui.u(14))
         weighBox.isClickable = true
-        weighBox.setOnClickListener { a.push(ScaleScreen(a)) }
+        weighBox.setOnClickListener {
+            val ing = recipe.steps.getOrNull(index)?.weigh?.label ?: recipe.steps.getOrNull(index)?.text?.take(30)
+            a.push(ScaleScreen(a, forcedIngredient = ing))
+        }
         val wRow = Ui.horizontal(c)
         wRow.addView(Icon(c, Icon.Kind.SCALE, Ui.COOL), LinearLayout.LayoutParams(Ui.u(28), Ui.u(28)).apply { rightMargin = Ui.u(12) })
         weighLabel = Ui.ellipsize(Ui.text(c, "", 18f, Ui.TEXT, Ui.MEDIUM).apply { setLineSpacing(0f, 1.15f) }, lines = 3)
