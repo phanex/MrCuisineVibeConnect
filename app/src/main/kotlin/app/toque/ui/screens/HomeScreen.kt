@@ -149,7 +149,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
             setOnClickListener { a.push(RecipesScreen(a, initialUsage = RecipesScreen.Usage.MOST)) }
         }
         shortcuts.addView(freqBtn, LinearLayout.LayoutParams(Ui.u(50), Ui.u(50)))
-        left.addView(shortcuts, Ui.lp(Ui.MATCH, Ui.WRAP, t = 16))
+        left.addView(shortcuts, Ui.lp(Ui.MATCH, Ui.WRAP, t = 28))
 
         resumeCard = Ui.horizontal(c, Gravity.CENTER_VERTICAL).apply {
             minimumHeight = Ui.u(50)
@@ -172,7 +172,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
             val r = a.app.recipes.getAdjusted(a.prefs.guidedRecipe)
             if (r != null) a.push(CookScreen(a, r, a.prefs.guidedStep)) else { a.prefs.guidedRecipe = ""; refresh() }
         }
-        left.addView(resumeCard, Ui.lp(Ui.MATCH, Ui.u(50), t = 16))
+        left.addView(resumeCard, Ui.lp(Ui.MATCH, Ui.u(50), t = 28))
 
         // Рівномірний простір зверху (ваги строго по центру між верхнім слотом і Турбо)
         left.addView(Ui.spacer(c, weight = 1f))

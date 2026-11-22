@@ -43,9 +43,16 @@ abstract class Screen(val a: MainActivity) {
 /** Barre supérieure : retour, titre, état de la base, heure. */
 class TopBar(private val a: MainActivity) : LinearLayout(a) {
     private val back = Icon(a, Icon.Kind.BACK, Ui.TEXT)
-    private val titleBox = Ui.horizontal(a, Gravity.CENTER_VERTICAL)
-    private val titleView = Ui.ellipsize(Ui.text(a, "", 24f, Ui.TEXT, Ui.MEDIUM))
-    private val counterView = Ui.text(a, "", 18f, Ui.TEXT2, Ui.LIGHT)
+    private val titleBox = LinearLayout(a).apply {
+        orientation = HORIZONTAL
+        isBaselineAligned = true
+    }
+    private val titleView = Ui.ellipsize(Ui.text(a, "", 24f, Ui.TEXT, Ui.MEDIUM)).apply {
+        includeFontPadding = false
+    }
+    private val counterView = Ui.text(a, "", 18f, Ui.TEXT2, Ui.LIGHT).apply {
+        includeFontPadding = false
+    }
     private val tempIcon = Icon(a, Icon.Kind.THERMO, Ui.TEXT2)
     private val tempText = Ui.text(a, "", 28f, Ui.TEXT, Ui.THIN)
     private val tempBox = Ui.horizontal(a, Gravity.CENTER_VERTICAL).apply {
@@ -83,9 +90,12 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
         addView(home, LayoutParams(Ui.u(48), Ui.u(48)).apply { leftMargin = Ui.u(20) })
 
         titleBox.addView(titleView)
-        titleBox.addView(counterView, LayoutParams(Ui.WRAP, Ui.WRAP).apply { leftMargin = Ui.u(12) })
+        titleBox.addView(counterView, LayoutParams(Ui.WRAP, Ui.WRAP).apply { leftMargin = Ui.u(10) })
         counterView.visibility = View.GONE
-        addView(titleBox, LayoutParams(0, Ui.WRAP, 1f).apply { leftMargin = Ui.u(28) })
+        addView(titleBox, LayoutParams(0, Ui.WRAP, 1f).apply {
+            leftMargin = Ui.u(28)
+            gravity = Gravity.CENTER_VERTICAL
+        })
 
         // Indicateurs et horloge à droite
         addView(lid, Ui.lp(Ui.WRAP, Ui.WRAP, r = 16))
