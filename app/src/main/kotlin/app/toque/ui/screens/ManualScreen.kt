@@ -299,7 +299,7 @@ class ManualScreen(
             val w = s.weightG
             val sign = if (w < 0) "- " else ""
             val formatted = String.format(java.util.Locale.FRENCH, "%,d", Math.abs(w)).replace('\u00A0', ' ')
-            weight.text = "$sign$formatted г"
+            weight.text = "$sign$formatted g"
             weightIcon.visibility = View.VISIBLE
         } else {
             weight.text = tr("Base non connectée")

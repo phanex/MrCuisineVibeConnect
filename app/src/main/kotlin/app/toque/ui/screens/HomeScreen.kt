@@ -174,7 +174,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         }
         left.addView(resumeCard, Ui.lp(Ui.MATCH, Ui.u(50), t = 28))
 
-        // Рівномірний простір зверху (ваги строго по центру між верхнім слотом і Турбо)
+        // Espacement flexible supérieur (pesée centrée entre le bandeau et Turbo)
         left.addView(Ui.spacer(c, weight = 1f))
 
         // Rangée 2 : Affichage de pesée grand format (sans cadre)
@@ -182,7 +182,15 @@ class HomeScreen(a: MainActivity) : Screen(a) {
             clipChildren = false
             clipToPadding = false
         }
-        scaleRow.addView(Icon(c, Icon.Kind.SCALE, Ui.TEXT2), LinearLayout.LayoutParams(Ui.u(38), Ui.u(38)).apply {
+        val weightArea = Ui.horizontal(c, Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply {
+            clipChildren = false
+            clipToPadding = false
+        }
+        val weightCluster = Ui.horizontal(c, Gravity.BOTTOM).apply {
+            clipChildren = false
+            clipToPadding = false
+        }
+        weightCluster.addView(Icon(c, Icon.Kind.SCALE, Ui.TEXT2), LinearLayout.LayoutParams(Ui.u(38), Ui.u(38)).apply {
             rightMargin = Ui.u(14)
             bottomMargin = Ui.u(-2)
         })
@@ -201,7 +209,9 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         weightBox.addView(weightUnit, LinearLayout.LayoutParams(Ui.WRAP, Ui.WRAP).apply {
             leftMargin = Ui.u(6)
         })
-        scaleRow.addView(weightBox, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
+        weightCluster.addView(weightBox)
+        weightArea.addView(weightCluster, Ui.lp(Ui.WRAP, Ui.WRAP))
+        scaleRow.addView(weightArea, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
 
         val tareBtn = Ui.vertical(c, Gravity.CENTER).apply {
             setPadding(Ui.u(14), Ui.u(8), Ui.u(14), Ui.u(8))
@@ -216,7 +226,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         scaleRow.setOnClickListener { a.push(ScaleScreen(a)) }
         left.addView(scaleRow, Ui.lp(Ui.MATCH, Ui.WRAP))
 
-        // Рівномірний простір знизу (рівно 1f, як і зверху)
+        // Espacement flexible inférieur
         left.addView(Ui.spacer(c, weight = 1f))
 
         // Rangée 3 : Bouton Turbo instantané à maintien (calé en bas, flush avec les cartes de droite)

@@ -51,7 +51,7 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
         val root = Ui.horizontal(c, Gravity.TOP)
         root.setPadding(Ui.u(24), Ui.u(10), Ui.u(24), Ui.u(20))
 
-        // --- Ліва частина : Велике табло та органи керування ---
+        // Panneau gauche : grand affichage et commandes
         val left = Ui.vertical(c, Gravity.CENTER_HORIZONTAL)
         left.addView(Ui.spacer(c, weight = 1f), LinearLayout.LayoutParams(1, 0, 1f))
 
@@ -111,7 +111,7 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
 
         root.addView(left, LinearLayout.LayoutParams(0, Ui.MATCH, 1f).apply { rightMargin = Ui.u(20) })
 
-        // --- Права частина : Панель історії зважувань ---
+        // Panneau droit : historique des pesées
         val panel = Ui.vertical(c)
         panel.background = Ui.round(Ui.SURFACE, 26f)
         panel.setPadding(Ui.u(20), Ui.u(16), Ui.u(20), Ui.u(16))
@@ -173,7 +173,7 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
         historyList.gravity = Gravity.BOTTOM
         clearBtn.visibility = View.VISIBLE
 
-        // Записи йдуть знизу нагору: найстаріші згори, найновіші знизу
+        // Entrées empilées chronologiquement
         for (i in history.indices) {
             val entry = history[i]
             val item = Ui.vertical(c)
@@ -212,7 +212,7 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
             historyList.addView(item, Ui.lp(b = 8))
         }
 
-        // Автоскрол до останнього заміру внизу
+        // Défilement automatique vers la dernière mesure en bas
         historyScroll.post {
             historyScroll.fullScroll(View.FOCUS_DOWN)
         }
@@ -243,7 +243,7 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
         textView.text = txt
         textView.setTextColor(col)
 
-        // --- Автоматична фіксація заміру при спокої > 5 сек ---
+        // Enregistrement automatique après stabilisation > 5s
         if (s.scaleStable && s.weightG >= 10) {
             val now = System.currentTimeMillis()
             if (kotlin.math.abs(s.weightG - pendingAutoWeight) > 5) {

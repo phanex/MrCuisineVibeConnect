@@ -18,7 +18,7 @@ object TextNorm {
         "el", "los", "las", "unos", "unas", "del", "con", "por", "para", "al", "receta", "recetas",
         // Polski (PL)
         "w", "z", "na", "do", "dla", "i", "oraz", "o", "po", "ze", "za", "od", "pod", "nad", "przepis", "przepisy",
-        // Українська (UK)
+        // Ukrainian (UK)
         "і", "й", "та", "в", "у", "на", "з", "із", "зі", "до", "для", "по", "за", "про", "від", "під", "над",
         "як", "що", "або", "чи", "не", "це", "рецепт", "рецепти",
     )
