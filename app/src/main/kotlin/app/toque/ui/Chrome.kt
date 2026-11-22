@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.drawable.InsetDrawable
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
@@ -46,12 +47,12 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
     private val temp = Ui.chip(a, "", Icon.Kind.THERMO, Ui.TEXT2)
     private val lid = Ui.chip(a, tr("Couvercle ouvert"), Icon.Kind.LID, Ui.WARN, 0x33FFC14D)
     private val link = Ui.chip(a, "", Icon.Kind.LINK, Ui.TEXT2)
-    private val clock = Ui.text(a, "", 22f, Ui.TEXT, Ui.LIGHT)
-    private val home = Icon(a, Icon.Kind.HOME, Ui.TEXT2)
+    private val clock = Ui.chip(a, "", Icon.Kind.CLOCK, Ui.TEXT)
+    private val home = Icon(a, Icon.Kind.HOME, Ui.TEXT)
     private val handler = Handler(Looper.getMainLooper())
     private val tick = object : Runnable {
         override fun run() {
-            clock.text = MainActivity.now()
+            Ui.chipText(clock).text = MainActivity.now()
             handler.postDelayed(this, 10_000)
         }
     }
@@ -63,18 +64,14 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
         setGravity(Gravity.CENTER_VERTICAL)
         setPadding(Ui.u(10), 0, Ui.u(18), 0)
         // Transparente : le dégradé du fond passe aussi derrière la barre du haut.
-        back.setPadding(Ui.u(10), Ui.u(10), Ui.u(10), Ui.u(10))
-        back.background = Ui.pressable(Ui.round(0, 30f), 30f)
-        back.setOnClickListener { a.back() }
+        roundButton(back) { a.back() }
         addView(back, LayoutParams(Ui.u(52), Ui.u(52)))
         addView(titleView, LayoutParams(0, Ui.WRAP, 1f).apply { leftMargin = Ui.u(6) })
         addView(lid, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
         addView(temp, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
-        addView(link, Ui.lp(Ui.WRAP, Ui.WRAP, r = 16))
-        addView(clock, Ui.lp(Ui.WRAP, Ui.WRAP, r = 6))
-        home.setPadding(Ui.u(10), Ui.u(10), Ui.u(10), Ui.u(10))
-        home.background = Ui.pressable(Ui.round(0, 30f), 30f)
-        home.setOnClickListener { a.home() }
+        addView(link, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
+        addView(clock, Ui.lp(Ui.WRAP, Ui.WRAP, r = 8))
+        roundButton(home) { a.home() }
         addView(home, LayoutParams(Ui.u(52), Ui.u(52)))
         lid.visibility = View.GONE
         temp.visibility = View.GONE
@@ -87,6 +84,14 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
                 a.openAndroidSettings()
             }
         }
+    }
+
+    /** Bouton rond de 44 au centre d'une zone tactile de 52, de la même famille que les pastilles ; l'icône fait 26. */
+    private fun roundButton(icon: Icon, onClick: () -> Unit) {
+        icon.background = InsetDrawable(Ui.pressable(Ui.round(Ui.SURFACE2, 22f, Ui.STROKE, 1f), 22f), Ui.u(4))
+        // Après le fond : un fond qui porte une marge impose sinon la sienne à la vue.
+        icon.setPadding(Ui.u(13), Ui.u(13), Ui.u(13), Ui.u(13))
+        icon.setOnClickListener { onClick() }
     }
 
     fun startClock() {
@@ -269,7 +274,11 @@ class MachineBar(private val a: MainActivity) : FrameLayout(a) {
         time.text = if (st == JobState.FINISHED) "00:00" else Ui.clock(s.remainingMs)
         progress.progress = if (s.totalMs > 0) s.elapsedMs.toFloat() / s.totalMs else 0f
         progress.color = if (s.jobTempLevel > 0) Ui.ACCENT else Ui.COOL
-        Ui.chipText(speedChip).text = if (s.jobKind == "STEAM") tr("Vapeur") else tr("Vitesse %d", s.jobSpeed)
+        Ui.chipText(speedChip).text = when {
+            s.jobKind == "STEAM" -> tr("Vapeur")
+            s.jobKind == "MANUAL" && s.jobSpeed == 0 -> tr("Sans mélange")
+            else -> tr("Vitesse %d", s.jobSpeed)
+        }
         tempChip.visibility = if (s.jobTempLevel > 0) View.VISIBLE else View.GONE
         Ui.chipText(tempChip).text = "${Mcc.celsiusForLevel(s.jobTempLevel)} °C"
         dirChip.visibility = if (s.jobReverse && s.jobKind == "MANUAL") View.VISIBLE else View.GONE

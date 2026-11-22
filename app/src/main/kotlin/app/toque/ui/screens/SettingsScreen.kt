@@ -5,6 +5,7 @@ import android.graphics.drawable.ColorDrawable
 import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
@@ -22,6 +23,7 @@ import app.toque.core.time.ZoneLookup
 import app.toque.core.update.Release
 import app.toque.recipes.LidlSync
 import app.toque.recipes.OnlineSync
+import app.toque.recipes.SyncProgress
 import app.toque.recipes.RecipeFiles
 import app.toque.core.recipes.UserRecipes
 import app.toque.ui.Icon
@@ -39,12 +41,14 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
     private lateinit var host: EditText
     private lateinit var port: EditText
     private lateinit var syncText: TextView
+    private lateinit var syncBtn: View
+    private lateinit var stopSyncBtn: View
+    private lateinit var importBtn: View
     private lateinit var bowlText: TextView
     private lateinit var linkText: TextView
     private lateinit var timeText: TextView
     private var settingTime = false
     private var mode = a.prefs.mode
-    private var syncing = false
 
     private enum class Upd { IDLE, CHECKING, UP_TO_DATE, AVAILABLE, ERROR }
     private val updater by lazy { Updater(a) }
@@ -152,14 +156,18 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         syncText = Ui.text(c, "", 16f, Ui.TEXT)
         lidl.addView(syncText, Ui.lp(t = 10))
         val b1 = Ui.horizontal(c)
-        b1.addView(Ui.button(c, tr("Synchroniser"), Ui.Style.PRIMARY, Icon.Kind.SYNC, height = 58) { sync(online = true) }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
+        syncBtn = Ui.button(c, tr("Synchroniser"), Ui.Style.PRIMARY, Icon.Kind.SYNC, height = 58) { sync(online = true) }
+        b1.addView(syncBtn, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
+        // Visible seulement pendant une synchronisation ; ce qui est déjà fait est gardé.
+        stopSyncBtn = Ui.button(c, tr("Arrêter"), Ui.Style.SECONDARY, Icon.Kind.STOP, height = 58) { SyncProgress.requestStop() }
+        b1.addView(stopSyncBtn)
         lidl.addView(b1, Ui.lp(t = 12))
         lidl.addView(Ui.text(c, tr("Autre source : les recettes déjà présentes dans l'appli d'origine du robot (remplacent celles du site)."),
             14f, Ui.TEXT3).apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 12))
         // Un bouton par ligne : côte à côte, « Ouvrir l'appli d'origine » n'avait plus la place et
         // son texte se coupait au milieu d'un mot.
-        lidl.addView(Ui.button(c, tr("Importer de l'appli d'origine"), Ui.Style.SECONDARY, height = 52) { sync(online = false) },
-            Ui.lp(Ui.WRAP, Ui.WRAP, t = 6))
+        importBtn = Ui.button(c, tr("Importer de l'appli d'origine"), Ui.Style.SECONDARY, height = 52) { sync(online = false) }
+        lidl.addView(importBtn, Ui.lp(Ui.WRAP, Ui.WRAP, t = 6))
         lidl.addView(Ui.button(c, tr("Ouvrir l'appli d'origine"), Ui.Style.GHOST, Icon.Kind.LINK, height = 52) { a.openVendorApp() },
             Ui.lp(Ui.WRAP, Ui.WRAP, t = 8))
         lidl.addView(toggle(tr("Synchro automatique chaque nuit"), a.prefs.autoSync) { a.prefs.autoSync = it }, Ui.lp(t = 10))
@@ -262,7 +270,26 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         box.addView(label, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
         box.addView(Icon(c, Icon.Kind.CHEVRON, Ui.TEXT2).apply { rotation = 90f }, LinearLayout.LayoutParams(Ui.u(22), Ui.u(22)))
         box.isClickable = true
+        // Poser le doigt hors de la liste la ferme, y compris sur la case elle-même, qui reçoit aussi cet
+        // appui : il faut s'en souvenir, sinon le même appui la rouvre aussitôt.
+        var shown: PopupWindow? = null
+        var boxDownAt = 0L
+        var closedByDownAt = -1L
+        box.setOnTouchListener { _, e ->
+            if (e.actionMasked == MotionEvent.ACTION_DOWN) boxDownAt = e.downTime
+            false
+        }
         box.setOnClickListener {
+            shown?.let {
+                if (it.isShowing) {
+                    it.dismiss()
+                    return@setOnClickListener
+                }
+            }
+            if (closedByDownAt == boxDownAt) {
+                closedByDownAt = -1L
+                return@setOnClickListener
+            }
             val list = Ui.vertical(c)
             list.setPadding(0, Ui.u(6), 0, Ui.u(6))
             val scroll = ScrollView(c).apply {
@@ -289,8 +316,14 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
             }
             popup.setBackgroundDrawable(ColorDrawable(0))
             popup.isOutsideTouchable = true
+            popup.setTouchInterceptor { _, e ->
+                if (e.actionMasked == MotionEvent.ACTION_OUTSIDE) closedByDownAt = e.downTime
+                false
+            }
+            popup.setOnDismissListener { if (shown === popup) shown = null }
             popup.elevation = Ui.uf(8f)
             popup.showAsDropDown(box, 0, Ui.u(6))
+            shown = popup
         }
         return box
     }
@@ -382,21 +415,22 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
     }
 
     private fun sync(online: Boolean) {
-        if (syncing) return
+        if (SyncProgress.running) return
         if (!online && a.prefs.mode != Prefs.Mode.HARDWARE) {
             a.toast(tr("Disponible une fois Toque installé sur le robot (mode Machine réelle)"), Ui.WARN)
             return
         }
-        syncing = true
-        syncText.text = tr("Synchronisation en cours… (quelques minutes)")
+        // L'avancement vit dans SyncProgress, pas dans cet écran : on peut le quitter et y revenir.
+        SyncProgress.start(tr("Synchronisation en cours… (quelques minutes)"), stoppable = online)
+        val app = a.app
         Thread {
-            val r = if (online) OnlineSync(a, a.prefs, a.app.recipes, a.app.log).sync { msg -> view.post { syncText.text = msg } }
-            else LidlSync(a, a.prefs, a.app.recipes, a.app.log).importNow { msg -> view.post { syncText.text = msg } }
-            view.post {
-                syncing = false
-                refreshSync()
-                a.toast(r.message, if (r.ok) Ui.OK else Ui.WARN)
+            val r = if (online) OnlineSync(app, app.prefs, app.recipes, app.log).sync()
+            else try {
+                LidlSync(app, app.prefs, app.recipes, app.log).importNow { SyncProgress.report(it) }
+            } finally {
+                SyncProgress.finished()
             }
+            a.runOnUiThread { a.toast(r.message, if (r.ok) Ui.OK else Ui.WARN) }
         }.start()
     }
 
@@ -437,9 +471,21 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
     }
 
     private fun refreshSync() {
+        val progress = SyncProgress.message
+        val running = progress != null
+        // Pendant une synchronisation : rien à relancer, et un bouton pour l'arrêter.
+        Ui.setButtonEnabled(syncBtn, !running)
+        Ui.setButtonEnabled(importBtn, !running)
+        stopSyncBtn.visibility = if (running && SyncProgress.stoppable) View.VISIBLE else View.GONE
+        Ui.setButtonEnabled(stopSyncBtn, !SyncProgress.stopRequested)
         val last = a.prefs.lastSyncResult
-        syncText.text = (if (last.isEmpty()) tr("Jamais synchronisé") else tr("Dernière synchro le %s", last)) +
-            "\n" + if (a.app.recipes.loaded) tr("%d recettes dans Toque", a.app.recipes.count) else tr("Chargement des recettes…")
+        val first = when {
+            progress == null -> if (last.isEmpty()) tr("Jamais synchronisé") else tr("Dernière synchro le %s", last)
+            SyncProgress.stopRequested -> tr("Arrêt en cours…")
+            else -> progress
+        }
+        // Le nombre de recettes reste affiché sous l'avancement : « Recettes : 343 / 1667 » compte les fiches relues, pas le catalogue.
+        syncText.text = first + "\n" + if (a.app.recipes.loaded) tr("%d recettes dans Toque", a.app.recipes.count) else tr("Chargement des recettes…")
     }
 
     // ------------------------------------------------------------------ mises à jour
@@ -501,17 +547,21 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
 
     /** Désabonnement du suivi des recettes (le nombre s'affiche une fois la base chargée). */
     private var unsubRecipes: (() -> Unit)? = null
+    private var unsubSync: (() -> Unit)? = null
 
     override fun onShow() {
         mode = a.prefs.mode
         renderModes()
-        if (!syncing) refreshSync()
-        unsubRecipes = a.app.recipes.onChange { if (!syncing) refreshSync() }
+        refreshSync()
+        unsubRecipes = a.app.recipes.onChange { refreshSync() }
+        unsubSync = SyncProgress.onChange { refreshSync() }
     }
 
     override fun onHide() {
         unsubRecipes?.invoke()
         unsubRecipes = null
+        unsubSync?.invoke()
+        unsubSync = null
     }
 
     override fun onSnapshot(s: Snapshot) {

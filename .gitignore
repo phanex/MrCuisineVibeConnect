@@ -23,3 +23,7 @@ Recipes
 Recipes-journal
 recipe_images/
 diagnostic-recettes.txt
+# Sur un dépôt insensible à la casse (Windows, macOS), « Recipes » cache aussi les dossiers de
+# code « recipes » : un nouveau fichier y resterait invisible pour git.
+!app/src/**/recipes/
+!core/src/**/recipes/

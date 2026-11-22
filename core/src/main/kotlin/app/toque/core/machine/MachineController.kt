@@ -415,10 +415,13 @@ class MachineController(
         if (j.ended || j.state == JobState.STOPPING) return Verdict.refuse("state", tr("Programme terminé"))
         if (j.spec.kind != JobKind.MANUAL || j.spec.phases.size != 1) return Verdict.refuse("kind", tr("Réglage fixe pour ce programme"))
         val old = j.phase.setting
+        val newSpeed = speed ?: old.speed
+        val newLevel = temperatureLevel ?: old.temperatureLevel
         val s = old.copy(
-            speed = speed ?: old.speed,
-            temperatureLevel = temperatureLevel ?: old.temperatureLevel,
-            direction = direction ?: old.direction,
+            operation = Programs.manualOperation(newSpeed, newLevel),
+            speed = newSpeed,
+            temperatureLevel = newLevel,
+            direction = Programs.manualDirection(newSpeed, direction ?: old.direction),
         )
         val newTotal = totalMs ?: j.spec.totalMs
         val spec = j.spec.copy(
@@ -430,7 +433,8 @@ class MachineController(
         if (newTotal < j.totalElapsed + 1_000) v += Violation("past", tr("Durée déjà écoulée"))
         if (v.isNotEmpty()) return Verdict.refuse(v)
         j.spec = spec
-        if (s.direction != old.direction && j.state == JobState.RUNNING) j.waitingStop = Barrier(seq, now)
+        // Changement de sens, ou passage entre chauffe avec et sans mélange : par un arrêt confirmé.
+        if ((s.direction != old.direction || s.operation != old.operation) && j.state == JobState.RUNNING) j.waitingStop = Barrier(seq, now)
         return Verdict.OK
     }
 
@@ -576,9 +580,10 @@ class MachineController(
         j.phaseIndex = next
         j.phaseElapsed = 0
         val directionChange = !cur.isRest && !nxt.isRest && cur.direction != nxt.direction && nxt.speed > 0
+        val operationChange = !cur.isRest && !nxt.isRest && cur.operation != nxt.operation
         when {
             nxt.isRest && !cur.isRest -> j.waitingStop = Barrier(seq, now)
-            directionChange -> j.waitingStop = Barrier(seq, now)
+            directionChange || operationChange -> j.waitingStop = Barrier(seq, now)
             // Même sens : on passe directement au réglage suivant, après l'avoir revérifié
             // (le contenu a pu chauffer pendant la phase précédente).
             !nxt.isRest -> if (!enterPhase(j, now)) return

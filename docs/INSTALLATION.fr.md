@@ -49,6 +49,17 @@ erreur peut rendre la tablette du robot inutilisable. Lisez tout avant de commen
    `0x1000000`), cliquer sur **Read Back**, puis allumer le robot. On obtient `boot-original.img`
    et `recovery-original.img` (16 Mo chacun) : **à garder précieusement, c'est votre seule voie
    de retour.**
+
+   > **SKMC 1100 A1** (étiquette sous le robot, image système `v4.3a_2022-09-15`) : le TWRP du
+   > guide de référence embarque un noyau de 2018 et ce robot tourne avec un noyau de 2022. Avant
+   > l'étape 4, reconstruire TWRP autour de votre propre noyau : placer les deux sauvegardes dans
+   > `C:\Toque\backup\`, puis lancer
+   > [`tools\setup\toque-setup.ps1`](../tools/setup/toque-setup.ps1) avec `-Step prepare` (il
+   > télécharge et vérifie l'image TWRP ; ses remarques sur le pilote et SP Flash Tool sont sans
+   > importance si vous les avez déjà), `-Step backup` (les fichiers étant déjà là, il se contente
+   > de les vérifier) et `-Step own-twrp`. Ces commandes n'envoient rien au robot. Utiliser ensuite
+   > `C:\Toque\twrp-own-kernel.img` partout où cette page indique `hacks/recovery.img` (étape 4
+   > ci-dessous, et étape 2 de la section suivante).
 4. Onglet **Download**, *Download Only* : cocher uniquement `boot`, avec `hacks/recovery.img`
    (TWRP). Cliquer sur **Download**, puis éteindre et rallumer le robot.
 5. Éteindre le robot, débrancher le câble, rallumer : **TWRP** démarre. Rebrancher le câble :
@@ -97,8 +108,10 @@ pourrait alors accéder au robot.
 2. `powershell -ExecutionPolicy Bypass -File tools\install-robot.ps1`
    (par Wi-Fi : ajouter `-Ip <adresse IP du robot>`).
 3. Le script autorise aussi Toque dans Magisk (aucune fenêtre sur le robot : celle de Magisk se
-   ferme seule au bout de 10 s puis refuse définitivement) et vérifie que la busybox de Magisk,
-   dont Toque a besoin pour le port série, est en place.
+   ferme seule au bout de 10 s puis refuse), installe un script de démarrage qui redonne cette
+   autorisation à chaque allumage (Magisk 31 oublie l'autorisation de toutes les applis à chaque
+   démarrage d'un appareil Android 6), et vérifie que la busybox de Magisk, dont Toque a besoin
+   pour le port série, est en place.
 
 ## 4. Premier essai — bol VIDE
 
