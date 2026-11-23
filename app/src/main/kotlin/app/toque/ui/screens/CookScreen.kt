@@ -16,6 +16,7 @@ import app.toque.core.machine.SafetyPolicy
 import app.toque.core.machine.Snapshot
 import app.toque.core.protocol.Mcc
 import app.toque.core.recipes.Recipe
+import app.toque.core.recipes.StepMachine
 import app.toque.core.recipes.StepProgram
 import app.toque.ui.HoldButton
 import app.toque.ui.Icon
@@ -298,10 +299,14 @@ class CookScreen(a: MainActivity, private var recipe: Recipe, startStep: Int) : 
                         updateStepMachine(picked)
                     })
                 } else {
-                    a.push(RecipeStepScreen(a, recipe, index) { updatedRecipe ->
-                        recipe = updatedRecipe
-                        buildPanel()
-                        onSnapshot(a.snapshot)
+                    a.push(StepEditScreen(a, recipe.steps[index], index + 1, false) { updatedStep ->
+                        if (updatedStep != null) {
+                            val oldSteps = recipe.steps.toMutableList()
+                            oldSteps[index] = updatedStep
+                            recipe = recipe.copy(steps = oldSteps)
+                            buildPanel()
+                            onSnapshot(a.snapshot)
+                        }
                     })
                 }
             }, Ui.lp(t = 8))
