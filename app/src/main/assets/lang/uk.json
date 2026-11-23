@@ -611,5 +611,7 @@
   "… et %d autres": "… та ще %d",
   "Corriger le réglage": "Виправити налаштування",
   "Sommeil profond (veille totale)": "Глибокий сон (повне вимкнення)",
-  "Coupe complètement l'écran et la puissance de la machine. Un appui sur l'écran ou le bouton rotatif la réveille instantanément.": "Повністю вимикає підсвітку екрана та силове живлення комбайна. Дотик до дисплея або коліщатка миттєво пробуджує пристрій."
+  "Coupe complètement l'écran et la puissance de la machine. Un appui sur l'écran ou le bouton rotatif la réveille instantanément.": "Повністю вимикає підсвітку екрана та силове живлення комбайна. Дотик до дисплея або коліщатка миттєво пробуджує пристрій.",
+  "Extinction totale": "Повне вимкнення",
+  "Coupe complètement l'alimentation de la machine et éteint l'écran. L'anneau lumineux est éteint (le réglage ci-dessus ne s'applique pas). Un appui sur l'écran ou la molette la réveille instantanément.": "Повністю знеструмлює силове живлення комбайна та гасить дисплей. Підсвітка коліщатка вимикається (налаштування вище не діє). Дотик до екрана або коліщатка миттєво пробуджує комбайн."
 }

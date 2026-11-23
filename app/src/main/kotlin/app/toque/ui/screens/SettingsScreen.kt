@@ -127,13 +127,13 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         screen.addView(Ui.text(c, tr("Mise en veille"), 18f, Ui.TEXT))
         screen.addView(dropdown(delays, a.prefs.standbyMinutes.toString()) { m -> a.prefs.standbyMinutes = m.toInt() },
             Ui.lp(Ui.MATCH, Ui.u(58), t = 8))
-        screen.addView(toggle(tr("Sommeil profond (veille totale)"), a.prefs.deepSleep) { a.prefs.deepSleep = it }, Ui.lp(t = 12))
-        screen.addView(Ui.text(c, tr("Coupe complètement l'écran et la puissance de la machine. Un appui sur l'écran ou le bouton rotatif la réveille instantanément."),
-            15f, Ui.TEXT3).apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 6))
         val knob = listOf("normal" to tr("Normale"), "dim" to tr("Plus légère"), "off" to tr("Éteinte"))
         screen.addView(Ui.text(c, tr("Molette pendant la veille"), 18f, Ui.TEXT), Ui.lp(t = 12))
         screen.addView(dropdown(knob, a.prefs.standbyKnob) { a.prefs.standbyKnob = it },
             Ui.lp(Ui.MATCH, Ui.u(58), t = 8))
+        screen.addView(toggle(tr("Extinction totale"), a.prefs.deepSleep) { a.prefs.deepSleep = it }, Ui.lp(t = 14))
+        screen.addView(Ui.text(c, tr("Coupe complètement l'alimentation de la machine et éteint l'écran. L'anneau lumineux est éteint (le réglage ci-dessus ne s'applique pas). Un appui sur l'écran ou la molette la réveille instantanément."),
+            15f, Ui.TEXT3).apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 6))
 
         // ---- Date et heure
         val time = section(right, tr("Date et heure"), Icon.Kind.CLOCK)
