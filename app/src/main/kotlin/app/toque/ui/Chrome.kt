@@ -12,12 +12,12 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import app.toque.Prefs
+import app.toque.TimeSync
 import app.toque.core.i18n.tr
 import app.toque.core.machine.JobState
 import app.toque.core.machine.LinkState
 import app.toque.core.machine.MachineEvent
 import app.toque.core.machine.Snapshot
-import app.toque.core.protocol.Mcc
 
 /** Écran de l'appli (vue construite une fois, réutilisée). */
 abstract class Screen(val a: MainActivity) {
@@ -67,8 +67,12 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
     private val handler = Handler(Looper.getMainLooper())
     private val tick = object : Runnable {
         override fun run() {
-            clock.text = MainActivity.now()
-            handler.postDelayed(this, 10_000)
+            // Pastille masquée tant que l'heure n'est pas réglée ou que le Wi-Fi est coupé : une heure
+            // fausse (2010, 01:00 au démarrage) trompe plus qu'une heure absente.
+            val show = TimeSync.showClock(a)
+            if (show) clock.text = MainActivity.now()
+            clock.visibility = if (show) View.VISIBLE else View.GONE
+            handler.postDelayed(this, if (show) 10_000 else 2_000)
         }
     }
     private var adminTaps = 0
@@ -268,7 +272,9 @@ class MachineBar(private val a: MainActivity) : FrameLayout(a) {
         if (s.state == JobState.PAUSED) {
             a.machine.resume(s.hotBlendConfirmed) { v ->
                 if (!v.ok && v.has(app.toque.core.machine.SafetyPolicy.HOT_BLEND)) {
-                    a.confirm(tr("Contenu chaud"), tr("Le bol est à %d °C. Reprendre le mixage ?", s.actualTempC), tr("Reprendre"), icon = Icon.Kind.THERMO) {
+                    val q = if (app.toque.core.robot.RobotProfiles.active.capabilities.measuresTemperature) tr("Le bol est à %d °C. Reprendre le mixage ?", s.actualTempC)
+                        else tr("Ce robot ne mesure pas toujours la température du bol : Toque considère le contenu comme chaud. Reprendre le mixage ?")
+                    a.confirm(tr("Contenu chaud"), q, tr("Reprendre"), icon = Icon.Kind.THERMO) {
                         a.machine.resume(true) { a.refusal(it) }
                     }
                 } else a.refusal(v)
@@ -328,7 +334,8 @@ class MachineBar(private val a: MainActivity) : FrameLayout(a) {
             else -> tr("Vitesse %d", s.jobSpeed)
         }
         tempChip.visibility = if (s.jobTempLevel > 0) View.VISIBLE else View.GONE
-        Ui.chipText(tempChip).text = "${Mcc.celsiusForLevel(s.jobTempLevel)} °C"
+        // °C exacts du programme (40 °C et programmes du Smart compris), pas le niveau de Toque juste en dessous.
+        Ui.chipText(tempChip).text = "${s.jobTempC} °C"
         dirChip.visibility = if (s.jobReverse && s.jobKind == "MANUAL") View.VISIBLE else View.GONE
         val ended = st == JobState.FINISHED || st == JobState.ABORTED
         setButtons(running = st != JobState.PAUSED, ended = ended, turbo = false)

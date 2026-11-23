@@ -18,9 +18,16 @@ import app.toque.core.machine.Violation
 import app.toque.core.protocol.Direction
 import app.toque.core.protocol.Mcc
 import app.toque.core.protocol.Operation
+import app.toque.core.protocol.Smart
+import app.toque.core.protocol.SmartProgram
+import app.toque.core.robot.Feature
+import app.toque.core.robot.RobotProfiles
 
-/** Recettes Lidl importées (site monsieur-cuisine.com ou appli d'origine) ; USER : réservé aux recettes perso. */
-enum class RecipeSource { IMPORTED, USER }
+/**
+ * IMPORTED : recettes Lidl (site monsieur-cuisine.com ou appli d'origine) ; USER : recettes perso ;
+ * COMMUNITY : recettes de la communauté, venues de toqueapp.org (identifiants « toqueapp-N »).
+ */
+enum class RecipeSource { IMPORTED, USER, COMMUNITY }
 
 data class Ingredient(
     val qty: String = "",
@@ -41,12 +48,20 @@ data class Ingredient(
 
 data class IngredientGroup(val title: String = "", val items: List<Ingredient>)
 
-enum class StepProgram(val key: String, val kind: JobKind) {
-    MANUAL("manuel", JobKind.MANUAL),
-    KNEAD("petrir", JobKind.KNEAD),
-    STEAM("vapeur", JobKind.STEAM),
-    TOAST("rissoler", JobKind.TOAST),
-    TURBO("turbo", JobKind.TURBO);
+enum class StepProgram(val key: String, val kind: JobKind, val feature: Feature, val heated: Boolean = false) {
+    MANUAL("manuel", JobKind.MANUAL, Feature.MANUAL),
+    KNEAD("petrir", JobKind.KNEAD, Feature.KNEAD),
+    STEAM("vapeur", JobKind.STEAM, Feature.STEAM),
+    TOAST("rissoler", JobKind.TOAST, Feature.TOAST),
+    TURBO("turbo", JobKind.TURBO, Feature.TURBO),
+    // Programmes du Monsieur Cuisine Smart (recettes « MC3.0 » du site) : trames de l'appli d'origine.
+    MIXER("mixer", JobKind.PROGRAM, Feature.MIXER),
+    SMOOTHIE("smoothie", JobKind.PROGRAM, Feature.SMOOTHIE),
+    SOUS_VIDE("sous-vide", JobKind.PROGRAM, Feature.SOUS_VIDE, heated = true),
+    SLOW_COOK("mijoter", JobKind.PROGRAM, Feature.SLOW_COOK, heated = true),
+    FERMENT("fermenter", JobKind.PROGRAM, Feature.FERMENT, heated = true);
+
+    val label: String get() = feature.label
 
     companion object {
         fun of(key: String?): StepProgram? = values().firstOrNull { it.key == key?.trim()?.lowercase() }
@@ -66,15 +81,40 @@ data class StepMachine(
 ) {
     val temperatureLevel: Int get() = Mcc.levelAtMost(tempC)
 
+    /** Niveau de la table du Smart pour une température absente de celle du Connect (40 °C), sinon null. */
+    val smartLevel: Int? get() =
+        if (tempC > 0 && Mcc.levelForCelsius(tempC) < 0 && tempC in Smart.TEMPERATURE_LEVELS) Smart.TEMPERATURE_LEVELS.indexOf(tempC) else null
+
+    /** Température affichée : celle de la recette si le robot l'a, sinon celle de la table juste en dessous. */
+    private val shownC: Int get() = if (smartLevel != null) tempC else Mcc.celsiusForLevel(temperatureLevel)
+
+    /** Programme propre au Smart et la trame capturée qui le porte (null pour les autres). */
+    private val smartProgram: SmartProgram? get() = when (program) {
+        StepProgram.MIXER -> SmartProgram.MIXER
+        StepProgram.SMOOTHIE -> SmartProgram.SMOOTHIE
+        StepProgram.SOUS_VIDE -> SmartProgram.SOUS_VIDE
+        StepProgram.SLOW_COOK -> SmartProgram.MIJOTER_BRASSE
+        StepProgram.FERMENT -> SmartProgram.FERMENTER_BRASSE
+        else -> null
+    }
+
+    /** Température exacte d'un programme du Smart (null : celle de l'appli d'origine). */
+    private val programCelsius: Int? get() = if (program.heated && tempC > 0) tempC else null
+
     val summary: String
         get() = when (program) {
             StepProgram.TURBO -> if (pulses > 0) "Turbo × $pulses" else "Turbo"
             StepProgram.KNEAD -> JobKind.KNEAD.label + " " + SafetyPolicy.formatDuration(seconds * 1000L)
             StepProgram.STEAM -> JobKind.STEAM.label + " " + SafetyPolicy.formatDuration(seconds * 1000L)
             StepProgram.TOAST -> JobKind.TOAST.label + " " + SafetyPolicy.formatDuration(seconds * 1000L)
+            StepProgram.MIXER, StepProgram.SMOOTHIE, StepProgram.SOUS_VIDE, StepProgram.SLOW_COOK, StepProgram.FERMENT -> buildString {
+                append(program.label).append(' ').append(SafetyPolicy.formatDuration(seconds * 1000L))
+                val c = programCelsius ?: smartProgram?.takeIf { program.heated }?.targetCelsius ?: 0
+                if (c > 0) append(" · ").append(c).append(" °C")
+            }
             StepProgram.MANUAL -> buildString {
                 append(SafetyPolicy.formatDuration(seconds * 1000L))
-                if (tempC > 0) append(" · ").append(Mcc.celsiusForLevel(temperatureLevel)).append(" °C")
+                if (tempC > 0) append(" · ").append(shownC).append(" °C")
                 append(" · ").append(if (speed == 0) tr("sans mélange") else tr("vitesse %d", speed))
                 if (reverse && speed > 0) append(" · ").append(tr("inverse"))
                 if (accessory == Accessory.WHISK) append(" · ").append(tr("fouet"))
@@ -88,12 +128,17 @@ data class StepMachine(
             StepProgram.MANUAL -> Programs.manual(
                 speed, temperatureLevel,
                 if (reverse) Direction.COUNTER_CLOCKWISE else Direction.CLOCKWISE,
-                ms, accessory, hotBlendConfirmed, label,
+                ms, accessory, hotBlendConfirmed, label, smartLevel = smartLevel,
             )
             StepProgram.KNEAD -> Programs.knead(ms).copy(label = label)
             StepProgram.STEAM -> Programs.steam(ms).copy(label = label)
             StepProgram.TOAST -> Programs.toast(ms).copy(label = label)
             StepProgram.TURBO -> null
+            StepProgram.MIXER -> Programs.smartProgram(SmartProgram.MIXER, ms, label, hotBlendConfirmed)
+            StepProgram.SMOOTHIE -> Programs.smartProgram(SmartProgram.SMOOTHIE, ms, label, hotBlendConfirmed)
+            StepProgram.SOUS_VIDE -> Programs.smartProgram(SmartProgram.SOUS_VIDE, ms, label, hotBlendConfirmed, programCelsius)
+            StepProgram.SLOW_COOK -> Programs.smartMijoter(ms, label, programCelsius)
+            StepProgram.FERMENT -> Programs.smartFermenter(ms, label, programCelsius)
         }
     }
 
@@ -105,8 +150,13 @@ data class StepMachine(
             return v
         }
         val v = ArrayList<Violation>()
-        if (tempC != 0 && Mcc.levelForCelsius(tempC) < 0)
+        val caps = RobotProfiles.active.capabilities
+        if (!caps.has(program.feature)) v += Violation("feature", tr("%s : absent de ce robot", program.label))
+        if (program == StepProgram.MANUAL && tempC != 0 && tempC !in caps.temperaturesC)
             v += Violation("temp_table", tr("Température %d °C absente de la machine", tempC))
+        val sp = smartProgram
+        if (sp != null && programCelsius != null && !sp.allowsCelsius(tempC))
+            v += Violation("temp_table", tr("%s : de %d à %d °C", program.label, sp.minCelsius, sp.maxCelsius))
         val job = toJob("vérification") ?: return v
         v += SafetyPolicy.checkJob(job, null)
         return v
@@ -150,6 +200,8 @@ data class Recipe(
     val language: String = "",
     /** Ce que compte [servings] quand ce ne sont pas des personnes (« pots », « Gläser ») ; vide sinon. */
     val servingUnit: String = "",
+    /** Robots auxquels le site destine la recette (« MC2.0 », « MC3.0 ») ; vide si inconnu (recettes perso). */
+    val devices: List<String> = emptyList(),
 ) {
     val machineSteps: Int get() = steps.count { it.machine != null }
     val allIngredients: List<Ingredient> get() = ingredients.flatMap { it.items }
@@ -177,6 +229,7 @@ object RecipeCodec {
         "ratingCount" to r.ratingCount,
         "language" to r.language,
         "servingUnit" to r.servingUnit,
+        "devices" to r.devices,
         "ingredients" to r.ingredients.map { g ->
             linkedMapOf(
                 "group" to g.title,
@@ -248,6 +301,7 @@ object RecipeCodec {
             ratingCount = (m.int("ratingCount") ?: 0).coerceAtLeast(0),
             language = m.str("language")?.trim().orEmpty(),
             servingUnit = m.str("servingUnit")?.trim().orEmpty(),
+            devices = m["devices"].list().mapNotNull { (it as? String)?.trim()?.takeIf { d -> d.isNotEmpty() } },
         )
     }
 
@@ -304,6 +358,16 @@ object RecipeCodec {
  * « Mes recettes » : recettes écrites ou modifiées sur le robot. Leur identifiant commence par
  * [ID_PREFIX] ; les synchronisations (site, appli d'origine) n'y touchent jamais.
  */
+/** Recettes de toqueapp.org : identifiant « toqueapp-N », N étant le numéro de la recette sur le site. */
+object CommunityRecipes {
+    const val ID_PREFIX = "toqueapp-"
+
+    fun isCommunity(id: String): Boolean = id.startsWith(ID_PREFIX)
+
+    /** Numéro de la recette sur le site, ou null. */
+    fun siteId(id: String): Long? = if (isCommunity(id)) id.removePrefix(ID_PREFIX).toLongOrNull() else null
+}
+
 object UserRecipes {
     const val ID_PREFIX = "perso-"
     /** Nom du fichier d'échange, dans le dossier Download du robot. */
@@ -367,6 +431,8 @@ fun StepMachine.toSetting(): Setting = Setting(
         StepProgram.STEAM -> Operation.STEAM
         StepProgram.TOAST -> Operation.TOAST
         StepProgram.TURBO -> Operation.TURBO
+        // Programmes du Smart : réglage manuel indicatif (le programme envoie sa propre trame).
+        StepProgram.MIXER, StepProgram.SMOOTHIE, StepProgram.SOUS_VIDE, StepProgram.SLOW_COOK, StepProgram.FERMENT -> Operation.STANDARD
     },
     speed, temperatureLevel, if (reverse) Direction.COUNTER_CLOCKWISE else Direction.CLOCKWISE,
 )

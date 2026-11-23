@@ -368,7 +368,7 @@ function Step-Prepare {
     if ($Apk -eq "") {
         try {
             $rel = Invoke-RestMethod -Uri $Known.Releases -Headers @{ "User-Agent" = "toque-setup" }
-            $asset = $rel.assets | Where-Object { $_.name -like "Toque-*.apk" } | Select-Object -First 1
+            $asset = $rel.assets | Where-Object { $_.name -like "Toque-*.apk" -and $_.name -notlike "Toque-smart-*" } | Select-Object -First 1
             if ($asset) {
                 $dest = Join-Path $Downloads $asset.name
                 if (-not (Test-Path $dest)) { Fetch $asset.browser_download_url $dest }
@@ -617,7 +617,7 @@ function Step-Android {
 function Step-Install {
     $apkPath = $Apk
     if ($apkPath -eq "") {
-        $latest = Get-ChildItem $Downloads -Filter "Toque-*.apk" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        $latest = Get-ChildItem $Downloads -Filter "Toque-*.apk" -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike "Toque-smart-*" } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
         if ($latest) { $apkPath = $latest.FullName }
     }
     if ($apkPath -eq "" -or -not (Test-Path $apkPath)) { Fail "No Toque APK: run 'prepare' (downloads the latest release) or pass -Apk <file>." }

@@ -22,9 +22,11 @@ import app.toque.core.machine.Snapshot
 import app.toque.core.time.ZoneLookup
 import app.toque.core.update.Release
 import app.toque.recipes.LidlSync
+import app.toque.core.recipes.McOnline
 import app.toque.recipes.OnlineSync
 import app.toque.recipes.SyncProgress
 import app.toque.recipes.RecipeFiles
+import app.toque.core.recipes.CommunityRecipes
 import app.toque.core.recipes.UserRecipes
 import app.toque.ui.Icon
 import app.toque.ui.MainActivity
@@ -43,7 +45,8 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
     private lateinit var syncText: TextView
     private lateinit var syncBtn: View
     private lateinit var stopSyncBtn: View
-    private lateinit var importBtn: View
+    /** Absent sur un robot dont la base de l'appli d'origine n'est pas encore lue (Smart). */
+    private var importBtn: View? = null
     private lateinit var bowlText: TextView
     private lateinit var linkText: TextView
     private lateinit var timeText: TextView
@@ -57,6 +60,10 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
     private var upd = Upd.IDLE
     private var release: Release? = null
     private var updMessage = ""
+    private lateinit var accountText: TextView
+    private lateinit var accountButtons: LinearLayout
+    private lateinit var siteText: TextView
+    private lateinit var siteBtn: View
 
     override fun build(): View {
         val col = Ui.vertical(c)
@@ -67,6 +74,13 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         columns.addView(left, LinearLayout.LayoutParams(0, Ui.WRAP, 1f).apply { rightMargin = Ui.u(18) })
         columns.addView(right, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
         col.addView(columns)
+
+        // ---- Robot (fiche : protocole, programmes, recettes montrées)
+        val robot = section(left, tr("Robot"), Icon.Kind.POT)
+        robotText = Ui.text(c, "", 18f, Ui.TEXT).apply { setLineSpacing(0f, 1.15f) }
+        robot.addView(robotText, Ui.lp(t = 4))
+        robot.addView(Ui.button(c, tr("Changer de robot"), Ui.Style.SECONDARY, height = 52) { a.askRobot() }, Ui.lp(Ui.WRAP, Ui.WRAP, t = 10))
+        renderRobot()
 
         // ---- Machine
         val machine = section(left, tr("Machine"), Icon.Kind.POT)
@@ -121,6 +135,24 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
             a.applyLanguage()
         }, Ui.lp(Ui.MATCH, Ui.u(58), t = 4))
 
+        // ---- Apparence : thème sombre/clair + couleur d'accent
+        val look = section(right, tr("Apparence"), Icon.Kind.STAR)
+        look.addView(Ui.text(c, tr("Thème"), 18f, Ui.TEXT))
+        val themes = listOf("dark" to tr("Mode sombre"), "light" to tr("Mode clair"))
+        look.addView(dropdown(themes, if (a.prefs.lightTheme) "light" else "dark") { code ->
+            val light = code == "light"
+            if (light != a.prefs.lightTheme) a.applyTheme(light)
+        }, Ui.lp(Ui.MATCH, Ui.u(58), t = 8))
+        look.addView(Ui.text(c, tr("Couleur des boutons, des icônes et des repères."), 15f, Ui.TEXT3)
+            .apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 12))
+        for (rowIndex in 0 until 2) {
+            val row = Ui.horizontal(c, Gravity.CENTER)
+            for (i in rowIndex * 5 until rowIndex * 5 + 5) {
+                row.addView(swatch(Ui.ACCENTS[i]), LinearLayout.LayoutParams(0, Ui.u(60), 1f))
+            }
+            look.addView(row, Ui.lp(t = if (rowIndex == 0) 12 else 6))
+        }
+
         // ---- Écran
         val screen = section(right, tr("Écran"), Icon.Kind.CLOCK)
         val delays = listOf("0" to tr("Jamais")) + listOf(1, 2, 5, 10, 15, 30).map { it.toString() to tr("Après %d min", it) }
@@ -152,8 +184,10 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
 
         // ---- Recettes Lidl
         val lidl = section(right, tr("Recettes Lidl"), Icon.Kind.SYNC)
-        lidl.addView(Ui.text(c, tr("Toque télécharge lui-même les recettes officielles du Monsieur Cuisine connect sur monsieur-cuisine.com (sans compte)."),
-            16f, Ui.TEXT2).apply { setLineSpacing(0f, 1.15f) })
+        val chosen = a.prefs.robot
+        val lidlIntro = if (chosen.lidlDevice == "MC2.0") tr("Toque télécharge lui-même les recettes officielles du Monsieur Cuisine connect sur monsieur-cuisine.com (sans compte).")
+            else tr("Toque télécharge lui-même les recettes officielles du %s sur monsieur-cuisine.com (sans compte).", chosen.displayName)
+        lidl.addView(Ui.text(c, lidlIntro, 16f, Ui.TEXT2).apply { setLineSpacing(0f, 1.15f) })
         syncText = Ui.text(c, "", 16f, Ui.TEXT)
         lidl.addView(syncText, Ui.lp(t = 10))
         val b1 = Ui.horizontal(c)
@@ -163,14 +197,37 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         stopSyncBtn = Ui.button(c, tr("Arrêter"), Ui.Style.SECONDARY, Icon.Kind.STOP, height = 58) { SyncProgress.requestStop() }
         b1.addView(stopSyncBtn)
         lidl.addView(b1, Ui.lp(t = 12))
-        lidl.addView(Ui.text(c, tr("Autre source : les recettes déjà présentes dans l'appli d'origine du robot (remplacent celles du site)."),
-            14f, Ui.TEXT3).apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 12))
-        // Un bouton par ligne : côte à côte, « Ouvrir l'appli d'origine » n'avait plus la place et
-        // son texte se coupait au milieu d'un mot.
-        importBtn = Ui.button(c, tr("Importer de l'appli d'origine"), Ui.Style.SECONDARY, height = 52) { sync(online = false) }
-        lidl.addView(importBtn, Ui.lp(Ui.WRAP, Ui.WRAP, t = 6))
+        // Import depuis l'appli d'origine : seulement là où Toque sait lire sa base (pas encore le Smart).
+        if (chosen.stockImport) {
+            lidl.addView(Ui.text(c, tr("Autre source : les recettes déjà présentes dans l'appli d'origine du robot (remplacent celles du site)."),
+                14f, Ui.TEXT3).apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 12))
+            // Un bouton par ligne : côte à côte, « Ouvrir l'appli d'origine » n'avait plus la place et
+            // son texte se coupait au milieu d'un mot.
+            val btn = Ui.button(c, tr("Importer de l'appli d'origine"), Ui.Style.SECONDARY, height = 52) { sync(online = false) }
+            lidl.addView(btn, Ui.lp(Ui.WRAP, Ui.WRAP, t = 6))
+            importBtn = btn
+        }
         lidl.addView(Ui.button(c, tr("Ouvrir l'appli d'origine"), Ui.Style.GHOST, Icon.Kind.LINK, height = 52) { a.openVendorApp() },
-            Ui.lp(Ui.WRAP, Ui.WRAP, t = 8))
+            Ui.lp(Ui.WRAP, Ui.WRAP, t = if (chosen.stockImport) 8 else 12))
+        lidl.addView(Ui.text(c, tr("Langue des recettes"), 18f, Ui.TEXT), Ui.lp(t = 12))
+        val recipeLangs = McOnline.RECIPE_LANGUAGES.map { code ->
+            code to when (code) {
+                "auto" -> tr("Automatique (selon l'interface)")
+                "es-ES" -> "Español"
+                "fr-FR" -> "Français"
+                "en-US" -> "English"
+                "de-DE" -> "Deutsch"
+                "it-IT" -> "Italiano"
+                "pt-PT" -> "Português"
+                "nl-NL" -> "Nederlands"
+                "pl-PL" -> "Polski"
+                else -> code
+            }
+        }
+        lidl.addView(dropdown(recipeLangs, a.prefs.recipeLanguage) { code ->
+            a.prefs.recipeLanguage = code
+            a.toast(tr("Pris en compte à la prochaine synchronisation"))
+        }, Ui.lp(Ui.MATCH, Ui.u(58), t = 8))
         lidl.addView(toggle(tr("Synchro automatique chaque nuit"), a.prefs.autoSync) { a.prefs.autoSync = it }, Ui.lp(t = 10))
         lidl.addView(toggle(tr("Recettes des autres langues"), a.prefs.foreignRecipes) {
             a.prefs.foreignRecipes = it
@@ -187,6 +244,28 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         files.addView(Ui.button(c, tr("Exporter"), Ui.Style.SECONDARY, Icon.Kind.UPLOAD, height = 52) { recipeFiles(export = true) }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
         files.addView(Ui.button(c, tr("Importer"), Ui.Style.SECONDARY, Icon.Kind.DOWNLOAD, height = 52) { recipeFiles(export = false) })
         mine.addView(files, Ui.lp(t = 12))
+
+        // ---- Compte Toque (toqueapp.org), facultatif
+        val account = section(left, tr("Compte Toque"), Icon.Kind.PEOPLE)
+        accountText = Ui.text(c, "", 16f, Ui.TEXT2).apply { setLineSpacing(0f, 1.15f) }
+        account.addView(accountText)
+        accountButtons = Ui.horizontal(c)
+        account.addView(accountButtons, Ui.lp(t = 12))
+
+        // ---- Recettes de la communauté (toqueapp.org), sans compte
+        val community = section(left, tr("Recettes de la communauté"), Icon.Kind.GLOBE)
+        community.addView(Ui.text(c, tr("Les recettes partagées sur toqueapp.org, reçues sans compte. Celles que la communauté a traduites arrivent dans votre langue."),
+            16f, Ui.TEXT2).apply { setLineSpacing(0f, 1.15f) })
+        community.addView(toggle(tr("Recevoir les recettes de la communauté"), a.prefs.siteCommunity) { on ->
+            a.app.site.setCommunity(on)
+            refreshSite()
+        }, Ui.lp(t = 10))
+        siteText = Ui.text(c, "", 16f, Ui.TEXT)
+        community.addView(siteText, Ui.lp(t = 10))
+        siteBtn = Ui.button(c, tr("Synchroniser"), Ui.Style.SECONDARY, Icon.Kind.SYNC, height = 52) {
+            a.app.site.sync { r -> r?.let { a.toast(it.message, if (it.ok) Ui.OK else Ui.WARN) } }
+        }
+        community.addView(siteBtn, Ui.lp(Ui.WRAP, Ui.WRAP, t = 12))
 
         // ---- Mises à jour
         val updates = section(left, tr("Mises à jour"), Icon.Kind.INFO)
@@ -208,6 +287,10 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         val version = try { a.packageManager.getPackageInfo(a.packageName, 0).versionName } catch (_: Exception) { "?" }
         tools.addView(Ui.text(c, tr("Toque %s · protocole d'après le Monsieur Cuisine Developer SDK (licence MIT). " +
             "Projet indépendant, non affilié à Lidl ni à SilverCrest.", version), 14f, Ui.TEXT3).apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 12))
+        a.prefs.robot.let { p -> p.credit?.let { who ->
+            tools.addView(Ui.text(c, tr("%s : protocole d'après %s (licence MIT).", p.displayName, who), 14f, Ui.TEXT3)
+                .apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 4))
+        } }
 
         return Ui.scroll(c, col)
     }
@@ -220,6 +303,20 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         card.addView(head, Ui.lp(b = 10))
         parent.addView(card, Ui.lp(b = 16))
         return card
+    }
+
+    /** Pastille de couleur : un disque, entouré et coché quand c'est la couleur en cours. */
+    private fun swatch(color: Int): View {
+        val box = android.widget.FrameLayout(c)
+        val selected = color == Ui.ACCENT
+        val dot = android.widget.FrameLayout(c).apply {
+            background = Ui.pressable(Ui.round(color, 26f, if (selected) Ui.TEXT else 0, if (selected) 3f else 0f), 26f)
+            if (selected) addView(Icon(c, Icon.Kind.CHECK, Ui.ON_ACCENT), Ui.flp(Ui.u(24), Ui.u(24), Gravity.CENTER))
+            isClickable = true
+            setOnClickListener { if (!selected) a.applyAccent(color) }
+        }
+        box.addView(dot, Ui.flp(Ui.u(52), Ui.u(52), Gravity.CENTER))
+        return box
     }
 
     private fun field(value: String, hint: String) = EditText(c).apply {
@@ -237,15 +334,25 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         val row = Ui.horizontal(c)
         row.addView(Ui.text(c, label, 18f, Ui.TEXT), LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
         var state = initial
-        val sw = Ui.text(c, "", 16f, Ui.TEXT, Ui.MEDIUM).apply { gravity = Gravity.CENTER }
+        // Interrupteur : piste arrondie, pastille à gauche (non) ou à droite (oui).
+        val sw = android.widget.FrameLayout(c)
+        val knob = View(c)
+        sw.addView(knob, Ui.flp(Ui.u(34), Ui.u(34), Gravity.CENTER_VERTICAL))
+        sw.setPadding(Ui.u(5), 0, Ui.u(5), 0)
         fun paint() {
-            sw.text = if (state) tr("Oui") else tr("Non")
-            sw.setTextColor(if (state) 0xFF1A0E05.toInt() else Ui.TEXT2)
-            sw.background = if (state) Ui.round(Ui.ACCENT, 24f) else Ui.round(Ui.SURFACE3, 24f)
+            sw.background = Ui.round(if (state) Ui.ACCENT else Ui.SURFACE3, 22f, if (state) Ui.ACCENT else Ui.STROKE, 1f)
+            knob.background = Ui.round(if (state) Ui.ON_ACCENT else Ui.TEXT2, 17f)
+            (knob.layoutParams as android.widget.FrameLayout.LayoutParams).gravity =
+                Gravity.CENTER_VERTICAL or (if (state) Gravity.END else Gravity.START)
+            knob.requestLayout()
+            sw.contentDescription = if (state) tr("Oui") else tr("Non")
         }
         paint()
-        sw.setOnClickListener { state = !state; paint(); onChange(state) }
-        row.addView(sw, LinearLayout.LayoutParams(Ui.u(84), Ui.u(46)))
+        val flip = { _: View -> state = !state; paint(); onChange(state) }
+        sw.setOnClickListener(flip)
+        row.setOnClickListener(flip)   // toute la ligne est touchable, pas seulement l'interrupteur
+        row.minimumHeight = Ui.u(52)
+        row.addView(sw, LinearLayout.LayoutParams(Ui.u(76), Ui.u(44)).apply { leftMargin = Ui.u(14) })
         return row
     }
 
@@ -329,6 +436,15 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         return box
     }
 
+    private lateinit var robotText: TextView
+
+    private fun renderRobot() {
+        val p = a.prefs.robot
+        robotText.text = if (!a.prefs.robotConfirmed) tr("Pas encore choisi : la liaison avec la base reste fermée en « Machine réelle ».")
+            else p.displayName + " (" + p.models.joinToString(", ") + ")" + if (p.tested) "" else
+                "\n" + tr("En test : le projet ne l'a pas essayé lui-même, vos retours sont attendus sur GitHub.")
+    }
+
     private fun renderModes() {
         modeRow.removeAllViews()
         for (m in Prefs.Mode.values()) {
@@ -349,6 +465,12 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
     private fun applyMode() {
         if (a.snapshot.busy) {
             a.toast(tr("Arrêtez d'abord le programme en cours"), Ui.WARN)
+            return
+        }
+        if (mode == Prefs.Mode.HARDWARE && !a.prefs.robotConfirmed) {
+            // Jamais de trame vers la base sans savoir quel robot c'est.
+            a.toast(tr("Choisissez d'abord votre robot"), Ui.WARN)
+            a.askRobot()
             return
         }
         if (mode == Prefs.Mode.HARDWARE && a.prefs.mode != Prefs.Mode.HARDWARE) {
@@ -423,6 +545,11 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
             a.toast(tr("Disponible une fois Toque installé sur le robot (mode Machine réelle)"), Ui.WARN)
             return
         }
+        if (!online && !a.prefs.robot.stockImport) {
+            // Base de l'appli d'origine du Smart : format pas encore relevé.
+            a.toast(tr("Pas encore possible sur ce robot : utilisez « Synchroniser »"), Ui.WARN)
+            return
+        }
         // L'avancement vit dans SyncProgress, pas dans cet écran : on peut le quitter et y revenir.
         SyncProgress.start(tr("Synchronisation en cours… (quelques minutes)"), stoppable = online)
         val app = a.app
@@ -478,17 +605,65 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         val running = progress != null
         // Pendant une synchronisation : rien à relancer, et un bouton pour l'arrêter.
         Ui.setButtonEnabled(syncBtn, !running)
-        Ui.setButtonEnabled(importBtn, !running)
+        importBtn?.let { Ui.setButtonEnabled(it, !running) }
         stopSyncBtn.visibility = if (running && SyncProgress.stoppable) View.VISIBLE else View.GONE
         Ui.setButtonEnabled(stopSyncBtn, !SyncProgress.stopRequested)
         val last = a.prefs.lastSyncResult
         val first = when {
-            progress == null -> if (last.isEmpty()) tr("Jamais synchronisé") else tr("Dernière synchro le %s", last)
+            progress == null -> if (last.isEmpty()) tr("Jamais synchronisé") else tr("Dernière synchro le %s", lastLine(last, a.prefs.lastSyncLang, a.prefs.lastSyncMs))
             SyncProgress.stopRequested -> tr("Arrêt en cours…")
             else -> progress
         }
         // Le nombre de recettes reste affiché sous l'avancement : « Recettes : 343 / 1667 » compte les fiches relues, pas le catalogue.
-        syncText.text = first + "\n" + if (a.app.recipes.loaded) tr("%d recettes dans Toque", a.app.recipes.count) else tr("Chargement des recettes…")
+        val repo = a.app.recipes
+        syncText.text = first + "\n" + if (repo.loaded) tr("%d recettes dans Toque", repo.count) +
+            // Recettes enregistrées mais pas faisables sur ce robot (autre robot, programme absent).
+            (if (repo.hiddenCount > 0) "\n" + tr("%d recettes masquées : pas faites pour ce robot", repo.hiddenCount) else "")
+            else tr("Chargement des recettes…")
+    }
+
+    /**
+     * Ligne « date : résultat » d'une synchro. Écrite dans une autre langue que celle de l'appli
+     * (langue changée depuis) : seulement la date, dans la langue d'aujourd'hui, plutôt qu'un texte
+     * dans l'ancienne langue. Le résultat complet revient à la synchro suivante.
+     */
+    private fun lastLine(text: String, lang: String, ms: Long): String =
+        if (lang.isEmpty() || lang == I18n.code || ms <= 0) text
+        else java.text.SimpleDateFormat(tr("dd/MM à HH:mm"), I18n.locale).format(java.util.Date(ms))
+
+    // ------------------------------------------------------------------ toqueapp.org
+
+    private fun renderAccount() {
+        accountButtons.removeAllViews()
+        val prefs = a.prefs
+        if (prefs.siteLinked) {
+            accountText.text = tr("Relié au compte « %s ». Vos favoris du site arrivent sur le robot, et vous pouvez publier vos recettes.", prefs.siteUser)
+            accountButtons.addView(Ui.button(c, tr("Délier"), Ui.Style.GHOST, Icon.Kind.CLOSE, height = 52) {
+                a.confirm(tr("Délier le robot ?"), tr("Le robot ne recevra plus vos favoris du site. Les recettes déjà reçues restent."), tr("Délier")) {
+                    a.app.site.unlink()
+                    a.toast(tr("Robot délié du compte"))
+                }
+            })
+        } else {
+            accountText.text = tr("Aucun compte relié. Le compte est facultatif : relié, le robot reçoit vos favoris du site et vous pouvez publier vos recettes depuis le robot.")
+            accountButtons.addView(Ui.button(c, tr("Relier mon compte"), Ui.Style.PRIMARY, Icon.Kind.LINK, height = 52) { a.push(SiteLinkScreen(a)) })
+        }
+    }
+
+    private fun refreshSite() {
+        val site = a.app.site
+        val prefs = a.prefs
+        val on = prefs.siteCommunity || prefs.siteLinked
+        Ui.setButtonEnabled(siteBtn, on && !site.busy)
+        val last = prefs.siteLastResult
+        val first = when {
+            site.busy -> tr("Synchronisation en cours…")
+            last.isEmpty() -> tr("Jamais synchronisé")
+            else -> tr("Dernière synchro le %s", lastLine(last, prefs.siteLastLang, prefs.siteLastMs))
+        }
+        val repo = a.app.recipes
+        val n = if (repo.loaded) repo.index.entries.count { CommunityRecipes.isCommunity(it.id) } else 0
+        siteText.text = first + if (repo.loaded) "\n" + tr("%d recettes de la communauté dans Toque", n) else ""
     }
 
     // ------------------------------------------------------------------ mises à jour
@@ -551,13 +726,19 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
     /** Désabonnement du suivi des recettes (le nombre s'affiche une fois la base chargée). */
     private var unsubRecipes: (() -> Unit)? = null
     private var unsubSync: (() -> Unit)? = null
+    private var unsubSite: (() -> Unit)? = null
 
     override fun onShow() {
         mode = a.prefs.mode
         renderModes()
+        renderRobot()
         refreshSync()
-        unsubRecipes = a.app.recipes.onChange { refreshSync() }
+        renderAccount()
+        refreshSite()
+        // Changement de robot : les recettes sont refiltrées, puis cet écran se met à jour.
+        unsubRecipes = a.app.recipes.onChange { renderRobot(); refreshSync(); refreshSite() }
         unsubSync = SyncProgress.onChange { refreshSync() }
+        unsubSite = a.app.site.onChange { renderAccount(); refreshSite() }
     }
 
     override fun onHide() {
@@ -565,6 +746,8 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
         unsubRecipes = null
         unsubSync?.invoke()
         unsubSync = null
+        unsubSite?.invoke()
+        unsubSite = null
     }
 
     override fun onSnapshot(s: Snapshot) {

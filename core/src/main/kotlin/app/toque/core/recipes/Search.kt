@@ -5,6 +5,11 @@ import java.text.Normalizer
 object TextNorm {
     private val MARKS = Regex("\\p{Mn}+")
     private val NON_ALNUM = Regex("[^\\p{L}\\p{Nd}]+")
+    /**
+     * Apostrophe entre deux lettres cyrilliques (М'ясо → мясо). Plage explicite : Android 6 refuse
+     * `\p{IsCyrillic}` (U_ILLEGAL_ARGUMENT_ERROR). Compilée une fois, pas à chaque titre.
+     */
+    private val CYRILLIC_APOSTROPHE = Regex("(?<=[\u0400-\u04FF])['’ʼ`](?=[\u0400-\u04FF])")
     private val STOP = hashSetOf(
         // Français (FR)
         "de", "du", "des", "la", "le", "les", "l", "d", "et", "a", "au", "aux", "en", "un", "une",
@@ -18,7 +23,7 @@ object TextNorm {
         "el", "los", "las", "unos", "unas", "del", "con", "por", "para", "al", "receta", "recetas",
         // Polski (PL)
         "w", "z", "na", "do", "dla", "i", "oraz", "o", "po", "ze", "za", "od", "pod", "nad", "przepis", "przepisy",
-        // Ukrainian (UK)
+        // Українська (UK)
         "і", "й", "та", "в", "у", "на", "з", "із", "зі", "до", "для", "по", "за", "про", "від", "під", "над",
         "як", "що", "або", "чи", "не", "це", "рецепт", "рецепти",
     )
@@ -26,7 +31,7 @@ object TextNorm {
     fun normalize(s: String): String {
         var t = s.lowercase().replace("œ", "oe").replace("æ", "ae").replace("ß", "ss")
             .replace("ł", "l")
-            .replace("'", "").replace("’", "").replace("ʼ", "")
+            .replace(CYRILLIC_APOSTROPHE, "")
         t = Normalizer.normalize(t, Normalizer.Form.NFD)
         t = MARKS.replace(t, "")
         t = NON_ALNUM.replace(t, " ")

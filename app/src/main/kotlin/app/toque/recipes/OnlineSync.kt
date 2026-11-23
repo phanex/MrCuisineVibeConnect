@@ -11,9 +11,12 @@ import app.toque.core.json.Json
 import app.toque.core.json.int
 import app.toque.core.json.obj
 import app.toque.core.json.str
+import app.toque.core.recipes.CommunityRecipes
+import app.toque.core.recipes.McCategories
 import app.toque.core.recipes.McOnline
 import app.toque.core.recipes.Recipe
 import app.toque.core.recipes.UserRecipes
+import app.toque.core.robot.RobotProfiles
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -73,16 +76,19 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
     }
 
     private fun run(progress: (String) -> Unit): LidlSync.Report {
-        val language = McOnline.languageFor(I18n.code)
+        val language = McOnline.recipeLanguage(I18n.code, prefs.recipeLanguage)
+        // Recettes destinées au robot choisi (Connect : MC2.0, Smart : MC3.0).
+        val device = RobotProfiles.active.lidlDevice
+        val indexKey = McOnline.indexKey(language, device)
         val stored = readIndex()
-        // Autre langue ou lecture des fiches améliorée depuis : toutes les fiches sont relues.
-        val index = if (stored.language == language && stored.parser == McOnline.PARSER) HashMap(stored.recipes) else HashMap()
+        // Autre langue, autre robot ou lecture des fiches améliorée depuis : toutes les fiches sont relues.
+        val index = if (stored.language == indexKey && stored.parser == McOnline.PARSER) HashMap(stored.recipes) else HashMap()
 
         // 1. Liste complète (résumés).
         progress(tr("Liste des recettes…"))
         val entries = ArrayList<McOnline.Entry>()
         try {
-            entries += list(language) { page, pages -> progress(tr("Liste des recettes… %d / %d", page, pages)) }
+            entries += list(language, device) { page, pages -> progress(tr("Liste des recettes… %d / %d", page, pages)) }
         } catch (e: IOException) {
             return LidlSync.Report(false, tr("Serveur de recettes injoignable : %s", e.message ?: e.toString()))
         }
@@ -96,7 +102,7 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
             for (lang in McOnline.OTHER_LANGUAGES) {
                 if (lang == language) continue
                 try {
-                    others += list(lang) { page, pages -> progress(tr("Autres langues (%s)… %d / %d", lang.substringBefore('-'), page, pages)) }
+                    others += list(lang, device) { page, pages -> progress(tr("Autres langues (%s)… %d / %d", lang.substringBefore('-'), page, pages)) }
                 } catch (e: IOException) {
                     log.write("synchro", "liste $lang : ${e.message}")
                     foreignFailed = true
@@ -115,7 +121,7 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
         val rescored = ArrayList<Recipe>()
         for (e in entries) {
             if (SyncProgress.stopRequested) {
-                save(rescored, index, language)
+                save(rescored, index, indexKey)
                 throw Stopped()
             }
             val key = e.apiId.toString()
@@ -123,21 +129,30 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
             val r = repo.get(McOnline.toqueId(e.apiId)) ?: continue
             rescored += McOnline.withScore(r, e)
             index[key] = e.stamp
-            if (rescored.size >= 100) save(rescored, index, language)
+            if (rescored.size >= 100) save(rescored, index, indexKey)
         }
-        save(rescored, index, language)
+        save(rescored, index, indexKey)
+        // Noms des catégories dans la langue des recettes, pour les fiches prises dans une autre langue.
+        var categoryNames = emptyMap<Long, String>()
+        if (todo.any { it.language.isNotBlank() && it.language != language }) {
+            try {
+                categoryNames = McCategories.parse(get(McCategories.url(), language))
+            } catch (e: IOException) {
+                log.write("synchro", "catégories : ${e.message}")
+            }
+        }
         val batch = ArrayList<Recipe>()
         var failures = 0
         var inARow = 0
         for ((i, e) in todo.withIndex()) {
             if (SyncProgress.stopRequested) {
-                save(batch, index, language)
+                save(batch, index, indexKey)
                 throw Stopped()
             }
             progress(tr("Recettes : %d / %d", i + 1, todo.size))
             try {
                 val lang = e.language.ifBlank { language }
-                val r = McOnline.parseRecipe(get(McOnline.recipeUrl(e.apiId), lang))
+                val r = McOnline.parseRecipe(get(McOnline.recipeUrl(e.apiId), lang), if (lang != language) categoryNames else emptyMap())
                 if (r != null) batch += if (lang != language) r.copy(language = lang) else r
                 index[e.apiId.toString()] = e.stamp
                 inARow = 0
@@ -146,14 +161,14 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
                 inARow++
                 log.write("synchro", "recette ${e.apiId} : ${ex.message}")
                 if (inARow >= 5) {
-                    save(batch, index, language)
+                    save(batch, index, indexKey)
                     return LidlSync.Report(false, tr("Serveur de recettes injoignable : %s", ex.message ?: ex.toString()))
                 }
             }
-            if (batch.size >= 25) save(batch, index, language)
+            if (batch.size >= 25) save(batch, index, indexKey)
             pause(250)
         }
-        save(batch, index, language)
+        save(batch, index, indexKey)
         checkStop()
 
         // 3. Le catalogue suit la liste du site (recettes retirées supprimées). Les recettes perso
@@ -161,10 +176,10 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
         val kept = entries.map { it.apiId.toString() }.toHashSet()
         if (foreignFailed) kept += stored.recipes.keys
         val keep = kept.mapNotNull { it.toLongOrNull()?.let(McOnline::toqueId) }.toHashSet()
-        val removes = present.any { it !in keep && !UserRecipes.isUser(it) }
+        val removes = present.any { it !in keep && !UserRecipes.isUser(it) && !CommunityRecipes.isCommunity(it) }
         repo.removeAllExcept(keep, rebuild = false)
         index.keys.retainAll(kept)
-        writeIndex(language, index)
+        writeIndex(indexKey, index)
         // Rien d'enregistré ni de retiré : le catalogue en mémoire est déjà le bon. Le recharger prend une
         // vingtaine de secondes sur le robot, pendant lesquelles un arrêt demandé ne peut pas être pris en compte.
         if (dirty || removes) repo.refresh()
@@ -180,12 +195,12 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
     }
 
     /** Liste complète des recettes officielles dans [language] (lève IOException si le site ne répond pas). */
-    private fun list(language: String, progress: (Int, Int) -> Unit): List<McOnline.Entry> {
+    private fun list(language: String, device: String, progress: (Int, Int) -> Unit): List<McOnline.Entry> {
         val out = ArrayList<McOnline.Entry>()
         var page = 1
         var pages = 1
         while (page <= pages) {
-            val p = McOnline.parsePage(get(McOnline.listUrl(page), language))
+            val p = McOnline.parsePage(get(McOnline.listUrl(page, device), language))
             pages = p.totalPages.coerceIn(1, 1000)
             out += p.entries
             progress(page, pages)

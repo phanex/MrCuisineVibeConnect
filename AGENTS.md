@@ -1,13 +1,39 @@
-# AGENTS.md: install Toque on a Monsieur Cuisine Connect
+# AGENTS.md: install Toque on a Monsieur Cuisine (Connect or Smart)
 
 This file is for an AI agent (Claude, ChatGPT, Copilot…) that a person has pointed at this
-repository with a request such as *"Install Toque on my Monsieur Cuisine Connect"*. It is the
-complete procedure, written so that the agent does everything it can by itself and asks the person
-only for what needs hands, eyes or a Windows security prompt.
+repository with a request such as *"Install Toque on my Monsieur Cuisine"*. It is the complete
+procedure, written so that the agent does everything it can by itself and asks the person only for
+what needs hands, eyes or a Windows security prompt.
 
-Humans: the same procedure by hand is in [docs/INSTALLATION.md](docs/INSTALLATION.md).
+Humans: the same procedure by hand is in [docs/INSTALLATION.md](docs/INSTALLATION.md) (Connect) and
+[docs/SMART.en.md](docs/SMART.en.md) (Smart).
 
-## What you are doing
+## First: which robot?
+
+Toque runs on two Lidl robots that look alike but have different tablets, protocols and install
+procedures. **Before anything else, ask the person to read the model on the label under the robot**
+(it starts with `SKMC` or `SKMS`), and follow the matching line:
+
+| Label under the robot | Robot | Tablet | Follow | Toque APK |
+|---|---|---|---|---|
+| **SKMC 1200** (A1, B2, C3) | Monsieur Cuisine **Connect** | Android 6.0 | This guide, from *What you are doing* | `Toque-X.Y.Z.apk` |
+| **SKMC 1100 A1** | Monsieur Cuisine **Connect** | Android 6.0 | This guide, with the extra step `own-twrp` | `Toque-X.Y.Z.apk` |
+| **SKMS 1200** | Monsieur Cuisine **Smart** (in test) | Android 8.1 | *Monsieur Cuisine Smart (SKMS 1200)* below | `Toque-smart-X.Y.Z.apk` |
+| anything else | unknown | | Stop. Ask the person to open an issue with a photo of the label | |
+
+- If ADB already works (a robot rooted earlier), check that the tablet agrees with the label:
+  `adb shell getprop ro.build.version.release` gives `6.0` on a Connect and `8.1.0` on a Smart, and
+  `adb shell pm list packages` lists the stock app, `de.silpion.mc2` (Connect) or
+  `com.tecpal.device.mc30` (Smart). If the label and the tablet disagree, stop and ask.
+- **Never run `tools\setup\toque-setup.ps1` on a Smart.** Its TWRP, scatter file and partition
+  addresses are the Connect's: written to a Smart, they can leave its tablet unusable.
+- **Each robot has its own APK; never swap them.** The Smart's APK runs in the virtual machine's
+  safe mode, which its Android 8.1 needs (its JIT compiler miscompiles some code) and which would make
+  a Connect much slower. Once installed, *Settings › Updates* takes the right one by itself.
+- On first start, Toque asks *Which robot is this?* (the detected one is listed first). The person
+  confirms the robot on the label; until then Toque sends nothing to the motor base.
+
+## What you are doing (Connect)
 
 The Lidl **Monsieur Cuisine Connect** (model **SKMC 1200**) is a cooking robot whose screen is an
 Android 6 tablet (MediaTek MT6580). Toque replaces its stock app. To get there you will:
@@ -37,11 +63,11 @@ with exactly these files; total time 1–2 hours, most of it waiting for the per
 - If the person is using the PC (a game, a call…), ask before taking over the screen.
 - When a step prints `STOP:`, do not improvise a workaround on the robot: read the cause, fix it
   on the PC side or ask the person, then run the step again.
-- Check the model on the label under the robot. **SKMC 1200**, revisions A1, B2 and C3, have been
-  installed with this procedure. An **SKMC 1100 A1** needs TWRP rebuilt around its own, newer
-  kernel (issue #10): one more step, `own-twrp`, right after `backup` (see *SKMC 1100 A1* below);
-  everything else is the same. A Monsieur Cuisine **Smart** (SKMS 1200) is different hardware:
-  stop.
+- Know the robot before you start (*First: which robot?*). **SKMC 1200**, revisions A1, B2 and C3,
+  have been installed with this procedure. An **SKMC 1100 A1** needs TWRP rebuilt around its own,
+  newer kernel (issue #10): one more step, `own-twrp`, right after `backup` (see *SKMC 1100 A1*
+  below); everything else is the same. A Monsieur Cuisine **Smart** (SKMS 1200) is different
+  hardware: none of the Connect steps apply, see *Monsieur Cuisine Smart (SKMS 1200)*.
 - The SP Flash Tool archive has a public password printed on its download page; typing it to
   extract the archive is fine. Any other password: never.
 
@@ -73,12 +99,12 @@ is done and what comes next. Output lines:
 
 A log is kept in `C:\Toque\setup-log.txt`, state in `C:\Toque\state.json`.
 
-## Procedure
+## Procedure (Connect)
 
 | # | Step | Who | What happens |
 |---|------|-----|--------------|
 | 0 | clone | agent | Get this repository on the PC (git clone or the ZIP of `main`). |
-| 1 | `prepare` | agent | Downloads adb, Magisk v31.0, TWRP and the scatter file, the latest Toque APK; checks SHA-256. |
+| 1 | `prepare` | agent | Downloads adb, Magisk v31.0, TWRP and the scatter file, the latest Toque APK for the Connect (`Toque-X.Y.Z.apk`, never `Toque-smart-*`); checks SHA-256. |
 | 1b | (browser) | agent + person | Two files need a browser, see *Manual downloads*. Then `prepare` again. |
 | 2 | `driver` | agent + person | Installs the MediaTek PreLoader USB VCOM driver (UAC prompt). May ask to turn memory integrity off and restart. |
 | 3 | `backup` | person, then agent | Cover off, cable in the **right-hand "Android USB" port**, robot off; the script reads `boot` and `recovery`; the person switches the robot on when told. Verifies two 16 MiB Android images. |
@@ -88,7 +114,7 @@ A log is kept in `C:\Toque\setup-log.txt`, state in `C:\Toque\state.json`.
 | 6 | `flash-root` | agent + person | Writes `boot-magisk.img` into `boot` and TWRP into `recovery`. Power cycle as above → stock app. |
 | 7 | `android` | agent + person | Checks Magisk, installs its app; the person taps **Grant** on the robot once. Checks the boot partition. |
 | 8 | `install` | agent | Installs Toque, allows it in Magisk, starts it. |
-| 9 | first run | person | Empty bowl: Settings › Machine › Real machine › Apply. Success: badge **not** in demo mode **and** journal line showing the real link, e.g. `liaison ouverte : Base moteur (/dev/ttyMT…)`; then manual cooking 10 s speed 2. |
+| 9 | first run | person | *Which robot is this?*: **Monsieur Cuisine Connect**. Empty bowl: Settings › Machine › Real machine › Apply. Success: badge **not** in demo mode **and** journal line showing the real link, e.g. `liaison ouverte : Base moteur (/dev/ttyMT…)`; then manual cooking 10 s speed 2. |
 | 10 | `wifi` | agent | ADB over Wi-Fi (port 5555), so the cable can go and the cover go back on. |
 | 11 | `cleanup` | agent + person | Removes the MediaTek driver; the person can turn memory integrity back on. |
 
@@ -163,7 +189,7 @@ Ask the person before downloading (state the file names, sources and sizes: ~130
 | Magisk v31.0 | `https://github.com/topjohnwu/Magisk/releases/download/v31.0/Magisk-v31.0.apk` | `2c8a488b9a5293e578e95ae4f07e3c57aba4feec4a52ca4dd852a2692d6dd4e8` |
 | TWRP `hacks/recovery.img` | [EliasKotlyar/Monsieur-Cuisine-Connect-Hack](https://github.com/EliasKotlyar/Monsieur-Cuisine-Connect-Hack) | `fc9ac999fc3b0a6c0cb563f39359084a6fcc211aeb42e7b754990afa4b543d3e` |
 | Scatter `l706_dfbh_v_695scatter.txt` | same repository | `13b8260dba9e4efba874c09e35803af43cc69556ba0f1937226240b0ab318364` |
-| Toque `Toque-X.Y.Z.apk` | [latest release](https://github.com/Wuki60/MrCuisineVibeConnect/releases/latest) of this repository | (signed with the project key) |
+| Toque `Toque-X.Y.Z.apk` (Connect) | [latest release](https://github.com/Wuki60/MrCuisineVibeConnect/releases/latest) of this repository | (signed with the project key) |
 
 ### SP Flash Tool: console mode, and the GUI fallback
 
@@ -195,7 +221,40 @@ operation in the window — with a computer-use tool, or by guiding the person:
 4. Continue with the next step (`root` after `flash-twrp`, `android` after `flash-root`). Those
    steps check the robot itself, so they work the same after a GUI flash.
 
-## Known problems and fixes
+## Monsieur Cuisine Smart (SKMS 1200): in test
+
+Toque drives the Smart since 0.8.0, but the project has no Smart: **Smart owners test it and report
+in [issue #59](https://github.com/Wuki60/MrCuisineVibeConnect/issues/59)**. Tell the person so before
+starting. The full guide, with the tests to run, is [docs/SMART.en.md](docs/SMART.en.md).
+
+1. **Root.** Toque has no root guide or script for the Smart. The tablet must be rooted with Magisk,
+   with ADB enabled, by following
+   [Camybrith Cooking's guide](https://github.com/Tidusneo24150/camybrith-cooking/blob/main/docs/GUIDE.en.md).
+   Read it first and keep this file's rules: backup before anything is written, ask before each step
+   that writes to the robot, never type a password. If the robot is already rooted, skip this.
+2. **Check** the robot over ADB: `adb shell getprop ro.build.version.release` gives `8.1.0`, and
+   `adb shell "su -c 'id -u'"` gives `0` (the person may have to tap **Grant** in Magisk). Otherwise
+   stop.
+3. **Download** `Toque-smart-X.Y.Z.apk` from the
+   [latest release](https://github.com/Wuki60/MrCuisineVibeConnect/releases/latest): the asset whose
+   name **starts with `Toque-smart-`** (about 1.1 MB). Ask before downloading.
+4. **Install**, from the repository folder:
+   `powershell -ExecutionPolicy Bypass -File tools\install-robot.ps1 -Apk <folder>\Toque-smart-X.Y.Z.apk`.
+   It installs the APK, sets up root for Toque (`tools/robot/setup-root.sh`) and starts it. If the
+   install fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, another port with the same package name
+   (`app.toque`, for example Camybrith Cooking's Ratatouille Edition) is installed with another
+   signature: `adb uninstall app.toque` removes it, **with its settings and own recipes**. Ask the
+   person first, and suggest exporting those recipes in that app.
+5. **On the robot**: *Which robot is this?* → **Monsieur Cuisine Smart (SKMS 1200)**.
+6. **First run, empty bowl, hand on the main switch**: Settings › Machine › Real machine › Apply.
+   Then the tests of [docs/SMART.en.md](docs/SMART.en.md), in their order. Help the person write
+   what they saw for #59; they post it.
+
+The *Known problems* table below is for the Connect. On a Smart, describe the problem in #59.
+Undo: Toque › Settings › Tools › *Back to the stock app* (it re-enables the stock app's
+`SerialPortMC30Service`), or `tools\restore-robot.ps1 -Uninstall`.
+
+## Known problems and fixes (Connect)
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -219,7 +278,7 @@ operation in the window — with a computer-use tool, or by guiding the person:
 | The rotary knob does nothing | Knob keys not set up | Tap the *Rotary knob not set up* pill on Home and follow the 3 steps |
 | Scale shows "overload · 0 g" right after the install | The robot was resting on the cable or the open cover | Put the robot flat on its feet with nothing under it, screw the cover back, restart it |
 
-## Undo
+## Undo (Connect)
 
 - Back to the stock app, keeping root: Toque › Settings › Tools › *Back to the stock app*, or
   `powershell -ExecutionPolicy Bypass -File tools\restore-robot.ps1 -Uninstall`.
@@ -228,7 +287,8 @@ operation in the window — with a computer-use tool, or by guiding the person:
 
 ## After the install
 
-- Updates: Toque › Settings › Updates installs new releases from this repository.
+- Updates: Toque › Settings › Updates installs new releases from this repository, each robot its
+  own APK.
 - Recipes: Settings › Lidl recipes › Sync (monsieur-cuisine.com, no account). Nightly re-sync.
 - Clock: set automatically (time zone from the Internet connection); Settings › Date and time.
 - To work on the robot later over Wi-Fi: `adb connect <robot IP>:5555`.
@@ -239,6 +299,9 @@ If you were asked to change Toque rather than install it: `core/` is pure Kotlin
 holds the protocol, the safety rules, the controller and the recipe parsing; `app/` is the Android
 app (minSdk 23, no AndroidX, views built in code). Run `gradlew :core:test` (unit tests, including a
 check that every interface text has an English translation in `app/src/main/assets/lang/en.json`)
-and `gradlew :app:assembleRelease`. Interface texts are written in French and wrapped in `tr(...)`.
+and `gradlew :app:assembleRelease` (the Smart's APK: `gradlew :app:assembleRelease -PtoqueSmart=true`).
+Each robot has a profile in `core/.../robot/Robots.kt` (serial port, protocol, programs,
+temperatures, Lidl recipe type) and its own codec (`ConnectCodec`, `SmartCodec`). Interface texts are
+written in French and wrapped in `tr(...)`.
 Motor safety rules live in `core/.../machine/Safety.kt` and are enforced by `MachineController`:
 keep them strict, and add a test in `ControllerTest` for any behaviour change.

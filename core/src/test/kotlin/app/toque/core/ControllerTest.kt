@@ -458,6 +458,7 @@ class ControllerTest {
 
         b.step(2_000)
         assertTrue(b.snap.scaleStable)
-        assertEquals(500, b.snap.weightG)
+        // La balance simulée tend vers 500 g sans forcément l'atteindre (troncature) : à 2 g près.
+        assertTrue("poids ${b.snap.weightG}", kotlin.math.abs(b.snap.weightG - 500) <= 2)
     }
 }

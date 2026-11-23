@@ -1,6 +1,9 @@
 package app.toque.core.machine
 
 import app.toque.core.i18n.tr
+import app.toque.core.protocol.BoardCodec
+import app.toque.core.protocol.ConnectCodec
+import app.toque.core.protocol.SmartCodec
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
@@ -72,14 +75,32 @@ object RootShell {
 }
 
 /**
- * Liaison série réelle avec la base moteur (`/dev/ttyMT0`, 4800 bauds), via un petit pont
- * shell exécuté en root. Exige un accès exclusif : l'appli d'origine doit être arrêtée.
+ * Liaison série réelle avec la base moteur, via un petit pont shell exécuté en root. Exige un
+ * accès exclusif : l'appli d'origine (et, sur le Smart, l'appli de test usine) est arrêtée.
+ *
+ * Connect : `/dev/ttyMT0`, 4800 bauds, `de.silpion.mc2`, [ConnectCodec].
+ * Smart : `/dev/ttyMT1`, 9600 bauds, `com.tecpal.device.mc30` + `com.tecpal.testapp.mc30`, [SmartCodec]
+ * (voir [forSmart]).
  */
 class RootSerialTransport(
     private val device: String = "/dev/ttyMT0",
     private val baud: Int = 4800,
     private val vendorPackage: String? = "de.silpion.mc2",
+    private val extraStopPackages: List<String> = emptyList(),
+    override val codec: BoardCodec = ConnectCodec,
 ) : Transport {
+    companion object {
+        const val SMART_DEVICE = "/dev/ttyMT1"
+        const val SMART_BAUD = 9600
+        const val SMART_VENDOR = "com.tecpal.device.mc30"
+        const val SMART_FACTORY_APP = "com.tecpal.testapp.mc30"
+
+        /** Liaison du Monsieur Cuisine Smart. */
+        fun forSmart(device: String = SMART_DEVICE, vendorPackage: String? = SMART_VENDOR) = RootSerialTransport(
+            device, SMART_BAUD, vendorPackage, listOf(SMART_FACTORY_APP), SmartCodec(),
+        )
+    }
+
     override val name: String get() = tr("Base moteur (%s)", device)
 
     @Volatile private var process: Process? = null
@@ -97,7 +118,7 @@ class RootSerialTransport(
             ?: throw IOException(tr("busybox introuvable (fourni par Magisk)"))
         if (lines.none { it == "DEV=ok" }) throw IOException(tr("%s absent", device))
 
-        if (vendorPackage != null) RootShell.run("am force-stop $vendorPackage", 8_000)
+        for (pkg in listOfNotNull(vendorPackage) + extraStopPackages) RootShell.run("am force-stop $pkg", 8_000)
 
         val holders = RootShell.run(
             "B=$bb; for p in /proc/[0-9]*; do for f in \$p/fd/*; do " +
@@ -123,7 +144,11 @@ class RootSerialTransport(
         val script = "D=$device; B=$bb; " +
             "\$B stty -F \$D $baud raw -echo cs8 -cstopb -parenb -crtscts clocal cread || exit 3; " +
             "\$B cat \$D & R=\$!; trap 'kill \$R 2>/dev/null' EXIT INT TERM HUP; " +
-            "\$B cat > \$D; kill \$R 2>/dev/null"
+            "\$B cat > \$D; " +
+            // Toque s'est arrêté (fermeture, plantage, processus tué) : la carte du Smart ne
+            // décompte pas et garderait la dernière commande. On envoie STOP depuis le pont.
+            "for i in 1 2 3; do \$B printf '${shellOctal(codec.stopFrame())}' > \$D; \$B usleep 200000; done; " +
+            "kill \$R 2>/dev/null"
         val p = ProcessBuilder("su", "-c", script).start()
         process = p
         try {
@@ -145,6 +170,10 @@ class RootSerialTransport(
             throw IOException(tr("Pont série arrêté (code %d) %s", exited, err))
         }
     }
+
+    /** Octets sous forme d'échappements octaux pour `printf` (\252\000…). */
+    internal fun shellOctal(bytes: ByteArray): String =
+        bytes.joinToString("") { "\\" + Integer.toOctalString(it.toInt() and 0xFF).padStart(3, '0') }
 
     override fun write(frame: ByteArray) {
         val p = process ?: throw IOException(tr("port fermé"))

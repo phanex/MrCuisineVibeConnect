@@ -38,14 +38,29 @@ object Releases {
     private fun parts(v: String): List<Int> =
         versionOf(v).split('.').map { p -> p.takeWhile { it.isDigit() }.toIntOrNull() ?: 0 }
 
-    /** Analyse la réponse de `GET /repos/{dépôt}/releases/latest`. */
-    fun parse(json: String): Release {
+    /**
+     * Marque de l'APK du Monsieur Cuisine Smart (mode sûr de la machine virtuelle) dans une version :
+     * « Toque-smart-x.y.z.apk ». Rangé après « Toque-x.y.z.apk » par date d'envoi comme par ordre
+     * alphabétique : les anciennes versions de Toque, qui prennent le premier APK, prennent celui du Connect.
+     */
+    const val SMART_PREFIX = "Toque-smart-"
+
+    /**
+     * Analyse la réponse de `GET /repos/{dépôt}/releases/latest`. Une version porte deux APK de la même
+     * source : celui du Connect et celui du Smart ([SMART_PREFIX]). [smart] : prendre celui du Smart,
+     * et seulement lui (sans lui, pas de mise à jour : l'APK du Connect plante sur sa tablette).
+     * Les anciennes versions de Toque prennent le premier APK : celui du Connect doit être joint en premier.
+     */
+    fun parse(json: String, smart: Boolean = false): Release {
         @Suppress("UNCHECKED_CAST")
         val o = Json.parse(json) as? Map<String, Any?> ?: throw IllegalArgumentException("réponse GitHub illisible")
         val tag = o["tag_name"] as? String ?: throw IllegalArgumentException("version sans numéro")
         @Suppress("UNCHECKED_CAST")
         val assets = (o["assets"] as? List<Any?>).orEmpty().mapNotNull { it as? Map<String, Any?> }
-        val apk = assets.firstOrNull { (it["name"] as? String)?.endsWith(".apk", ignoreCase = true) == true }
+        fun name(a: Map<String, Any?>) = (a["name"] as? String).orEmpty()
+        val apks = assets.filter { name(it).endsWith(".apk", ignoreCase = true) }
+        val apk = if (smart) apks.firstOrNull { name(it).startsWith(SMART_PREFIX, ignoreCase = true) }
+        else apks.firstOrNull { !name(it).startsWith(SMART_PREFIX, ignoreCase = true) }
         return Release(
             tag = tag,
             version = versionOf(tag),

@@ -40,6 +40,10 @@ data class Snapshot(
     val waitingStop: Boolean = false,
     val jobSpeed: Int = 0,
     val jobTempLevel: Int = 0,
+    /** Température visée de la phase en cours, en °C (40 °C et programmes du Smart compris), 0 sans chauffe. */
+    val jobTempC: Int = 0,
+    /** Smart : programme automatique en cours ([app.toque.core.protocol.SmartProgram]), vide sinon. */
+    val jobProgram: String = "",
     val jobReverse: Boolean = false,
     val accessory: String = Accessory.BLADE.name,
     val hotBlendConfirmed: Boolean = false,
@@ -72,6 +76,7 @@ data class Snapshot(
         "endReason" to endReason, "phaseIndex" to phaseIndex, "phaseCount" to phaseCount,
         "elapsedMs" to elapsedMs, "totalMs" to totalMs, "remainingMs" to remainingMs,
         "waitingStop" to waitingStop, "jobSpeed" to jobSpeed, "jobTempLevel" to jobTempLevel,
+        "jobTempC" to jobTempC, "jobProgram" to jobProgram,
         "jobReverse" to jobReverse, "accessory" to accessory, "hotBlendConfirmed" to hotBlendConfirmed,
         "turboActive" to turboActive, "wireOperation" to wireOperation, "wireSpeed" to wireSpeed,
         "wireTempLevel" to wireTempLevel, "txHex" to txHex, "txFrames" to txFrames,
@@ -97,6 +102,7 @@ data class Snapshot(
                 endReason = s("endReason"), phaseIndex = i("phaseIndex"), phaseCount = i("phaseCount"),
                 elapsedMs = l("elapsedMs"), totalMs = l("totalMs"), remainingMs = l("remainingMs"),
                 waitingStop = b("waitingStop"), jobSpeed = i("jobSpeed"), jobTempLevel = i("jobTempLevel"),
+                jobTempC = i("jobTempC"), jobProgram = s("jobProgram"),
                 jobReverse = b("jobReverse"), accessory = s("accessory").ifEmpty { Accessory.BLADE.name },
                 hotBlendConfirmed = b("hotBlendConfirmed"), turboActive = b("turboActive"),
                 wireOperation = s("wireOperation"), wireSpeed = i("wireSpeed"), wireTempLevel = i("wireTempLevel"),

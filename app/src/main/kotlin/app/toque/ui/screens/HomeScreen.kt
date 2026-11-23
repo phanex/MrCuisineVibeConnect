@@ -4,10 +4,12 @@ import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
+import app.toque.TimeSync
 import app.toque.core.i18n.I18n
 import app.toque.core.i18n.tr
 import app.toque.core.machine.Accessory
 import app.toque.core.machine.Snapshot
+import app.toque.core.recipes.CommunityRecipes
 import app.toque.core.recipes.UserRecipes
 import app.toque.ui.HoldButton
 import app.toque.ui.Icon
@@ -97,11 +99,12 @@ class HomeScreen(a: MainActivity) : Screen(a) {
             isClickable = true
             setOnClickListener {
                 val mode = a.prefs.mode
-                val msg = when (mode) {
-                    app.toque.Prefs.Mode.DEMO -> tr("Mode démo")
-                    app.toque.Prefs.Mode.TWIN -> tr("Mode jumeau (externe)")
-                    else -> tr("Mode combiné")
+                val name = when (mode) {
+                    app.toque.Prefs.Mode.DEMO -> tr("Démo")
+                    app.toque.Prefs.Mode.TWIN -> tr("Jumeau (PC)")
+                    else -> tr("Machine réelle")
                 }
+                val msg = tr("Mode : %s", name)
                 a.toast(msg, Ui.COOL)
             }
         }
@@ -241,11 +244,11 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         val grid = Ui.vertical(c)
         val row1 = Ui.horizontal(c)
         val row2 = Ui.horizontal(c)
-        val (t1, s1) = tile(Icon.Kind.BOOK, tr("Recettes"), tr("1 118 recettes")) { a.push(RecipesScreen(a)) }
+        val (t1, s1) = tile(Icon.Kind.BOOK, tr("Recettes")) { a.push(RecipesScreen(a)) }
         recipesSub = s1
         row1.addView(t1, tileLp(true))
-        row1.addView(tile(Icon.Kind.POT, tr("Cuisson\nmanuelle"), tr("Contrôle manuel")) { a.push(ManualScreen(a)) }.first, tileLp(true))
-        row1.addView(tile(Icon.Kind.KNEAD, tr("Programmes"), tr("Préréglages")) { a.push(ProgramsScreen(a)) }.first, tileLp(false))
+        row1.addView(tile(Icon.Kind.POT, tr("Cuisson\nmanuelle"), tr("Ajuster à la main")) { a.push(ManualScreen(a)) }.first, tileLp(true))
+        row1.addView(tile(Icon.Kind.KNEAD, tr("Programmes"), tr("Pétrir, vapeur, rissoler, nettoyage")) { a.push(ProgramsScreen(a)) }.first, tileLp(false))
         row2.addView(tile(Icon.Kind.SCALE, tr("Balance"), tr("Peser au gramme")) { a.push(ScaleScreen(a)) }.first, tileLp(true))
         val (t5, s5) = tile(Icon.Kind.STAR, tr("Favoris"), tr("Aucun favori")) { a.push(RecipesScreen(a, favorites = true)) }
         favSub = s5
@@ -291,6 +294,11 @@ class HomeScreen(a: MainActivity) : Screen(a) {
     }
 
     private fun refreshClock() {
+        // Heure et date masquées tant qu'elles ne sont pas réglées (voir TimeSync.showClock) ; la
+        // place reste réservée pour que l'accueil ne saute pas quand elles apparaissent.
+        val show = TimeSync.showClock(a)
+        clock.visibility = if (show) View.VISIBLE else View.INVISIBLE
+        date.visibility = if (show) View.VISIBLE else View.INVISIBLE
         clock.text = MainActivity.now()
         date.text = SimpleDateFormat(tr("EEEE d MMMM"), I18n.locale).format(Date()).replaceFirstChar { it.uppercaseChar() }
         val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
@@ -305,13 +313,15 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         val repo = a.app.recipes
         val n = repo.count
         val perso = repo.index.entries.count { UserRecipes.isUser(it.id) }
-        val lidl = n - perso
+        val community = repo.index.entries.count { CommunityRecipes.isCommunity(it.id) }
+        val lidl = n - perso - community
         recipesSub.text = when {
             !repo.loaded -> tr("Chargement…")
             n == 0 -> tr("Aucune recette Lidl pour l'instant")
             else -> listOfNotNull(
                 when (lidl) { 0 -> null; 1 -> tr("1 recette Lidl"); else -> tr("%d recettes Lidl", lidl) },
                 when (perso) { 0 -> null; 1 -> tr("1 recette perso"); else -> tr("%d recettes perso", perso) },
+                when (community) { 0 -> null; 1 -> tr("1 de la communauté"); else -> tr("%d de la communauté", community) },
             ).joinToString("\n")
         }
         val favs = repo.index.entries.count { it.favorite }

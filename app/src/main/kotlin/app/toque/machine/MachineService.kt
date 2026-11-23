@@ -20,11 +20,13 @@ import app.toque.core.i18n.I18n
 import app.toque.core.i18n.tr
 import app.toque.core.machine.Accessory
 import app.toque.core.machine.ControllerConfig
+import app.toque.core.machine.DemoCodec
 import app.toque.core.machine.JobState
 import app.toque.core.machine.MachineEvent
 import app.toque.core.machine.MachineLoop
 import app.toque.core.machine.MonotonicClock
 import app.toque.core.machine.RootSerialTransport
+import app.toque.core.robot.RobotProfiles
 import app.toque.core.machine.SimBoard
 import app.toque.core.machine.SimTransport
 import app.toque.core.machine.Snapshot
@@ -88,13 +90,16 @@ class MachineService : Service() {
     private fun createLoop() {
         loop?.shutdown()
         prefs = Prefs(this) // relit le fichier écrit par l'interface
+        RobotProfiles.active = prefs.robot
         val mode = prefs.mode
         sim = null
         val factory: () -> Transport = when (mode) {
             Prefs.Mode.DEMO -> {
                 val board = SimBoard(MonotonicClock)
                 sim = board
-                ({ SimTransport(board) })
+                // Démo du robot choisi : ses règles, avec la base simulée du Connect.
+                val codec = DemoCodec.forRobot(prefs.robot.newCodec())
+                ({ SimTransport(board, codec) })
             }
             Prefs.Mode.TWIN -> {
                 val host = prefs.twinHost
@@ -102,14 +107,25 @@ class MachineService : Service() {
                 ({ TcpTransport(host, port) })
             }
             Prefs.Mode.HARDWARE -> {
+                if (!prefs.robotConfirmed) {
+                    // Jamais de trame tant que la personne n'a pas confirmé son robot : une trame d'un
+                    // autre protocole pourrait être mal comprise par la base.
+                    log.write("machine", "robot non confirmé : liaison avec la base fermée")
+                    loop = null
+                    return
+                }
+                val robot = prefs.robot
                 val dev = prefs.serialDevice
                 val vendor = prefs.vendorPackage
-                ({ RootSerialTransport(dev, 4800, vendor) })
+                log.write("machine", "robot : ${robot.displayName} ($dev, ${robot.baud} bauds)")
+                ({ RootSerialTransport(dev, robot.baud, vendor, robot.extraStopPackages, robot.newCodec()) })
             }
         }
         val l = MachineLoop(
             transportFactory = factory,
             config = ControllerConfig(requireBowl = prefs.requireBowl, invertBowl = prefs.invertBowl, hotRamp = prefs.hotRamp),
+            // Cadence du robot pour la vraie base ; la démo et le jumeau parlent comme le Connect.
+            periodMs = if (mode == Prefs.Mode.HARDWARE) prefs.robot.framePeriodMs else RobotProfiles.MC_CONNECT.framePeriodMs,
             onSnapshot = { s -> main.post { publish(s) } },
             onEvent = { e -> main.post { broadcastEvent(e) } },
             log = { line -> log.write("machine", line) },
@@ -181,9 +197,19 @@ class MachineService : Service() {
     }
 
     private fun handle(msg: Message) {
-        val l = loop ?: return
         val to = msg.replyTo
         val id = msg.arg1
+        if (loop == null && msg.what == Ipc.RECONFIGURE) {
+            // Pas de boucle (robot pas encore confirmé en « Machine réelle ») : rien ne tourne, on la crée.
+            createLoop()
+            reply(to, id, Verdict.OK)
+            return
+        }
+        if (loop == null && msg.what == Ipc.REGISTER) {
+            if (to != null && clients.none { it.binder == to.binder }) clients += to
+            return
+        }
+        val l = loop ?: return
         val data = msg.data
         data.getString(Ipc.LANG)?.let { if (it != I18n.code) I18n.select(it) }
         when (msg.what) {
@@ -211,13 +237,15 @@ class MachineService : Service() {
                     (if (data.getBoolean("reverse")) Direction.COUNTER_CLOCKWISE else Direction.CLOCKWISE) else null
                 val total = if (data.containsKey("totalMs")) data.getLong("totalMs") else null
                 val hot = data.getBoolean("hot")
-                l.post { c -> reply(to, id, c.adjust(speed, temp, dir, total, hot)) }
+                val smartLevel = if (data.containsKey("smartLevel")) data.getInt("smartLevel") else null
+                l.post { c -> reply(to, id, c.adjust(speed, temp, dir, total, hot, smartLevel)) }
             }
             Ipc.TURBO_DOWN -> {
                 val acc = try { Accessory.valueOf(data.getString("accessory") ?: "") } catch (_: Exception) { Accessory.BLADE }
                 l.post { c -> reply(to, id, c.turboPress(acc)) }
             }
             Ipc.TURBO_UP -> l.post { c -> c.turboRelease() }
+            Ipc.CONFIRM_COLD -> l.post { c -> reply(to, id, c.confirmCold()) }
             Ipc.TARE -> l.post { c -> c.tare() }
             Ipc.ACK_FAULT -> l.post { c -> reply(to, id, c.acknowledgeFault()) }
             Ipc.RECONFIGURE -> Thread {

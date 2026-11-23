@@ -2,11 +2,14 @@ package app.toque.core.machine
 
 import app.toque.core.i18n.tr
 import app.toque.core.i18n.trKey
+import app.toque.core.protocol.BoardCodec
+import app.toque.core.protocol.ConnectCodec
 import app.toque.core.protocol.Direction
+import app.toque.core.protocol.FrameParser
 import app.toque.core.protocol.Mcc
 import app.toque.core.protocol.MccProtocolException
-import app.toque.core.protocol.MccStreamParser
 import app.toque.core.protocol.Operation
+import app.toque.core.protocol.SmartCodec
 import app.toque.core.protocol.Telemetry
 
 interface Clock {
@@ -103,7 +106,10 @@ class MachineController(
 ) {
     var listener: ((MachineEvent) -> Unit)? = null
 
-    private val parser = MccStreamParser()
+    /** Format des trames de la carte : fourni par la liaison à son ouverture ([onTransportUp]). */
+    var codec: BoardCodec = ConnectCodec
+        private set
+    private var parser: FrameParser = codec.newRxParser()
     private val frameBuffer = ArrayList<ByteArray>(4)
 
     var latest: Telemetry? = null
@@ -122,17 +128,41 @@ class MachineController(
 
     private var job: ActiveJob? = null
     private var turboStartedAt: Long? = null
+
+    /**
+     * Smart : l'utilisateur a confirmé que le contenu est froid (la carte ne mesure la température
+     * qu'après une chauffe). La confirmation est liée à une « époque » : toute ouverture du
+     * couvercle, chauffe envoyée, perte ou changement de liaison passe à l'époque suivante et
+     * l'annule. Elle expire aussi après [Limits.COLD_CONFIRM_MS].
+     */
+    private var coldEpoch = 0
+    /** Époque du dernier refus « contenu froid ? » (la fenêtre de confirmation affichée). */
+    private var coldAskedEpoch = -1
+    private var coldConfirmedEpoch = -1
+    private var coldConfirmedAtMs = 0L
+
+    private fun invalidateCold() {
+        coldEpoch++
+    }
+
+    private fun coldConfirmed(now: Long): Boolean =
+        coldConfirmedEpoch == coldEpoch && now - coldConfirmedAtMs in 0..Limits.COLD_CONFIRM_MS
     private var tarePending = false
     var standby = false
         private set
     private val recentWeights = ArrayDeque<Pair<Long, Int>>()
     private var scaleStableComputed = false
 
+    /** Fin du dernier pétrissage (Malaxer) : l'appli d'origine fait attendre 30 min avant le suivant. */
+    private var kneadEndedAtMs: Long? = null
+
     private var lastWire: Setting = Setting.STOP
     private var stopSinceMs: Long? = null
     private var rampLevel = 0
     private var rampAtMs = 0L
     private var lastLidOpen = false
+    /** Dernier échantillon où la carte indiquait un moteur en marche. */
+    private var lastMotionAtMs = Long.MIN_VALUE / 4
 
     var txFrames = 0L
         private set
@@ -155,6 +185,14 @@ class MachineController(
         var pausedAt = 0L
         var endReason = ""
         var everStarted = false
+        /** Minuterie envoyée pendant la phase courante (octets 25-27 du Smart), hors [PhaseTimer.Total]. */
+        var timerS = 0
+        /** Numéro du dernier échantillon reçu au début de la phase courante. */
+        var phaseSeq = 0L
+        /** Fin de travail déjà prise en compte (attente entre deux pétrissages). */
+        var endNoted = false
+        /** Sens de la dernière phase où la lame tournait (changement de sens à travers un repos). */
+        var lastMovingDir: Direction? = null
 
         val phase: Phase get() = spec.phases[phaseIndex]
         val active: Boolean get() = state == JobState.STARTING || state == JobState.RUNNING || state == JobState.PAUSED
@@ -181,11 +219,12 @@ class MachineController(
 
     private fun onFrame(raw: ByteArray) {
         val t = try {
-            Mcc.decodeRx(raw)
+            codec.decodeRx(raw)
         } catch (e: MccProtocolException) {
             return
         }
         val now = clock.nowMs()
+        if (t.motorOn || t.actualRpm > 0) lastMotionAtMs = now
         seq++
         rxFrames++
         latest = t
@@ -220,6 +259,7 @@ class MachineController(
         if (t.lidOpen != lastLidOpen) {
             lastLidOpen = t.lidOpen
             if (t.lidOpen) {
+                invalidateCold()
                 emit(EventType.LID_OPENED, tr("Couvercle ouvert"))
                 onLidOpened(now)
             } else {
@@ -228,7 +268,7 @@ class MachineController(
         }
 
         if (t.errorDetected && fault?.code != FaultCode.BOARD_ERROR) {
-            raiseFault(FaultCode.BOARD_ERROR, Mcc.boardErrorMessage(t.errorCode), t.errorCode)
+            raiseFault(FaultCode.BOARD_ERROR, codec.errorMessage(t.errorCode), t.errorCode)
         }
 
         val since = stopSinceMs
@@ -251,15 +291,20 @@ class MachineController(
 
     // ------------------------------------------------------------------ transport
 
-    fun onTransportUp(name: String) {
+    fun onTransportUp(name: String, codec: BoardCodec = ConnectCodec) {
         transportName = name
         transportUp = true
+        if (codec !== this.codec) {
+            this.codec = codec
+            parser = codec.newRxParser()
+        }
         parser.reset()
     }
 
     fun onTransportDown(reason: String) {
         val wasUp = transportUp
         transportUp = false
+        invalidateCold()
         parser.reset()
         if (link != LinkState.OFFLINE) setLink(LinkState.OFFLINE)
         if (wasUp && (job?.active == true || turboStartedAt != null))
@@ -272,7 +317,7 @@ class MachineController(
 
     // ------------------------------------------------------------------ émission
 
-    /** À appeler toutes les ~100 ms : met à jour l'état et renvoie la trame à émettre. */
+    /** À appeler à chaque trame (100 ms Connect, 200 ms Smart) : met à jour l'état et renvoie la trame à émettre. */
     fun tick(): ByteArray {
         val now = clock.nowMs()
         if ((link == LinkState.READY || link == LinkState.ARMING) && now - latestAtMs > config.staleMs) {
@@ -291,16 +336,29 @@ class MachineController(
         } else {
             stopSinceMs = null
         }
-        val frame = Mcc.encodeTx(wire.operation, wire.speed, wire.temperatureLevel, wire.direction, tarePending)
-        tarePending = false
-        lastWire = wire
+        // Smart : la tare part seulement entre deux trames STOP (jamais en premier arrêt après un
+        // réglage actif) ; demandée pendant un programme, elle est abandonnée.
+        val tare = tarePending && (!codec.tareOnlyAtRest || (wire.isRest && lastWire.isRest))
+        if (tare || !wire.isRest || !codec.tareOnlyAtRest) tarePending = false
+        val j = job
+        val durationS = if (wire.isRest || j == null) 0
+            else if (j.phase.timer == PhaseTimer.Total) ((j.spec.totalMs + 999) / 1000).toInt() else j.timerS
+        val frame = try {
+            codec.encodeTx(wire.operation, wire.speed, wire.temperatureLevel, wire.direction, tare, durationS, wire.program, wire.smartLevel, wire.programCelsius)
+                .also { lastWire = wire; if (wire.heated) invalidateCold() }
+        } catch (e: IllegalArgumentException) {
+            // Réglage refusé par le codec (ne devrait pas arriver : vérifié au démarrage) : on arrête.
+            raiseFault(FaultCode.WRITE_FAILED, tr("Réglage refusé par le protocole : %s", e.message ?: ""))
+            lastWire = stopSetting()
+            codec.stopFrame(lastWire.direction)
+        }
         txFrames++
         lastTxHex = Mcc.hex(frame)
         return frame
     }
 
     /** Trame d'arrêt immédiate (fermeture, plantage). */
-    fun stopFrame(): ByteArray = Mcc.encodeTx(Operation.STOP, 0, 0, lastWire.direction, false)
+    fun stopFrame(): ByteArray = codec.stopFrame(lastWire.direction)
 
     private fun stopSetting() = Setting(Operation.STOP, 0, 0, lastWire.direction)
 
@@ -315,12 +373,16 @@ class MachineController(
     }
 
     private fun applyRamp(target: Setting, now: Long): Setting {
-        if (target.isRest || target.operation == Operation.TURBO || target.speed == 0) {
+        // Pas de montée progressive pour le Turbo, ni quand la carte refuse les vitesses
+        // intermédiaires (programmes gérés par la carte du Smart : pétrin à vitesse 4 fixe).
+        if (target.isRest || target.operation == Operation.TURBO || target.speed == 0 ||
+            !codec.accepts(target.operation, 1, target.temperatureLevel, target.direction, target.program, target.smartLevel, target.programCelsius)
+        ) {
             rampLevel = target.speed
             rampAtMs = now
             return target
         }
-        val hot = (latest?.actualTemperature ?: 0) >= Limits.HOT_C
+        val hot = (actualTemp() ?: 0) >= Limits.HOT_C
         val step = if (hot) (if (config.hotRamp) config.hotRampStepMs else 0L) else config.rampStepMs
         if (step <= 0) {
             rampLevel = target.speed
@@ -362,20 +424,34 @@ class MachineController(
             return v
         }
         if (t.lidOpen) v += Violation("lid", tr("Fermez et verrouillez le couvercle"))
-        if (t.errorDetected) v += Violation("board_error", Mcc.boardErrorMessage(t.errorCode))
+        if (t.errorDetected) v += Violation("board_error", codec.errorMessage(t.errorCode))
         if (config.requireBowl && !bowlPresent(t)) v += Violation("bowl", tr("Bol non détecté"))
         return v
     }
 
-    private fun actualTemp(): Int? = latest?.actualTemperature
+    /** Température à prendre en compte pour la sécurité (pessimiste si la carte ne la mesure pas toujours). */
+    private fun actualTemp(): Int? {
+        val t = latest?.actualTemperature ?: return null
+        return if (codec.temperatureReliable) t else maxOf(t, Limits.HOT_C)
+    }
 
-    fun startJob(spec: JobSpec): Verdict {
+    fun startJob(requested: JobSpec): Verdict {
         val now = clock.nowMs()
         val j = job
         if (j != null && !j.ended) return Verdict.refuse("busy", tr("Un programme est déjà en cours"))
         if (turboStartedAt != null) return Verdict.refuse("busy", tr("Turbo en cours"))
+        // Smart : pétrin, vapeur et rissolage tels que l'appli d'origine les envoie.
+        val spec = if (codec.rules is SmartCodec) Programs.forSmart(requested) else requested
         val v = ArrayList(baseChecks(now))
         v += SafetyPolicy.checkJob(spec, actualTemp())
+        if (spec.phases.any { p -> p.setting.let { !it.isRest && !codec.accepts(it.operation, it.speed, it.temperatureLevel, it.direction, it.program, it.smartLevel, it.programCelsius) } })
+            v += Violation("unsupported", tr("Programme pas encore pris en charge sur ce robot"))
+        // Comme l'appli d'origine : 30 min entre deux pétrissages, pour laisser refroidir le moteur.
+        val kneadEnd = kneadEndedAtMs
+        if (spec.cooldown && codec.rules is SmartCodec && kneadEnd != null && now - kneadEnd < Limits.KNEAD_COOLDOWN_MS) {
+            val min = ((Limits.KNEAD_COOLDOWN_MS - (now - kneadEnd) + 59_999) / 60_000).toInt()
+            v += Violation(KNEAD_COOLDOWN, tr("Attendez encore %d min avant le prochain pétrissage, pour que l'appareil puisse refroidir.", min))
+        }
         if (v.isNotEmpty()) return Verdict.refuse(v)
         job = ActiveJob(spec, now)
         return Verdict.OK
@@ -416,6 +492,7 @@ class MachineController(
         } else if (j.state == JobState.STOPPING) {
             j.state = JobState.FINISHED
         }
+        noteEnd(j)
         return Verdict.OK
     }
 
@@ -430,7 +507,9 @@ class MachineController(
      * Un changement de sens passe par un arrêt confirmé.
      */
     fun adjust(speed: Int? = null, temperatureLevel: Int? = null, direction: Direction? = null,
-               totalMs: Long? = null, hotBlendConfirmed: Boolean = false): Verdict {
+               totalMs: Long? = null, hotBlendConfirmed: Boolean = false,
+               /** Smart, avec [temperatureLevel] : niveau de sa table (40 °C) ; null = celui de Toque. */
+               smartLevel: Int? = null): Verdict {
         val now = clock.nowMs()
         val j = job ?: return Verdict.refuse("idle", tr("Aucun programme"))
         if (j.ended || j.state == JobState.STOPPING) return Verdict.refuse("state", tr("Programme terminé"))
@@ -443,6 +522,7 @@ class MachineController(
             speed = newSpeed,
             temperatureLevel = newLevel,
             direction = Programs.manualDirection(newSpeed, direction ?: old.direction),
+            smartLevel = if (temperatureLevel != null) smartLevel else old.smartLevel,
         )
         val newTotal = totalMs ?: j.spec.totalMs
         val spec = j.spec.copy(
@@ -451,6 +531,8 @@ class MachineController(
             hotBlendConfirmed = j.spec.hotBlendConfirmed || hotBlendConfirmed,
         )
         val v = ArrayList(SafetyPolicy.checkJob(spec, actualTemp()))
+        if (!codec.accepts(s.operation, s.speed, s.temperatureLevel, s.direction, s.program, s.smartLevel, s.programCelsius))
+            v += Violation("unsupported", tr("Programme pas encore pris en charge sur ce robot"))
         if (newTotal < j.totalElapsed + 1_000) v += Violation("past", tr("Durée déjà écoulée"))
         if (v.isNotEmpty()) return Verdict.refuse(v)
         j.spec = spec
@@ -465,10 +547,41 @@ class MachineController(
         if (j != null && !j.ended) return Verdict.refuse("busy", tr("Arrêtez d'abord le programme en cours"))
         val v = ArrayList(baseChecks(now))
         val t = latest
-        if (v.isEmpty() && t != null && !t.motorStopped) v += Violation("moving", tr("Attendez l'arrêt complet du moteur"))
-        v += SafetyPolicy.checkSetting(Programs.turboSetting(), JobKind.TURBO, accessory, actualTemp(), false)
+        // Le Smart ne mesure pas le régime : on attend aussi stopSettleMs après le dernier écho
+        // « moteur en marche » (ex. arrêt d'un programme en sens inverse puis Turbo).
+        if (v.isEmpty() && ((t != null && !t.motorStopped) || now - lastMotionAtMs < codec.stopSettleMs || !lastWire.isRest))
+            v += Violation("moving", tr("Attendez l'arrêt complet du moteur"))
+        // Température non mesurée (Smart) : Turbo seulement après confirmation « contenu froid » ;
+        // une température réellement mesurée au-dessus de 60 °C l'interdit dans tous les cas.
+        val turboTemp = if (codec.temperatureReliable) actualTemp() else latest?.actualTemperature
+        v += SafetyPolicy.checkSetting(Programs.turboSetting(), JobKind.TURBO, accessory, turboTemp, false)
+        if (!codec.temperatureReliable && !coldConfirmed(now) && v.none { it.code == "turbo_hot" }) {
+            v += Violation(SafetyPolicy.COLD_CONFIRM,
+                tr("Température du contenu inconnue : confirmez qu'il est froid (moins de %d °C)", Limits.HOT_C))
+            coldAskedEpoch = coldEpoch
+        }
+        if (!codec.supports(Operation.TURBO)) v += Violation("unsupported", tr("Programme pas encore pris en charge sur ce robot"))
         if (v.isNotEmpty()) return Verdict.refuse(v)
         turboStartedAt = now
+        return Verdict.OK
+    }
+
+    /**
+     * Smart : l'utilisateur confirme que le contenu est froid, en réponse à un refus
+     * [SafetyPolicy.COLD_CONFIRM]. Refusée si le couvercle a été ouvert ou la liaison a changé
+     * depuis ce refus, si la liaison n'est pas prête ou si le couvercle est ouvert.
+     */
+    fun confirmCold(): Verdict {
+        val now = clock.nowMs()
+        val t = latest
+        if (link != LinkState.READY || !fresh(now) || t == null) return Verdict.refuse("link", tr("Base non connectée"))
+        if (t.lidOpen) return Verdict.refuse("lid", tr("Fermez et verrouillez le couvercle"))
+        if (t.actualTemperature >= Limits.HOT_C)
+            return Verdict.refuse("turbo_hot", tr("Turbo interdit : contenu à %d °C (≥ %d °C)", t.actualTemperature, Limits.HOT_C))
+        if (coldAskedEpoch != coldEpoch)
+            return Verdict.refuse(SafetyPolicy.COLD_CONFIRM, tr("Le couvercle a été ouvert entre-temps : appuyez de nouveau sur Turbo"))
+        coldConfirmedEpoch = coldEpoch
+        coldConfirmedAtMs = now
         return Verdict.OK
     }
 
@@ -517,7 +630,7 @@ class MachineController(
 
     private fun barrierMet(b: Barrier, now: Long): Boolean {
         val t = latest ?: return false
-        return seq > b.afterSeq && fresh(now) && t.motorStopped
+        return seq > b.afterSeq && fresh(now) && t.motorStopped && now - lastMotionAtMs >= codec.stopSettleMs
     }
 
     private fun updateJob(now: Long) {
@@ -530,6 +643,7 @@ class MachineController(
                 if (barrierMet(b, now)) {
                     j.barrier = null
                     if (!enterPhase(j, now)) return
+                    startPhaseTimer(j)
                     j.state = JobState.RUNNING
                     if (j.everStarted) emit(EventType.JOB_RESUMED, j.spec.label)
                     else emit(EventType.JOB_STARTED, j.spec.label)
@@ -539,8 +653,16 @@ class MachineController(
                 }
             }
             JobState.RUNNING -> {
-                j.totalElapsed += dt
                 val ws = j.waitingStop
+                // Programme à étapes de l'appli d'origine : l'arrêt confirmé avant un changement de
+                // sens (ajouté par Toque), ou un repos prolongé jusqu'à l'arrêt de la lame, ne
+                // raccourcit pas la dernière étape.
+                val prolonge = j.spec.capturedSteps && ws == null && j.phaseElapsed >= j.phase.durationMs
+                if (prolonge && j.phaseElapsed - j.phase.durationMs > config.stopTimeoutMs) {
+                    raiseFault(FaultCode.STOP_TIMEOUT, tr("Le moteur ne s'arrête pas entre deux phases"))
+                    return
+                }
+                if ((ws == null && !prolonge) || !j.spec.capturedSteps) j.totalElapsed += dt
                 if (ws != null) {
                     if (barrierMet(ws, now)) {
                         j.waitingStop = null
@@ -557,23 +679,26 @@ class MachineController(
                     j.barrier = Barrier(seq, now)
                     return
                 }
-                if (ws == null && j.phaseElapsed >= j.phase.durationMs) advancePhase(j, now)
+                if (ws == null && (j.phaseElapsed >= j.phase.durationMs || temperatureReached(j, now))) advancePhase(j, now)
             }
             JobState.STOPPING -> {
                 val b = j.barrier ?: Barrier(seq, now).also { j.barrier = it }
                 if (barrierMet(b, now)) {
                     j.state = JobState.FINISHED
                     j.endReason = tr("Terminé")
+                    noteEnd(j)
                     emit(EventType.JOB_FINISHED, j.spec.label)
                 } else if (now - b.sinceMs > config.stopTimeoutMs) {
                     j.state = JobState.FINISHED
                     j.endReason = tr("Terminé")
+                    noteEnd(j)
                     raiseFault(FaultCode.STOP_TIMEOUT, tr("Le moteur ne s'est pas arrêté à la fin du programme"))
                 }
             }
             JobState.PAUSED -> {
                 if (now - j.pausedAt > config.pauseMaxMs) {
                     j.state = JobState.ABORTED
+                    noteEnd(j)
                     j.endReason = tr("Pause trop longue : programme annulé")
                     emit(EventType.JOB_ABORTED, j.endReason)
                 }
@@ -594,6 +719,42 @@ class MachineController(
         return false
     }
 
+    /** Minuterie de la phase qui commence (temps restant ou valeur fixe), et premier échantillon attendu. */
+    private fun startPhaseTimer(j: ActiveJob) {
+        j.phaseSeq = seq
+        j.phase.setting.let { if (!it.isRest && it.speed > 0) j.lastMovingDir = it.direction }
+        j.timerS = when (val t = j.phase.timer) {
+            PhaseTimer.Total -> ((j.spec.totalMs + 999) / 1000).toInt()
+            PhaseTimer.Remaining -> (((j.spec.totalMs - j.totalElapsed).coerceAtLeast(0) + 999) / 1000).toInt()
+            is PhaseTimer.Fixed -> t.seconds
+        }
+    }
+
+    /**
+     * Préchauffe du nettoyage long : la carte a levé le bit 5 (« température atteinte ») dans une
+     * réponse à la trame de cette phase (même niveau de température), reçue après son début.
+     */
+    private fun temperatureReached(j: ActiveJob, now: Long): Boolean {
+        val p = j.phase
+        if (!p.untilTemperature) return false
+        val t = latest ?: return false
+        val level = p.setting.program?.level ?: return false
+        return seq > j.phaseSeq && fresh(now) && t.aboveTargetTemperature && t.targetTemperatureLevel == level
+    }
+
+    /** Lame arrêtée depuis au moins [BoardCodec.stopSettleMs], d'après un échantillon récent. */
+    private fun settled(now: Long): Boolean {
+        val t = latest ?: return false
+        return fresh(now) && t.motorStopped && now - lastMotionAtMs >= codec.stopSettleMs
+    }
+
+    /** Fin d'un travail : un pétrissage de plus de 30 s fait attendre 30 min avant le suivant. */
+    private fun noteEnd(j: ActiveJob) {
+        if (j.endNoted) return
+        j.endNoted = true
+        if (j.spec.cooldown && j.totalElapsed >= KNEAD_COUNTS_MS) kneadEndedAtMs = clock.nowMs()
+    }
+
     private fun advancePhase(j: ActiveJob, now: Long) {
         val phases = j.spec.phases
         var next = j.phaseIndex + 1
@@ -607,10 +768,22 @@ class MachineController(
         }
         val cur = j.phase.setting
         val nxt = phases[next].setting
+        // Après un repos de l'appli d'origine, on compare au sens où la lame tournait avant ce repos
+        // (le repos peut déjà avoir l'autre sens : Malaxer pâte ferme).
+        val restInProgram = cur.program != null && cur.speed == 0
+        val ref = if (restInProgram) j.lastMovingDir ?: cur.direction else cur.direction
+        var directionChange = !cur.isRest && !nxt.isRest && ref != nxt.direction && nxt.speed > 0
+        if (directionChange && restInProgram) {
+            // Repos de l'appli d'origine (vitesse 0, fonction gardée) : comme elle, on repart dans
+            // l'autre sens sans STOP, mais seulement une fois la lame arrêtée ; sinon le repos dure
+            // un peu plus (nouvel essai au prochain tick).
+            if (!settled(now)) return
+            directionChange = false
+        }
         j.phaseIndex = next
         j.phaseElapsed = 0
-        val directionChange = !cur.isRest && !nxt.isRest && cur.direction != nxt.direction && nxt.speed > 0
         val operationChange = !cur.isRest && !nxt.isRest && cur.operation != nxt.operation
+        startPhaseTimer(j)
         when {
             nxt.isRest && !cur.isRest -> j.waitingStop = Barrier(seq, now)
             directionChange || operationChange -> j.waitingStop = Barrier(seq, now)
@@ -636,6 +809,7 @@ class MachineController(
         val j = job
         if (j != null && !j.ended) {
             j.state = JobState.ABORTED
+            noteEnd(j)
             j.endReason = message
             emit(EventType.JOB_ABORTED, message)
         }
@@ -645,6 +819,7 @@ class MachineController(
     private fun setLink(state: LinkState) {
         if (link == state) return
         link = state
+        invalidateCold()
         if (state != LinkState.ARMING) armingCount = 0
         if (state != LinkState.READY) {
             recentWeights.clear()
@@ -663,11 +838,26 @@ class MachineController(
 
     // ------------------------------------------------------------------ état
 
+    companion object {
+        /** Refus « attendez 30 min avant le prochain pétrissage ». */
+        const val KNEAD_COOLDOWN = "knead_cooldown"
+        /** Un pétrissage compte pour l'attente de 30 min s'il a duré au moins ceci. */
+        const val KNEAD_COUNTS_MS = 30_000L
+    }
+
     fun snapshot(): Snapshot {
         val now = clock.nowMs()
         val t = latest
         val j = job
-        val remaining = if (j == null) 0L else (j.spec.totalMs - j.totalElapsed).coerceAtLeast(0)
+        val remaining = if (j == null) 0L else {
+            val r = (j.spec.totalMs - j.totalElapsed).coerceAtLeast(0)
+            // Programme à étapes non cyclique : il finit avec sa dernière étape (préchauffe du
+            // nettoyage long finie tôt, par exemple).
+            if (j.spec.capturedSteps && !j.spec.cyclic) minOf(r,
+                (j.phase.durationMs - j.phaseElapsed).coerceAtLeast(0) +
+                    j.spec.phases.drop(j.phaseIndex + 1).sumOf { minOf(it.durationMs, j.spec.totalMs) })
+            else r
+        }
         val s = j?.phase?.setting
         return Snapshot(
             link = link,
@@ -680,7 +870,7 @@ class MachineController(
             actualTempC = t?.actualTemperature ?: 0,
             targetTempC = t?.targetTemperature ?: 0,
             rpm = t?.actualRpm ?: 0,
-            speedLevel = t?.actualSpeedLevel ?: 0,
+            speedLevel = t?.shownSpeedLevel ?: 0,
             weightG = t?.weight ?: 0,
             scaleStable = scaleStableComputed,
             scaleState = t?.androidScaleState ?: "",
@@ -705,6 +895,8 @@ class MachineController(
             waitingStop = j != null && (j.waitingStop != null || j.state == JobState.STARTING || j.state == JobState.STOPPING),
             jobSpeed = s?.speed ?: 0,
             jobTempLevel = s?.temperatureLevel ?: 0,
+            jobTempC = if (s == null || !s.heated) 0 else s.temperatureC,
+            jobProgram = s?.program?.name ?: "",
             jobReverse = s?.direction == Direction.COUNTER_CLOCKWISE,
             accessory = j?.spec?.accessory?.name ?: Accessory.BLADE.name,
             hotBlendConfirmed = j?.spec?.hotBlendConfirmed ?: false,

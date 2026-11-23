@@ -9,6 +9,7 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import app.toque.TimeSync
 import app.toque.core.i18n.tr
 import app.toque.core.machine.RootShell
 import app.toque.core.machine.Snapshot
@@ -159,7 +160,7 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
     }
 
     private fun refresh() {
-        clock?.text = MainActivity.now()
+        clock?.text = if (TimeSync.showClock(a)) MainActivity.now() else ""
         val temp = a.snapshot.actualTempC
         hot?.let {
             it.text = if (temp >= 50) tr("Bol chaud : %d °C", temp) else ""

@@ -2,12 +2,16 @@
 # when GitHub Actions is available): tag vX.Y.Z, release notes from the commits, the APK attached.
 # Robots then find it in Settings > Updates, and toque-setup.ps1 downloads it.
 #
-#   powershell -ExecutionPolicy Bypass -File tools\publish-release.ps1 -Apk Toque-0.5.1.apk [-RepoInfo]
+#   powershell -ExecutionPolicy Bypass -File tools\publish-release.ps1 -Apk Toque-0.8.0.apk -SmartApk Toque-smart-0.8.0.apk [-RepoInfo]
+#
+# -Apk: the Connect APK (gradlew assembleRelease), attached first: older Toque versions take the first APK.
+# -SmartApk: the Smart APK (gradlew assembleRelease -PtoqueSmart=true), attached as Toque-smart-X.Y.Z.apk.
 #
 # Token: $env:GH_TOKEN, else $env:GITHUB_TOKEN, else "gh auth token", else the github.com
 # credential already stored for git (Git Credential Manager). It is never printed.
 param(
     [Parameter(Mandatory = $true)][string]$Apk,
+    [string]$SmartApk = "",
     [string]$Repo = "Wuki60/MrCuisineVibeConnect",
     [switch]$RepoInfo,
     # Pre-release: on GitHub but not offered to robots (they read /releases/latest) until -Promote.
@@ -38,6 +42,7 @@ $version = ([regex]::Match((Get-Content "app\build.gradle.kts" -Raw), 'versionNa
 if (-not $version) { throw "versionName not found in app\build.gradle.kts" }
 $tag = "v$version"
 if (-not (Test-Path $Apk)) { throw "APK not found: $Apk" }
+if ($SmartApk -and -not (Test-Path $SmartApk)) { throw "Smart APK not found: $SmartApk" }
 $token = Get-Token
 $h = @{ Authorization = "Bearer $token"; Accept = "application/vnd.github+json"; "User-Agent" = "toque-publish"; "X-GitHub-Api-Version" = "2022-11-28" }
 $api = "https://api.github.com/repos/$Repo"
@@ -75,14 +80,25 @@ if (-not ($release.assets | Where-Object { $_.name -eq $name })) {
 } else {
     Write-Host "$name already attached."
 }
+if ($SmartApk) {
+    $smartName = "Toque-smart-$version.apk"
+    $release = Invoke-RestMethod -Uri "$api/releases/$($release.id)" -Headers $h
+    if (-not ($release.assets | Where-Object { $_.name -eq $smartName })) {
+        $upload = "https://uploads.github.com/repos/$Repo/releases/$($release.id)/assets?name=$smartName"
+        Invoke-RestMethod -Method Post -Uri $upload -Headers $h -InFile $SmartApk -ContentType "application/vnd.android.package-archive" | Out-Null
+        Write-Host "$smartName attached."
+    } else {
+        Write-Host "$smartName already attached."
+    }
+}
 
 if ($RepoInfo) {
     $info = @{
-        description = "Toque: a modern replacement interface for the Lidl Monsieur Cuisine Connect (SKMC 1200), with the official recipes, guided cooking and an AI-agent-friendly install guide."
+        description = "Toque: a modern replacement interface for the Lidl Monsieur Cuisine Connect (SKMC 1200, SKMC 1100) and Smart (SKMS 1200, in test), with the official recipes, guided cooking and an AI-agent-friendly install guide."
         homepage = "https://github.com/$Repo#readme"
     } | ConvertTo-Json
     Invoke-RestMethod -Method Patch -Uri $api -Headers $h -Body ([Text.Encoding]::UTF8.GetBytes($info)) -ContentType "application/json; charset=utf-8" | Out-Null
-    $topics = @{ names = @("monsieur-cuisine", "monsieur-cuisine-connect", "lidl", "silvercrest", "android", "kotlin", "magisk", "root", "recipes", "ai-agent") } | ConvertTo-Json
+    $topics = @{ names = @("monsieur-cuisine", "monsieur-cuisine-connect", "monsieur-cuisine-smart", "lidl", "silvercrest", "android", "kotlin", "magisk", "root", "recipes", "ai-agent") } | ConvertTo-Json
     Invoke-RestMethod -Method Put -Uri "$api/topics" -Headers $h -Body ([Text.Encoding]::UTF8.GetBytes($topics)) -ContentType "application/json; charset=utf-8" | Out-Null
     Write-Host "Repository description and topics updated."
 }

@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Process
 import app.toque.core.i18n.I18n
+import app.toque.core.robot.RobotProfiles
 import app.toque.machine.MachineClient
 import app.toque.recipes.RecipeRepo
 import app.toque.ui.MainActivity
@@ -21,6 +22,8 @@ class ToqueApp : Application() {
         private set
     val machine: MachineClient by lazy { MachineClient(this) }
     val recipes: RecipeRepo by lazy { RecipeRepo(this) }
+    /** toqueapp.org : compte relié, recettes de la communauté. */
+    val site: app.toque.site.SiteAccount by lazy { app.toque.site.SiteAccount(this) }
 
     override fun onCreate() {
         super.onCreate()
@@ -28,6 +31,10 @@ class ToqueApp : Application() {
         log = Logbook(this)
         LanguageFiles.install(this, log)
         I18n.select(I18n.resolve(prefs.language, Locale.getDefault().language).code)
+        app.toque.ui.Ui.setTheme(prefs.lightTheme)
+        app.toque.ui.Ui.setAccent(prefs.accentColor)
+        // Robot choisi : lu par le cœur (recettes, réglages proposés), dans les deux processus.
+        RobotProfiles.active = prefs.robot
         // Racines récentes absentes d'Android 6 (voir ExtraRoots), pour toutes les connexions HTTPS.
         try {
             HttpsURLConnection.setDefaultSSLSocketFactory(ExtraRoots.socketFactory(this))
