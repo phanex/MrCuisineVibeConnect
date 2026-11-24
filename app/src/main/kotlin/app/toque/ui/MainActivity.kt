@@ -370,6 +370,8 @@ class MainActivity : Activity() {
     }
 
     private fun show(s: Screen) {
+        lastKnobPressTime = 0L
+        main.removeCallbacks(knobLongPressRunnable)
         content.removeAllViews()
         val v = s.view
         (v.parent as? FrameLayout)?.removeView(v)

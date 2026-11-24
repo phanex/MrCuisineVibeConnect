@@ -76,6 +76,7 @@ class ProgramsScreen(a: MainActivity) : Screen(a) {
     private var selected = 0
     private var focusedIndex = 0
     private var editing = false
+    private var lastStartMs = 0L
     private lateinit var turbo: HoldButton
     private lateinit var startBtn: LinearLayout
 
@@ -223,6 +224,16 @@ class ProgramsScreen(a: MainActivity) : Screen(a) {
         return true
     }
 
+    private fun launchSelected() {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastStartMs < 600L) return
+        lastStartMs = now
+        editing = false
+        val p = progs[selected]
+        a.startJob(p.make(p.seconds * 1000L, p.celsius))
+        refresh()
+    }
+
     override fun onKnobPress(): Boolean {
         val s = a.snapshot
         if (s.busy) {
@@ -233,10 +244,7 @@ class ProgramsScreen(a: MainActivity) : Screen(a) {
         }
         if (editing) {
             if (startBtn.isEnabled && startBtn.visibility == View.VISIBLE) {
-                editing = false
-                val p = progs[selected]
-                a.startJob(p.make(p.seconds * 1000L, p.celsius))
-                refresh()
+                launchSelected()
             }
         } else {
             selected = focusedIndex
@@ -250,10 +258,7 @@ class ProgramsScreen(a: MainActivity) : Screen(a) {
         val s = a.snapshot
         if (!s.busy && startBtn.isEnabled && startBtn.visibility == View.VISIBLE) {
             selected = focusedIndex
-            editing = false
-            val p = progs[selected]
-            a.startJob(p.make(p.seconds * 1000L, p.celsius))
-            refresh()
+            launchSelected()
             return true
         }
         return false

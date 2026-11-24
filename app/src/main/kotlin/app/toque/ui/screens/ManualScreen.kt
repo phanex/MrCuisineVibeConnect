@@ -77,6 +77,7 @@ class ManualScreen(
     private var pendingEdit = false
     private var timeEdited = false
     private var configuredSeconds = seconds
+    private var lastStartMs = 0L
     private val pushLive = Runnable { sendAdjust() }
     /** Jusqu'à cette heure, l'anneau montre la consigne réglée ici plutôt que celle du programme en cours. */
     private var ownTargetUntil = 0L
@@ -229,6 +230,9 @@ class ManualScreen(
     )
 
     private fun start() {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastStartMs < 600L) return
+        lastStartMs = now
         onPick?.let { pick ->
             pick(app.toque.core.recipes.StepMachine(seconds = seconds, speed = speed, tempC = tempC,
                 reverse = reverse && speed > 0, accessory = accessory))
