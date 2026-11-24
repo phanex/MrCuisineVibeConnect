@@ -271,7 +271,7 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
 
     private fun handleTare() {
         val now = System.currentTimeMillis()
-        if (lastAutoRecordTimeMs > 0L && now - lastAutoRecordTimeMs <= 5000L && history.isNotEmpty()) {
+        if (lastAutoRecordTimeMs > 0L && now - lastAutoRecordTimeMs <= 5000L && history.isNotEmpty() && lastWeightG >= 10) {
             history.removeAt(history.lastIndex)
             renderHistory()
         } else if (lastWeightG > 5 && lastWeightG != lastAutoLoggedWeight) {
