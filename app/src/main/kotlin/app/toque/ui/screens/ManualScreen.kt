@@ -58,6 +58,7 @@ class ManualScreen(
     private var reverse = preset?.reverse ?: false
     private var accessory = preset?.accessory ?: Accessory.BLADE
     private var selected = 0
+    private var editing = false
 
     private lateinit var timeCard: ValueCard
     private lateinit var tempCard: ValueCard
@@ -90,7 +91,7 @@ class ManualScreen(
         speedCard = ValueCard(c, tr("Vitesse"), Icon.Kind.SPEED)
         val all = listOf(timeCard, tempCard, speedCard)
         for ((i, card) in all.withIndex()) {
-            card.onSelect = { selected = i; refresh() }
+            card.onSelect = { selected = i; editing = true; refresh() }
             card.onMinus = { change(i, -1) }
             card.onPlus = { change(i, 1) }
             cards.addView(card, LinearLayout.LayoutParams(0, Ui.MATCH, 1f).apply { if (i < 2) rightMargin = Ui.u(14) })
@@ -276,14 +277,36 @@ class ManualScreen(
             in 4..6 -> tr("Hacher")
             else -> tr("Mixer")
         } + if (reverse && speed > 0) " · " + tr("inverse") else "")
-        timeCard.select(selected == 0)
-        tempCard.select(selected == 1)
-        speedCard.select(selected == 2)
+        timeCard.setFocusState(when {
+            selected == 0 && editing -> ValueCard.State.EDITING
+            selected == 0 -> ValueCard.State.FOCUSED
+            else -> ValueCard.State.IDLE
+        })
+        tempCard.setFocusState(when {
+            selected == 1 && editing -> ValueCard.State.EDITING
+            selected == 1 -> ValueCard.State.FOCUSED
+            else -> ValueCard.State.IDLE
+        })
+        speedCard.setFocusState(when {
+            selected == 2 && editing -> ValueCard.State.EDITING
+            selected == 2 -> ValueCard.State.FOCUSED
+            else -> ValueCard.State.IDLE
+        })
 
         dirRow.removeAllViews()
         dirRow.alpha = if (speed == 0) 0.35f else 1f
-        dirRow.addView(Ui.toggleChip(c, tr("Sens normal"), !reverse, minWidth = 110, height = 64) { setReverse(false) }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 8))
-        dirRow.addView(Ui.toggleChip(c, tr("Inverse"), reverse, minWidth = 110, height = 64) { setReverse(true) })
+        dirRow.addView(Ui.toggleChip(c, tr("Sens normal"), !reverse, minWidth = 110, height = 64) {
+            selected = 3
+            setReverse(false)
+        }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 8))
+        dirRow.addView(Ui.toggleChip(c, tr("Inverse"), reverse, minWidth = 110, height = 64) {
+            selected = 3
+            setReverse(true)
+        })
+        val dirFocused = (selected == 3)
+        dirRow.background = if (dirFocused) Ui.round(Ui.SURFACE, 34f, Ui.TEXT3, 2.5f) else null
+        val pad = if (dirFocused) Ui.u(3) else 0
+        dirRow.setPadding(pad, pad, pad, pad)
         accRow.removeAllViews()
         accRow.addView(Ui.toggleChip(c, Accessory.BLADE.label, accessory == Accessory.BLADE, minWidth = 100, height = 64) { setAccessory(Accessory.BLADE) }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 8))
         accRow.addView(Ui.toggleChip(c, Accessory.WHISK.label, accessory == Accessory.WHISK, minWidth = 100, height = 64) { setAccessory(Accessory.WHISK) })
@@ -293,6 +316,9 @@ class ManualScreen(
         val v = SafetyPolicy.checkJob(spec(), bowl).filter { it.code != SafetyPolicy.HOT_BLEND }
         hint.text = v.firstOrNull()?.message ?: if (onPick == null && a.snapshot.hot && speed >= 4) tr("Contenu chaud : confirmation demandée") else idleHint()
         Ui.setButtonEnabled(startBtn, v.isEmpty())
+        val startFocused = (selected == 4)
+        val startBase = if (startFocused) Ui.round(Ui.ACCENT, 40f, Ui.TEXT3, 3f) else Ui.round(Ui.ACCENT, 40f)
+        startBtn.background = Ui.pressable(startBase, 40f)
         showRing(a.snapshot)
     }
 
@@ -340,6 +366,10 @@ class ManualScreen(
         wasLive = live
         val busy = s.busy
         startBtn.visibility = if (busy && s.state != JobState.PAUSED) View.GONE else View.VISIBLE
+        if (startBtn.visibility == View.GONE && selected == 4) {
+            selected = 0
+            refresh()
+        }
         (startBtn.getChildAt(1) as TextView).text = if (s.state == JobState.PAUSED && manualJob) tr("Reprendre") else tr("Démarrer")
         turbo.isEnabled = !busy || s.turboActive
         turbo.alpha = if (turbo.isEnabled) 1f else 0.35f
@@ -362,16 +392,41 @@ class ManualScreen(
     private fun idleHint(): String = if (speed == 0 && tempLevel > 0) tr("Sans mélange : surveillez la cuisson") else ""
 
     override fun onKnob(delta: Int): Boolean {
-        change(selected, delta)
+        if (editing) {
+            if (selected in 0..2) change(selected, delta)
+        } else {
+            val maxTarget = if (startBtn.visibility == View.VISIBLE) 4 else 3
+            val next = (selected + delta).coerceIn(0, maxTarget)
+            if (next != selected) {
+                selected = next
+                refresh()
+            }
+        }
         return true
     }
 
     override fun onKnobPress(): Boolean {
-        if (onPick != null) { start(); return true }
         val s = a.snapshot
-        when {
-            s.state == JobState.RUNNING -> a.machine.pause { a.refusal(it) }
-            else -> start()
+        if (s.state == JobState.RUNNING || s.state == JobState.STARTING) {
+            a.machine.pause { a.refusal(it) }
+            editing = false
+            refresh()
+            return true
+        }
+        when (selected) {
+            in 0..2 -> {
+                editing = !editing
+                refresh()
+            }
+            3 -> {
+                setReverse(!reverse)
+                refresh()
+            }
+            4 -> {
+                if (startBtn.isEnabled && startBtn.visibility == View.VISIBLE) {
+                    start()
+                }
+            }
         }
         return true
     }

@@ -24,7 +24,13 @@ class ValueCard(c: Context, label: String, icon: Icon.Kind) : LinearLayout(c) {
     var onSelect: () -> Unit = {}
     /** Répétition à l'appui long (désactivée pendant une cuisson pour vitesse et température). */
     var repeatEnabled = true
-    private var isSel = false
+
+    enum class State {
+        IDLE,       // Non sélectionné : bordure fine grise Ui.STROKE 1f
+        FOCUSED,    // Curseur de navigation : bordure épaisse grise Ui.TEXT3 2.5f
+        EDITING     // En cours de modification : bordure épaisse orange Ui.ACCENT 2.5f
+    }
+    private var focusState = State.IDLE
 
     init {
         orientation = VERTICAL
@@ -59,10 +65,14 @@ class ValueCard(c: Context, label: String, icon: Icon.Kind) : LinearLayout(c) {
         subView.text = sub
     }
 
-    fun select(sel: Boolean) {
-        if (sel == isSel) return
-        isSel = sel
+    fun setFocusState(s: State) {
+        if (s == focusState) return
+        focusState = s
         refreshBg()
+    }
+
+    fun select(sel: Boolean) {
+        setFocusState(if (sel) State.EDITING else State.IDLE)
     }
 
     fun setEditable(on: Boolean) {
@@ -71,8 +81,13 @@ class ValueCard(c: Context, label: String, icon: Icon.Kind) : LinearLayout(c) {
     }
 
     private fun refreshBg() {
-        background = Ui.round(Ui.SURFACE, 26f, if (isSel) Ui.ACCENT else Ui.STROKE, if (isSel) 2.5f else 1f)
-        iconView.color = if (isSel) Ui.ACCENT else Ui.TEXT2
+        val (strokeColor, strokeWidth) = when (focusState) {
+            State.IDLE -> Ui.STROKE to 1f
+            State.FOCUSED -> Ui.TEXT3 to 2.5f
+            State.EDITING -> Ui.ACCENT to 2.5f
+        }
+        background = Ui.round(Ui.SURFACE, 26f, strokeColor, strokeWidth)
+        iconView.color = if (focusState == State.EDITING) Ui.ACCENT else Ui.TEXT2
     }
 
     companion object {

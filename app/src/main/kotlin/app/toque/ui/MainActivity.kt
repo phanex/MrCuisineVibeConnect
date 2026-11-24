@@ -65,6 +65,17 @@ class MainActivity : Activity() {
         private set
     private var swallowTouch = false
     var knobListener: ((KeyEvent) -> Unit)? = null
+    private var knobLongHandled = false
+    private val knobLongPressRunnable = Runnable {
+        knobLongHandled = true
+        val s = current
+        if (s?.onKnobLongPress() != true) {
+            if (stack.size > 1) {
+                chime(1)
+                back()
+            }
+        }
+    }
 
     val prefs: Prefs get() = app.prefs
     val machine get() = app.machine
@@ -289,7 +300,13 @@ class MainActivity : Activity() {
         }
     }
 
+    override fun onPause() {
+        main.removeCallbacks(knobLongPressRunnable)
+        super.onPause()
+    }
+
     override fun onStop() {
+        main.removeCallbacks(knobLongPressRunnable)
         unsubscribe?.invoke()
         unsubscribeEvents?.invoke()
         topBar.stopClock()
@@ -398,7 +415,7 @@ class MainActivity : Activity() {
             if (event.action == KeyEvent.ACTION_DOWN) l(event)
             return true
         }
-        if (!isBack && event.action == KeyEvent.ACTION_DOWN && overlay.visibility != View.VISIBLE) {
+        if (!isBack && overlay.visibility != View.VISIBLE) {
             val k = event.keyCode
             // Par défaut : les flèches, et les touches du bouton du robot (clavier mtk-kpd :
             // F6 à droite, F7 à gauche, F5 à l'appui).
@@ -413,10 +430,28 @@ class MainActivity : Activity() {
             }
             val s = current
             if ((left || right || press) && !prefs.knobSetupDone) prefs.knobSetupDone = true
-            if (s != null && currentFocus !is android.widget.EditText) {
-                if (left && s.onKnob(-1)) return true
-                if (right && s.onKnob(1)) return true
-                if (press && s.onKnobPress()) return true
+
+            if (press) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    if (event.repeatCount == 0) {
+                        knobLongHandled = false
+                        main.postDelayed(knobLongPressRunnable, 500)
+                    }
+                    return true
+                } else if (event.action == KeyEvent.ACTION_UP) {
+                    main.removeCallbacks(knobLongPressRunnable)
+                    if (!knobLongHandled) {
+                        if (s != null && currentFocus !is android.widget.EditText) {
+                            s.onKnobPress()
+                        }
+                    }
+                    return true
+                }
+            } else if (event.action == KeyEvent.ACTION_DOWN) {
+                if (s != null && currentFocus !is android.widget.EditText) {
+                    if (left && s.onKnob(-1)) return true
+                    if (right && s.onKnob(1)) return true
+                }
             }
         }
         return super.dispatchKeyEvent(event)

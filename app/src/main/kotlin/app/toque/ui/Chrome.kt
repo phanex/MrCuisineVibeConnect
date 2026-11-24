@@ -35,6 +35,7 @@ abstract class Screen(val a: MainActivity) {
     open fun ownsFinishSound(e: MachineEvent): Boolean = false
     open fun onKnob(delta: Int): Boolean = false
     open fun onKnobPress(): Boolean = false
+    open fun onKnobLongPress(): Boolean = false
     /** false : l'écran demande d'abord confirmation (modifications non enregistrées) et appelle [proceed] si on confirme. */
     open fun canLeave(proceed: () -> Unit): Boolean = true
     /** Empêche la mise en veille tant que cet écran est affiché (balance). */
