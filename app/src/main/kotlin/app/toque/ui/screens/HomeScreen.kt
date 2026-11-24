@@ -46,6 +46,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
     private lateinit var timerChip: LinearLayout
     private lateinit var timerText: TextView
     private lateinit var timerCount: TextView
+    private lateinit var turboBtn: HoldButton
     private lateinit var searchHint: TextView
     /** Titre de la recette guidée cherché dans la base (catalogue pas encore chargé) : une fois par recette. */
     private var titleLookup = ""
@@ -270,6 +271,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
             setOnClickListener { a.machine.tare() }
         }
         scaleRow.addView(tareBtn, LinearLayout.LayoutParams(Ui.u(64), Ui.WRAP))
+        knobTargets += tareBtn to 16f
         scaleRow.isClickable = true
         scaleRow.setOnClickListener { a.push(ScaleScreen(a)) }
         left.addView(scaleRow, Ui.lp(Ui.MATCH, Ui.WRAP))
@@ -278,10 +280,11 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         left.addView(Ui.spacer(c, weight = 1f))
 
         val bottomActions = Ui.horizontal(c, Gravity.CENTER_VERTICAL)
-        val turbo = HoldButton(c, tr("Turbo"), onDown = {
+        turboBtn = HoldButton(c, tr("Turbo"), onDown = {
             a.machine.turboDown(Accessory.BLADE) { v -> if (!v.ok) a.refusal(v) }
         }, onUp = { a.machine.turboUp() })
-        bottomActions.addView(turbo, LinearLayout.LayoutParams(Ui.WRAP, Ui.WRAP))
+        bottomActions.addView(turboBtn, LinearLayout.LayoutParams(Ui.WRAP, Ui.WRAP))
+        knobTargets += turboBtn to 32f
         val timerBtn = Ui.button(c, tr("Minuteur"), Ui.Style.SECONDARY, Icon.Kind.TIMER) {
             TimerPanel.open(a)
         }.apply {
@@ -348,7 +351,13 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         }
         override fun mark(i: Int, on: Boolean) = KnobFocus.frame(knobTargets[i].first, on, knobTargets[i].second)
         override fun activate(i: Int) {
-            knobTargets[i].first.performClick()
+            val v = knobTargets[i].first
+            if (v === turboBtn) {
+                if (a.snapshot.turboActive) a.machine.turboUp()
+                else a.machine.turboDown(Accessory.BLADE) { r -> if (!r.ok) a.refusal(r) }
+            } else {
+                v.performClick()
+            }
         }
     }
 
