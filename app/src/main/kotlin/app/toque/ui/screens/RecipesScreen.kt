@@ -61,11 +61,9 @@ class RecipesScreen(
         else -> tr("Recettes")
     }
     override val titleCounter: String?
-        get() = when {
-            recipeCount < 0 -> null
-            recipeCount == 1 -> tr("1 recette")
-            else -> tr("%d recettes", recipeCount)
-        }
+        get() = if (recipeCount >= 0) {
+            java.text.NumberFormat.getIntegerInstance(java.util.Locale.FRANCE).format(recipeCount).replace('\u00A0', ' ')
+        } else null
 
     /**
      * Liste ouverte depuis « Recettes » ou la recherche : elle reprend les pastilles et le tri de la
