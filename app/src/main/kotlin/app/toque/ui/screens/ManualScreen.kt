@@ -463,7 +463,8 @@ class ManualScreen(
         if (editing) {
             editing = false
             refresh()
+            return true
         }
-        return true
+        return false
     }
 }

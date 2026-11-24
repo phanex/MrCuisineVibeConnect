@@ -269,7 +269,8 @@ class ProgramsScreen(a: MainActivity) : Screen(a) {
         if (editing) {
             editing = false
             refresh()
+            return true
         }
-        return true
+        return false
     }
 }
