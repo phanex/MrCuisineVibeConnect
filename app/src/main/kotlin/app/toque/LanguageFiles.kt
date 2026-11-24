@@ -26,7 +26,22 @@ object LanguageFiles {
             if (!f.name.endsWith(".json")) continue
             read(f.name, log) { f.readText() }?.let { found += it }
         }
-        I18n.install(found)
+        val overlays = HashMap<String, Map<String, String>>()
+        try {
+            for (name in context.assets.list("lang_fork").orEmpty().sorted()) {
+                if (!name.endsWith(".json")) continue
+                read(name, log) { context.assets.open("lang_fork/$name").bufferedReader().use { it.readText() } }?.let {
+                    overlays[it.code] = it.texts
+                }
+            }
+        } catch (e: Exception) {
+            log.write("langue", "langues fork illisibles : $e")
+        }
+        val merged = found.map { lang ->
+            val extra = overlays[lang.code]
+            if (extra.isNullOrEmpty()) lang else Language(lang.code, lang.name, lang.texts + extra)
+        }
+        I18n.install(merged)
     }
 
     private fun read(fileName: String, log: Logbook, text: () -> String): Language? = try {
