@@ -358,6 +358,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
     override fun onShow() {
         refreshClock()
         refresh()
+        refreshTiles()
         unsub = a.app.recipes.onChange { refresh() }
         a.updates.onChange = { refresh() }
         view.removeCallbacks(tick)
@@ -435,10 +436,6 @@ class HomeScreen(a: MainActivity) : Screen(a) {
             val strokeWidth = if (focused) 2.5f else 1f
             t.background = Ui.pressable(Ui.round(Ui.SURFACE, 26f, strokeColor, strokeWidth), 26f)
         }
-    }
-
-    override fun onShow() {
-        refreshTiles()
     }
 
     override fun onKnob(delta: Int): Boolean {
