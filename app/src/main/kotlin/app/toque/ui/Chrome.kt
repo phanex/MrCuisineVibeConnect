@@ -78,6 +78,7 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
     private val linkIcon = Icon(a, Icon.Kind.LINK, Ui.OK)
     private val clock = Ui.text(a, "", 28f, Ui.TEXT, Ui.THIN)
     private val home = Icon(a, Icon.Kind.HOME, Ui.TEXT)
+    private val backGroup = Ui.horizontal(a, Gravity.CENTER_VERTICAL)
     /** Minuteur de cuisine : bouton rond au repos, pastille orange (temps restant, nombre) quand il en tourne. */
     private val timerButton = Icon(a, Icon.Kind.TIMER, Ui.TEXT)
     private val timerChip = Ui.chip(a, "", Icon.Kind.TIMER, Ui.ACCENT, Ui.ACCENT_DIM)
@@ -103,20 +104,21 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
         setGravity(Gravity.CENTER_VERTICAL)
         setPadding(Ui.u(34), Ui.u(TOP_GAP), Ui.u(24), 0)
 
-        // Cluster de navigation à gauche : [◁]   [⌂]    Titre
+        // Retour + titre groupés à gauche comme une seule zone « Retour » ; accueil à droite.
         roundButton(back) { a.back() }
-        addView(back, LayoutParams(Ui.u(TOUCH), Ui.u(TOUCH)))
-
-        roundButton(home) { a.home() }
-        addView(home, LayoutParams(Ui.u(TOUCH), Ui.u(TOUCH)).apply { leftMargin = Ui.u(12) })
+        backGroup.addView(back, LayoutParams(Ui.u(TOUCH), Ui.u(TOUCH)))
 
         titleBox.addView(titleView)
         titleBox.addView(counterView, LayoutParams(Ui.WRAP, Ui.WRAP).apply { leftMargin = Ui.u(10) })
         counterView.visibility = View.GONE
-        addView(titleBox, LayoutParams(0, Ui.WRAP, 1f).apply {
-            leftMargin = Ui.u(24)
+        backGroup.addView(titleBox, LayoutParams(Ui.WRAP, Ui.WRAP).apply {
+            leftMargin = Ui.u(12)
             gravity = Gravity.CENTER_VERTICAL
         })
+        backGroup.setOnClickListener { a.back() }
+        val leftSlot = Ui.horizontal(a, Gravity.CENTER_VERTICAL)
+        leftSlot.addView(backGroup, LayoutParams(Ui.WRAP, Ui.WRAP))
+        addView(leftSlot, LayoutParams(0, Ui.WRAP, 1f).apply { rightMargin = Ui.u(12) })
 
         // Indicateurs et horloge à droite
         roundButton(timerButton) { TimerPanel.open(a) }
@@ -134,6 +136,8 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
         addView(tempBox, Ui.lp(Ui.WRAP, Ui.WRAP, r = 20))
         addView(linkIcon, Ui.lp(Ui.u(20), Ui.u(20), r = 16))
         addView(clock, Ui.lp(Ui.WRAP, Ui.WRAP))
+        roundButton(home) { a.home() }
+        addView(home, LayoutParams(Ui.u(TOUCH), Ui.u(TOUCH)).apply { leftMargin = Ui.u(12) })
         lid.visibility = View.GONE
         bowl.visibility = View.GONE
         tempBox.visibility = View.GONE
@@ -221,6 +225,7 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
             counterView.visibility = View.GONE
         }
         back.visibility = if (canGoBack) View.VISIBLE else View.GONE
+        backGroup.isClickable = canGoBack
         home.visibility = if (canGoBack) View.VISIBLE else View.GONE
         // Pas de doublon d'horloge sur l'écran d'accueil qui affiche déjà l'heure en grand.
         clock.visibility = if (canGoBack) View.VISIBLE else View.GONE
