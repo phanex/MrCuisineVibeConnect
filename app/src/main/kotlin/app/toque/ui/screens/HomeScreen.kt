@@ -281,12 +281,12 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         val turbo = HoldButton(c, tr("Turbo"), onDown = {
             a.machine.turboDown(Accessory.BLADE) { v -> if (!v.ok) a.refusal(v) }
         }, onUp = { a.machine.turboUp() })
-        bottomActions.addView(turbo, LinearLayout.LayoutParams(Ui.WRAP, Ui.u(54)))
-        val timerBtn = Ui.button(c, tr("Minuteur"), Ui.Style.SECONDARY, Icon.Kind.TIMER, height = 54, textSize = 18f) {
+        bottomActions.addView(turbo, LinearLayout.LayoutParams(Ui.WRAP, Ui.WRAP))
+        val timerBtn = Ui.button(c, tr("Minuteur"), Ui.Style.SECONDARY, Icon.Kind.TIMER) {
             TimerPanel.open(a)
         }
-        bottomActions.addView(timerBtn, LinearLayout.LayoutParams(Ui.WRAP, Ui.u(54)).apply { leftMargin = Ui.u(12) })
-        knobTargets += timerBtn to 27f
+        bottomActions.addView(timerBtn, LinearLayout.LayoutParams(Ui.WRAP, Ui.WRAP).apply { leftMargin = Ui.u(12) })
+        knobTargets += timerBtn to 32f
         left.addView(bottomActions, LinearLayout.LayoutParams(Ui.WRAP, Ui.WRAP).apply {
             gravity = Gravity.CENTER_HORIZONTAL
         })
