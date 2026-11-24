@@ -449,6 +449,12 @@ class MainActivity : Activity() {
             EventType.LID_OPENED -> if (snapshot.busy || snapshot.state != null) toast(tr("Couvercle ouvert : pause"), Ui.WARN)
             EventType.JOB_PAUSED -> if (e.message != PauseReason.USER.label) toast(e.message, Ui.WARN)
             EventType.TURBO_END -> toast(e.message, Ui.TEXT2)
+            EventType.SCALE_ZEROED -> toast(e.message, Ui.OK)
+            EventType.SCALE_INFO -> toast(e.message, Ui.TEXT2)
+            EventType.BOWL_LEARNED -> {
+                if (e.value > 0) prefs.emptyBowlG = e.value
+                toast(e.message, Ui.OK)
+            }
             else -> Unit
         }
     }

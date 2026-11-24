@@ -70,6 +70,7 @@ class RecipesScreen(
     private lateinit var grid: GridView
     private lateinit var empty: LinearLayout
     private lateinit var emptyText: TextView
+    private var refreshBtn: View? = null
     private val adapter = Adapter()
     private var unsub: (() -> Unit)? = null
     private val runSearch = Runnable { search() }
@@ -109,6 +110,13 @@ class RecipesScreen(
         clear.setOnClickListener { input.setText("") }
         field.addView(clear, LinearLayout.LayoutParams(Ui.u(48), Ui.u(48)))
         bar.addView(field, LinearLayout.LayoutParams(0, Ui.u(64), 1f))
+        count = Ui.text(c, "", 17f, Ui.TEXT2)
+        bar.addView(count, Ui.lp(Ui.WRAP, Ui.WRAP, l = 18))
+        if (favorites) {
+            // Favoris : reprendre tout de suite ceux du compte toqueapp.org (et les recettes du site).
+            refreshBtn = Ui.button(c, tr("Actualiser"), Ui.Style.SECONDARY, Icon.Kind.SYNC, height = 64, textSize = 18f) { refreshFavorites() }
+                .also { bar.addView(it, Ui.lp(Ui.WRAP, Ui.WRAP, l = 16)) }
+        }
         bar.addView(Ui.button(c, tr("Nouvelle recette"), Ui.Style.SECONDARY, Icon.Kind.PLUS, height = 64, textSize = 18f) {
             a.hideKeyboard()
             a.push(RecipeEditScreen(a, UserRecipes.blank(), isNew = true))
@@ -218,6 +226,25 @@ class RecipesScreen(
             filter.source == RecipeSource.USER && query.isBlank() ->
                 tr("Aucune recette perso pour l'instant.\nTouchez « Nouvelle recette », ou le crayon d'une recette Lidl pour en faire votre version.")
             else -> tr("Aucune recette ne correspond.\nAstuce : séparez plusieurs ingrédients par des virgules.")
+        }
+    }
+
+    /** Bouton Actualiser des favoris : synchro avec toqueapp.org (compte relié ou recettes de la communauté). */
+    private fun refreshFavorites() {
+        val site = a.app.site
+        if (!a.prefs.siteLinked && !a.prefs.siteCommunity) {
+            a.toast(tr("Reliez un compte Toque (Réglages › Compte Toque) pour retrouver ici vos favoris du site."), Ui.WARN)
+            return
+        }
+        if (site.busy) {
+            a.toast(tr("Actualisation…"))
+            return
+        }
+        refreshBtn?.apply { isEnabled = false; alpha = 0.5f }
+        a.toast(tr("Actualisation…"))
+        site.sync { r ->
+            refreshBtn?.apply { isEnabled = true; alpha = 1f }
+            if (r != null) a.toast(r.message, if (r.ok) Ui.OK else Ui.WARN)
         }
     }
 

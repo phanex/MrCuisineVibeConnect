@@ -109,6 +109,44 @@ class SiteTest {
         assertTrue(t.calls.single().url.contains("lang=en"))
     }
 
+    @Test fun aRecipeTranslatedOnTheSiteArrivesInTheRobotLanguage() {
+        val t = FakeSite()
+        t.replies["community"] = {
+            page(null, """{"id":"toqueapp-3","title":"Ketchup","language":"fr",
+               "ingredients":[{"group":"","items":[{"qty":"","unit":"","name":"tomates 750 g","note":""}]}],
+               "steps":[{"text":"Lavez 750 g de tomates."}],
+               "site":{"id":3,"updatedAt":"2026-11-24T01:00:00Z",
+                 "translation":{"language":"fr","original":"en","translator":"Wuki60","updatedAt":"2026-11-24T02:01:38Z"}}}""")
+        }
+        val r = ToqueSite(t).community("", 1, "fr").recipes.single()
+        assertEquals("Lavez 750 g de tomates.", r.steps.single().text)
+        assertEquals("tomates 750 g", r.ingredients.single().items.single().name)
+        assertEquals("fr", r.language)
+        assertTrue(t.calls.single().url.contains("lang=fr"))
+    }
+
+    @Test fun communityRecipesTakeTheSitePhotoOnly() {
+        val t = FakeSite()
+        val photo = "https://toqueapp.org/uploads/recipes/r3-00515a6500f07223.webp"
+        t.replies["community"] = {
+            page(null,
+                """{"id":"toqueapp-3","title":"Ketchup","site":{"id":3,"updatedAt":"2026-11-24T01:00:00Z","image":"$photo"}}""",
+                """{"id":"toqueapp-4","title":"Ailleurs","image":"https://evil.example/x.jpg","site":{"id":4,"updatedAt":"2026-11-24T01:00:00Z"}}""",
+                """{"id":"toqueapp-5","title":"Piège","site":{"id":5,"updatedAt":"2026-11-24T01:00:00Z","image":"https://toqueapp.org/uploads/recipes/../../config.php"}}""",
+                """{"id":"toqueapp-6","title":"Sans photo","site":{"id":6,"updatedAt":"2026-11-24T01:00:00Z"}}""")
+        }
+        val list = ToqueSite(t).community("", 1, "fr").recipes.associateBy { it.id }
+        assertEquals(photo, list.getValue("toqueapp-3").image)
+        assertEquals("", list.getValue("toqueapp-4").image)
+        assertEquals("", list.getValue("toqueapp-5").image)
+        assertEquals("", list.getValue("toqueapp-6").image)
+        val site = ToqueSite(t)
+        assertEquals(photo, site.photoUrl(photo))
+        assertEquals("", site.photoUrl("http://toqueapp.org/uploads/recipes/r3-00515a6500f07223.webp"))
+        assertEquals("", site.photoUrl("https://toqueapp.org.evil.example/uploads/recipes/r3-00515a6500f07223.webp"))
+        assertEquals("", site.photoUrl(null))
+    }
+
     @Test fun savingAPersonalRecipeSendsOnlyTheRecipe() {
         val t = FakeSite()
         t.replies["recipe"] = { ToqueSite.Reply(201, """{"id":31,"recipe":{}}""") }

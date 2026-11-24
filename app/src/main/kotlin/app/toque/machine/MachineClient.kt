@@ -44,7 +44,7 @@ class MachineClient(private val context: Context) {
             Ipc.EVENT -> {
                 val type = try { EventType.valueOf(msg.data.getString("type") ?: "") } catch (_: Exception) { null }
                 if (type != null) {
-                    val e = MachineEvent(type, msg.data.getString("message") ?: "")
+                    val e = MachineEvent(type, msg.data.getString("message") ?: "", msg.data.getInt("value"))
                     for (l in ArrayList(eventListeners)) l(e)
                 }
             }
@@ -116,7 +116,9 @@ class MachineClient(private val context: Context) {
         sendRaw(Ipc.RESUME, Bundle().apply { putBoolean("hot", hot) }, cb)
     fun stop(cb: (Verdict) -> Unit = {}) = sendRaw(Ipc.STOP, null, cb)
     fun clearFinished() = sendRaw(Ipc.CLEAR, null, null)
-    fun tare() = sendRaw(Ipc.TARE, null, null)
+    /** [auto] : tare faite par Toque (recette), qui n'apprend jamais le poids du bol vide. */
+    fun tare(auto: Boolean = false) = sendRaw(Ipc.TARE, if (auto) Bundle().apply { putBoolean("auto", true) } else null, null)
+    fun forgetEmptyBowl() = sendRaw(Ipc.FORGET_BOWL, null, null)
     fun acknowledge(cb: (Verdict) -> Unit) = sendRaw(Ipc.ACK_FAULT, null, cb)
     fun turboDown(accessory: Accessory, cb: (Verdict) -> Unit) =
         sendRaw(Ipc.TURBO_DOWN, Bundle().apply { putString("accessory", accessory.name) }, cb)

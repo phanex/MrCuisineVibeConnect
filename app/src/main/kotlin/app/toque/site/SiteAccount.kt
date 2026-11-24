@@ -1,5 +1,6 @@
 package app.toque.site
 
+import android.graphics.BitmapFactory
 import android.os.Handler
 import android.os.Looper
 import app.toque.Http
@@ -10,6 +11,7 @@ import app.toque.core.recipes.CommunityRecipes
 import app.toque.core.recipes.Recipe
 import app.toque.core.site.SiteSync
 import app.toque.core.site.ToqueSite
+import java.io.File
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -127,13 +129,26 @@ class SiteAccount(private val app: ToqueApp) {
         if (!running.compareAndSet(false, true)) return null
         changed()
         try {
+            if (prefs.siteFormat < FORMAT) {
+                // Recettes reçues par une version plus ancienne (sans photo) : tout redemander une fois.
+                prefs.siteSince = ""
+                prefs.siteFormat = FORMAT
+            }
             val r = try {
                 SiteSync(client, store).run(prefs.siteCommunity, ToqueSite.langFor(I18n.code))
             } catch (e: Exception) {
                 app.log.crash("site", e)
                 SiteSync.Result(false, 0, 0, 0, tr("toqueapp.org : erreur (%s)", e.message ?: e.toString()))
             }
-            if (r.added + r.updated > 0) repo.load()
+            // Catalogue rechargé tout de suite : les photos à chercher se lisent dans l'index à jour.
+            if (r.added + r.updated > 0) repo.refresh()
+            val photos = try {
+                photos()
+            } catch (e: Exception) {
+                app.log.crash("site", e)
+                0
+            }
+            if (photos > 0) repo.photosChanged()
             prefs.siteLastMs = System.currentTimeMillis()
             prefs.siteLastResult = SimpleDateFormat(tr("dd/MM à HH:mm"), I18n.locale).format(Date()) + " : " + r.message
             app.log.write("site", r.message)
@@ -161,9 +176,54 @@ class SiteAccount(private val app: ToqueApp) {
             } else {
                 prefs.siteSince = ""
                 repo.removeCommunityExcept(emptySet())
+                try {
+                    photos(download = false)
+                } catch (_: Exception) {
+                }
                 changed()
             }
         }
+    }
+
+    /**
+     * Photos des recettes de la communauté sur le robot (bannière et vignette) : la petite version
+     * du site (480 × 360, quelques dizaines de Ko), gardée telle quelle (aucun réencodage), une seule
+     * fois. Celles des recettes parties du robot ou remplacées sur le site sont effacées. Rend le
+     * nombre de photos reçues. [download] faux : seulement le ménage.
+     */
+    private fun photos(download: Boolean = true): Int {
+        if (!repo.loaded) return 0
+        val dir = repo.imagesDir
+        val wanted = HashMap<String, String>()
+        for (e in repo.index.entries) {
+            if (CommunityRecipes.isCommunity(e.id) && client.photoUrl(e.image).isNotEmpty()) wanted[e.image.substringAfterLast('/')] = e.image
+        }
+        var got = 0
+        var failed = 0
+        if (download) for ((name, url) in wanted) {
+            if (File(dir, name).length() > 0) continue
+            val bytes = fetchPhoto(url.replace(PHOTO_EXT, "-s.$1")) ?: fetchPhoto(url)
+            if (bytes == null) {
+                if (++failed >= 3) break  // site injoignable : la prochaine synchro reprendra
+                continue
+            }
+            val tmp = File(dir, "$name.part")
+            tmp.writeBytes(bytes)
+            if (tmp.renameTo(File(dir, name))) got++ else tmp.delete()
+        }
+        dir.listFiles()?.forEach { f -> if (ToqueSite.PHOTO_NAME.matches(f.name) && f.name !in wanted) f.delete() }
+        if (got > 0) app.log.write("site", "$got photo(s) de recettes reçue(s)")
+        return got
+    }
+
+    /** Octets d'une photo du site, seulement si c'est bien une image (en-tête lu, rien n'est décodé). */
+    private fun fetchPhoto(url: String): ByteArray? = try {
+        val bytes = Http.bytes(url, maxBytes = 2 * 1024 * 1024)
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth > 0) bytes else null
+    } catch (e: IOException) {
+        null
     }
 
     /** Étoile touchée sur une recette de la communauté : envoyée au compte (tout de suite, ou plus tard si hors ligne). */
@@ -223,6 +283,12 @@ class SiteAccount(private val app: ToqueApp) {
             }
             main.post { done(error) }
         }
+    }
+
+    companion object {
+        /** 1 : les recettes du site arrivent avec leur photo (0.8.2). */
+        const val FORMAT = 1
+        private val PHOTO_EXT = Regex("\\.(webp|jpg|png)$")
     }
 
     /** Une recette perso modifiée, déjà sur le site : la mettre à jour (même visibilité). */

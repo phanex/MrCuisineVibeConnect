@@ -65,6 +65,32 @@ object Http {
         }
     }
 
+    /** Petit fichier (photo d'une recette du site) : ses octets ; IOException si la réponse n'est pas 200 ou dépasse [maxBytes]. */
+    fun bytes(url: String, timeoutMs: Int = 15_000, maxBytes: Int = 1024 * 1024): ByteArray {
+        val c = URL(url).openConnection() as HttpURLConnection
+        try {
+            c.connectTimeout = timeoutMs
+            c.readTimeout = timeoutMs
+            c.instanceFollowRedirects = false
+            c.setRequestProperty("User-Agent", userAgent)
+            val code = c.responseCode
+            if (code != 200) throw IOException(tr("réponse %d du serveur", code))
+            c.inputStream.use { input ->
+                val out = ByteArrayOutputStream(64 * 1024)
+                val buf = ByteArray(8192)
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    out.write(buf, 0, n)
+                    if (out.size() > maxBytes) throw IOException(tr("réponse trop grande"))
+                }
+                return out.toByteArray()
+            }
+        } finally {
+            c.disconnect()
+        }
+    }
+
     fun get(url: String, headers: Map<String, String> = emptyMap(), timeoutMs: Int = 15_000, maxBytes: Int = 1024 * 1024): Response {
         val c = URL(url).openConnection() as HttpURLConnection
         try {

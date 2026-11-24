@@ -11,6 +11,7 @@ import app.toque.core.protocol.MccProtocolException
 import app.toque.core.protocol.Operation
 import app.toque.core.protocol.SmartCodec
 import app.toque.core.protocol.Telemetry
+import kotlin.math.abs
 
 interface Clock {
     fun nowMs(): Long
@@ -59,9 +60,15 @@ class Verdict private constructor(val ok: Boolean, val violations: List<Violatio
 enum class EventType {
     JOB_STARTED, JOB_PAUSED, JOB_RESUMED, PHASE_CHANGED, JOB_FINISHED, JOB_ABORTED,
     LID_OPENED, LID_CLOSED, FAULT, FAULT_CLEARED, LINK_CHANGED, TURBO_END,
+    /** Balance remise à zéro d'elle-même (bol vide replacé). */
+    SCALE_ZEROED,
+    /** Information sur la balance à montrer (bol replacé chargé, conseil). */
+    SCALE_INFO,
+    /** Poids du bol vide appris : [MachineEvent.value] en grammes, à mémoriser par l'interface. */
+    BOWL_LEARNED,
 }
 
-data class MachineEvent(val type: EventType, val message: String)
+data class MachineEvent(val type: EventType, val message: String, val value: Int = 0)
 
 class ControllerConfig(
     /** Âge maximal d'un échantillon pour autoriser un démarrage. */
@@ -88,7 +95,32 @@ class ControllerConfig(
     val requireBowl: Boolean = false,
     /** Certaines bases signalent le bol à l'envers (bit NTC à 1 quand le bol est retiré) : inverser la lecture. */
     val invertBowl: Boolean = false,
+    /**
+     * Remettre la balance à zéro quand le bol est replacé VIDE sur le socle. « Vide » = la masse
+     * posée sur le socle correspond, à [BowlScale.TOLERANCE_G] près, à [emptyBowlG] ; un bol replacé
+     * plus lourd n'est jamais taré (son contenu resterait sinon invisible).
+     */
+    val bowlAutoZero: Boolean = false,
+    /** Masse du bol vide (bol, lame, couvercle…) apprise sur ce robot, en g ; 0 = pas encore apprise. */
+    val emptyBowlG: Int = 0,
 )
+
+/** Réglages de la remise à zéro au retour du bol. */
+object BowlScale {
+    /** Écart toléré entre la masse posée et le bol vide mémorisé. */
+    const val TOLERANCE_G = 40
+    /** Le capteur du bol doit garder son nouvel état aussi longtemps pour compter. */
+    const val DEBOUNCE_MS = 500L
+    /** Poids stable depuis au moins… avant toute lecture de référence. */
+    const val SETTLE_MS = 800L
+    /** Après le retour du bol, le poids est évalué pendant… (le temps de poser le couvercle). */
+    const val RETURN_WINDOW_MS = 30_000L
+    /** Un appui sur Tare dans ce délai après le retour du bol apprend le bol vide. */
+    const val LEARN_WINDOW_MS = 5 * 60_000L
+    /** Masses plausibles pour un bol vide. */
+    const val MIN_EMPTY_G = 500
+    const val MAX_EMPTY_G = 4_000
+}
 
 /**
  * Cœur de pilotage. Un seul fil d'exécution doit l'appeler (voir [MachineLoop]).
@@ -150,6 +182,23 @@ class MachineController(
     private var tarePending = false
     var standby = false
         private set
+
+    // Retour du bol sur le socle (voir [ControllerConfig.bowlAutoZero]).
+    /** Bol mémorisé, appris pendant cette session ou lu dans la configuration. */
+    var emptyBowlG: Int = config.emptyBowlG
+        private set
+    private var bowlRaw: Boolean? = null
+    private var bowlRawSinceMs = 0L
+    /** État du bol après anti-rebond ; null = inconnu (début de liaison). */
+    private var bowlIn: Boolean? = null
+    private var stableSinceMs: Long? = null
+    /** Poids lu socle vide, dans le repère du zéro actuel de la base ; null = inconnu. */
+    private var baseRefG: Int? = null
+    /** Bol replacé à cet instant, masse encore à évaluer. */
+    private var bowlReturnedAtMs: Long? = null
+    private var lastReturnMassG: Int? = null
+    private var learnUntilMs = Long.MIN_VALUE / 4
+    private var bowlHintShown = false
     private val recentWeights = ArrayDeque<Pair<Long, Int>>()
     private var scaleStableComputed = false
 
@@ -243,6 +292,7 @@ class MachineController(
             }
             (maxW - minW) <= 5
         } else false
+        updateBowlScale(t, now)
 
         when (link) {
             LinkState.OFFLINE, LinkState.LOST -> {
@@ -280,6 +330,70 @@ class MachineController(
                 if (fault?.code != FaultCode.UNEXPECTED_HEAT)
                     raiseFault(FaultCode.UNEXPECTED_HEAT, tr("La chauffe reste active alors qu'elle devrait être coupée. Coupez l'interrupteur principal."))
             }
+        }
+    }
+
+    /**
+     * Suit le bol et la balance : socle vide (référence), puis retour du bol. Masse posée =
+     * poids lu − poids du socle vide, indépendante des tares faites entre-temps.
+     */
+    private fun updateBowlScale(t: Telemetry, now: Long) {
+        val raw = bowlPresent(t)
+        if (raw != bowlRaw) {
+            bowlRaw = raw
+            bowlRawSinceMs = now
+        }
+        if (now - bowlRawSinceMs >= BowlScale.DEBOUNCE_MS && raw != bowlIn) {
+            val was = bowlIn
+            bowlIn = raw
+            if (!raw) {
+                bowlReturnedAtMs = null
+                learnUntilMs = Long.MIN_VALUE / 4
+            } else if (was == false) {
+                bowlReturnedAtMs = now
+                lastReturnMassG = null
+            }
+        }
+        if (t.scaleState != "normal" || !scaleStableComputed) {
+            stableSinceMs = null
+            return
+        }
+        val since = stableSinceMs ?: now.also { stableSinceMs = it }
+        if (now - since < BowlScale.SETTLE_MS || bowlRaw != bowlIn) return
+        if (bowlIn == false) {
+            baseRefG = t.weight
+            return
+        }
+        val returned = bowlReturnedAtMs ?: return
+        if (now - returned > BowlScale.RETURN_WINDOW_MS) {
+            bowlReturnedAtMs = null
+            return
+        }
+        val base = baseRefG ?: return
+        val mass = t.weight - base
+        val last = lastReturnMassG
+        if (last != null && abs(mass - last) <= BowlScale.TOLERANCE_G) return
+        lastReturnMassG = mass
+        learnUntilMs = now + BowlScale.LEARN_WINDOW_MS
+        if (config.bowlAutoZero) onBowlReturned(mass)
+    }
+
+    private fun onBowlReturned(massG: Int) {
+        val empty = emptyBowlG
+        when {
+            empty <= 0 -> if (!bowlHintShown) {
+                bowlHintShown = true
+                emit(EventType.SCALE_INFO, tr("Bol replacé. S'il est vide, appuyez sur Tare : Toque retiendra son poids et remettra ensuite la balance à zéro à chaque retour du bol vide."))
+            }
+            abs(massG - empty) <= BowlScale.TOLERANCE_G -> if (!busy && fault == null) {
+                requestTare()
+                bowlReturnedAtMs = null
+                learnUntilMs = Long.MIN_VALUE / 4
+                emit(EventType.SCALE_ZEROED, tr("Bol vide replacé : balance remise à zéro"))
+            }
+            massG > empty + BowlScale.TOLERANCE_G ->
+                emit(EventType.SCALE_INFO, tr("Bol replacé avec environ %d g de contenu : balance laissée telle quelle", massG - empty))
+            else -> Unit // plus léger que le bol mémorisé (couvercle pas encore posé…) : on attend
         }
     }
 
@@ -340,6 +454,11 @@ class MachineController(
         // réglage actif) ; demandée pendant un programme, elle est abandonnée.
         val tare = tarePending && (!codec.tareOnlyAtRest || (wire.isRest && lastWire.isRest))
         if (tare || !wire.isRest || !codec.tareOnlyAtRest) tarePending = false
+        if (tare) {
+            // Le zéro de la base va passer au poids actuel : la référence socle vide suit.
+            val w = latest?.weight
+            baseRefG = if (w == null) null else baseRefG?.minus(w)
+        }
         val j = job
         val durationS = if (wire.isRest || j == null) 0
             else if (j.phase.timer == PhaseTimer.Total) ((j.spec.totalMs + 999) / 1000).toInt() else j.timerS
@@ -589,10 +708,38 @@ class MachineController(
         turboStartedAt = null
     }
 
-    fun tare() {
+    /**
+     * Tare demandée par la personne. [learn] : si elle survient peu après le retour du bol, la masse
+     * posée devient le bol vide de référence (désactivé pour les tares automatiques des recettes).
+     */
+    fun tare(learn: Boolean = true) {
+        val t = latest
+        val base = baseRefG
+        if (learn && config.bowlAutoZero && bowlIn == true && t != null && base != null && t.scaleState == "normal" &&
+            clock.nowMs() <= learnUntilMs && !busy) {
+            val mass = t.weight - base
+            // Rien d'ajouté depuis le retour du bol : c'est bien le bol tel qu'il a été replacé.
+            val unchanged = lastReturnMassG?.let { abs(mass - it) <= BowlScale.TOLERANCE_G } == true
+            if (unchanged && mass in BowlScale.MIN_EMPTY_G..BowlScale.MAX_EMPTY_G) {
+                emptyBowlG = mass
+                learnUntilMs = Long.MIN_VALUE / 4
+                emit(EventType.BOWL_LEARNED, tr("Poids du bol vide mémorisé : %d g", mass), mass)
+            }
+        }
+        requestTare()
+    }
+
+    /** Oublie le bol vide appris (réglages). */
+    fun forgetEmptyBowl() {
+        emptyBowlG = 0
+        bowlHintShown = false
+    }
+
+    private fun requestTare() {
         tarePending = true
         recentWeights.clear()
         scaleStableComputed = false
+        stableSinceMs = null
     }
 
     fun setStandby(enabled: Boolean) {
@@ -825,13 +972,21 @@ class MachineController(
             recentWeights.clear()
             scaleStableComputed = false
         }
+        if (state == LinkState.OFFLINE || state == LinkState.LOST) {
+            // La base peut refaire son zéro en revenant : les références de la balance ne valent plus.
+            baseRefG = null
+            bowlIn = null
+            bowlRaw = null
+            bowlReturnedAtMs = null
+            stableSinceMs = null
+        }
         emit(EventType.LINK_CHANGED, state.label)
     }
 
-    private fun emit(type: EventType, message: String) {
+    private fun emit(type: EventType, message: String, value: Int = 0) {
         val l = listener ?: return
         try {
-            l(MachineEvent(type, message))
+            l(MachineEvent(type, message, value))
         } catch (_: Throwable) {
         }
     }

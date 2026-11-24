@@ -443,6 +443,9 @@ class RecipeRepo(private val context: Context) {
         exec.submit { rebuild() }.get()
     }
 
+    /** Des photos sont arrivées : les écrans ouverts se redessinent. */
+    fun photosChanged() = notifyChanged()
+
     fun imageFile(name: String): File? {
         if (name.isBlank()) return null
         val clean = name.substringAfterLast('/')

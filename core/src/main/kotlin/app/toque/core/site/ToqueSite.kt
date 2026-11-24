@@ -117,7 +117,16 @@ class ToqueSite(private val transport: Transport, val baseUrl: String = DEFAULT_
         val id = r.str("id").orEmpty()
         if (!CommunityRecipes.isCommunity(id) || CommunityRecipes.siteId(id) == null) return@mapNotNull null
         // Toujours une recette de la communauté, quoi que dise la réponse (jamais une recette perso).
-        RecipeCodec.fromMap(r, RecipeSource.COMMUNITY)?.copy(source = RecipeSource.COMMUNITY, favorite = false)
+        // Sa photo : seulement celle que le site lui-même sert (site.image), jamais une autre adresse.
+        RecipeCodec.fromMap(r, RecipeSource.COMMUNITY)
+            ?.copy(source = RecipeSource.COMMUNITY, favorite = false, image = photoUrl(r["site"].obj().str("image")))
+    }
+
+    /** Adresse d'une photo du site (« https://toqueapp.org/uploads/recipes/r3-….webp »), ou "" si elle n'en est pas une. */
+    fun photoUrl(url: String?): String {
+        val u = url?.trim().orEmpty()
+        val prefix = "$baseUrl/uploads/recipes/"
+        return if (u.startsWith(prefix) && PHOTO_NAME.matches(u.substring(prefix.length))) u else ""
     }
 
     private fun call(
@@ -151,6 +160,8 @@ class ToqueSite(private val transport: Transport, val baseUrl: String = DEFAULT_
 
     companion object {
         const val DEFAULT_URL = "https://toqueapp.org"
+        /** Nom des photos des recettes sur le site (www/uploads/recipes) : r<numéro>-<16 hexa>.webp. */
+        val PHOTO_NAME = Regex("r\\d{1,9}-[0-9a-f]{16}\\.(webp|jpg|png)")
         /** Langues des recettes du site (traductions). */
         val LANGUAGES = setOf("fr", "en", "de", "es", "ca", "uk", "it", "nl", "pl", "pt")
 

@@ -61,6 +61,7 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
         addView(tempText)
     }
     private val lid = Ui.chip(a, tr("Couvercle ouvert"), Icon.Kind.LID, Ui.WARN, 0x33FFC14D)
+    private val bowl = Ui.chip(a, tr("Bol retiré"), Icon.Kind.POT, Ui.WARN, 0x33FFC14D)
     private val linkIcon = Icon(a, Icon.Kind.LINK, Ui.OK)
     private val clock = Ui.text(a, "", 28f, Ui.TEXT, Ui.THIN)
     private val home = Icon(a, Icon.Kind.HOME, Ui.TEXT)
@@ -104,10 +105,12 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
 
         // Indicateurs et horloge à droite
         addView(lid, Ui.lp(Ui.WRAP, Ui.WRAP, r = 16))
+        addView(bowl, Ui.lp(Ui.WRAP, Ui.WRAP, r = 16))
         addView(tempBox, Ui.lp(Ui.WRAP, Ui.WRAP, r = 20))
         addView(linkIcon, Ui.lp(Ui.u(20), Ui.u(20), r = 16))
         addView(clock, Ui.lp(Ui.WRAP, Ui.WRAP))
         lid.visibility = View.GONE
+        bowl.visibility = View.GONE
         tempBox.visibility = View.GONE
         linkIcon.visibility = View.GONE
         // Accès caché aux réglages Android : 5 appuis rapides sur l'heure.
@@ -152,6 +155,9 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
 
     fun update(s: Snapshot) {
         lid.visibility = if (s.hasSample && s.lidOpen) View.VISIBLE else View.GONE
+        // Seulement si la détection du bol est exigée : la personne a vérifié que le capteur est
+        // fiable (sens réglé), sinon la pastille resterait affichée à tort.
+        bowl.visibility = if (s.hasSample && a.prefs.requireBowl && !s.bowlDetected) View.VISIBLE else View.GONE
         if (s.hasSample) {
             tempBox.visibility = View.VISIBLE
             tempText.text = "${s.actualTempC} °C"

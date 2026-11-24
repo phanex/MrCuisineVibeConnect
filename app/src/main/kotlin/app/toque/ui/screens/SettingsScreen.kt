@@ -127,6 +127,29 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
             Sounds.weighReached(k)
         }, Ui.lp(Ui.MATCH, Ui.u(58), t = 8))
 
+        // ---- Balance
+        safety.addView(toggle(tr("Tare automatique aux étapes de pesée des recettes"), a.prefs.autoTareSteps) { a.prefs.autoTareSteps = it }, Ui.lp(t = 14))
+        safety.addView(Ui.text(c, tr("En passant à une étape « Pesez… », la balance repart de zéro : seul ce que vous ajoutez est compté. Jamais pendant un programme."),
+            15f, Ui.TEXT3).apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 6))
+        safety.addView(toggle(tr("Remettre la balance à zéro quand le bol vide est replacé"), a.prefs.bowlAutoZero) { on ->
+            a.prefs.bowlAutoZero = on
+            a.machine.reconfigure { a.refusal(it) }
+        }, Ui.lp(t = 10))
+        val bowlScaleText = Ui.text(c, "", 15f, Ui.TEXT3).apply { setLineSpacing(0f, 1.1f) }
+        fun showBowl() {
+            val g = a.prefs.emptyBowlG
+            bowlScaleText.text = tr("Toque compare la masse posée au bol vide mémorisé : un bol replacé avec du contenu n'est jamais remis à zéro.") + "\n" +
+                (if (g > 0) tr("Bol vide mémorisé : %d g.", g)
+                else tr("Bol vide pas encore mémorisé : retirez le bol, replacez-le vide (avec son couvercle si vous cuisinez avec), puis appuyez sur Tare."))
+        }
+        showBowl()
+        safety.addView(bowlScaleText, Ui.lp(t = 6))
+        safety.addView(Ui.button(c, tr("Oublier le bol vide mémorisé"), Ui.Style.SECONDARY, height = 52) {
+            a.prefs.emptyBowlG = 0
+            a.machine.forgetEmptyBowl()
+            showBowl()
+        }, Ui.lp(Ui.WRAP, Ui.WRAP, t = 8))
+
         // ---- Langue (titre bilingue : trouvable quelle que soit la langue affichée)
         val language = section(right, tr("Langue · Language"), Icon.Kind.INFO)
         val options = listOf(I18n.AUTO to tr("Automatique (langue du système)")) + I18n.languages.map { it.code to it.name }

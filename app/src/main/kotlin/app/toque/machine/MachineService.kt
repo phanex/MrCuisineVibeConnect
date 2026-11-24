@@ -123,7 +123,8 @@ class MachineService : Service() {
         }
         val l = MachineLoop(
             transportFactory = factory,
-            config = ControllerConfig(requireBowl = prefs.requireBowl, invertBowl = prefs.invertBowl, hotRamp = prefs.hotRamp),
+            config = ControllerConfig(requireBowl = prefs.requireBowl, invertBowl = prefs.invertBowl, hotRamp = prefs.hotRamp,
+                bowlAutoZero = prefs.bowlAutoZero, emptyBowlG = prefs.emptyBowlG),
             // Cadence du robot pour la vraie base ; la démo et le jumeau parlent comme le Connect.
             periodMs = if (mode == Prefs.Mode.HARDWARE) prefs.robot.framePeriodMs else RobotProfiles.MC_CONNECT.framePeriodMs,
             onSnapshot = { s -> main.post { publish(s) } },
@@ -167,6 +168,7 @@ class MachineService : Service() {
         m.data = Bundle().apply {
             putString("type", e.type.name)
             putString("message", e.message)
+            putInt("value", e.value)
         }
         send(m)
         log.write("évènement", "${e.type} ${e.message}")
@@ -246,7 +248,11 @@ class MachineService : Service() {
             }
             Ipc.TURBO_UP -> l.post { c -> c.turboRelease() }
             Ipc.CONFIRM_COLD -> l.post { c -> reply(to, id, c.confirmCold()) }
-            Ipc.TARE -> l.post { c -> c.tare() }
+            Ipc.TARE -> {
+                val learn = !data.getBoolean("auto")
+                l.post { c -> c.tare(learn) }
+            }
+            Ipc.FORGET_BOWL -> l.post { c -> c.forgetEmptyBowl() }
             Ipc.ACK_FAULT -> l.post { c -> reply(to, id, c.acknowledgeFault()) }
             Ipc.RECONFIGURE -> Thread {
                 val busy = try { l.call { it.busy } } catch (_: Exception) { true }

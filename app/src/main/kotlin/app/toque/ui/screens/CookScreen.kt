@@ -149,7 +149,20 @@ class CookScreen(a: MainActivity, private var recipe: Recipe, startStep: Int) : 
         weighArmed = false
         a.prefs.guidedRecipe = recipe.id
         a.prefs.guidedStep = index
+        autoTare()
         render()
+    }
+
+    /**
+     * En arrivant sur une étape de pesée, la balance repart de zéro : on pèse ce qu'on ajoute, pas
+     * le contenu déjà dans le bol. Jamais pendant un programme, ni bol retiré quand le capteur est exigé
+     * (pas à l'ouverture de l'écran : une pesée reprise après coup garderait son poids).
+     */
+    private fun autoTare() {
+        val s = a.snapshot
+        if (recipe.steps.getOrNull(index)?.weigh == null || !a.prefs.autoTareSteps) return
+        if (!s.ready || s.busy || (a.prefs.requireBowl && !s.bowlDetected)) return
+        a.machine.tare(auto = true)
     }
 
     private fun render() {
