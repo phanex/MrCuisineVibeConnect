@@ -13,6 +13,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.Message
 import android.os.Messenger
+import android.os.Process
 import android.os.RemoteException
 import app.toque.Logbook
 import app.toque.Prefs
@@ -50,6 +51,12 @@ class MachineService : Service() {
     private var lastNotified = ""
     private lateinit var prefs: Prefs
     private lateinit var log: Logbook
+
+    /**
+     * Ce que ce service a constaté sur la base du robot. Dans un fichier à lui : les réglages
+     * (Prefs) ne sont écrits que par l'interface, qui tourne dans un autre processus.
+     */
+    private val learned by lazy { getSharedPreferences("base", Context.MODE_PRIVATE) }
 
     private val messenger = Messenger(Handler(Looper.getMainLooper()) { msg ->
         try {
@@ -121,19 +128,36 @@ class MachineService : Service() {
                 ({ RootSerialTransport(dev, robot.baud, vendor, robot.extraStopPackages, robot.newCodec()) })
             }
         }
+        // Le sens du capteur du bol n'est retenu que pour la vraie base : une base simulée a le sien.
+        val real = mode == Prefs.Mode.HARDWARE
+        val seated = if (real && learned.contains(BOWL_BIT_SEATED)) learned.getBoolean(BOWL_BIT_SEATED, true) else null
         val l = MachineLoop(
             transportFactory = factory,
             config = ControllerConfig(requireBowl = prefs.requireBowl, invertBowl = prefs.invertBowl, hotRamp = prefs.hotRamp,
-                bowlAutoZero = prefs.bowlAutoZero, emptyBowlG = prefs.emptyBowlG),
+                bowlAutoZero = prefs.bowlAutoZero, emptyBowlG = prefs.emptyBowlG, bowlBitSeated = seated),
             // Cadence du robot pour la vraie base ; la démo et le jumeau parlent comme le Connect.
             periodMs = if (mode == Prefs.Mode.HARDWARE) prefs.robot.framePeriodMs else RobotProfiles.MC_CONNECT.framePeriodMs,
-            onSnapshot = { s -> main.post { publish(s) } },
+            onSnapshot = { s -> main.post { if (real) rememberBowlSense(s); publish(s) } },
             onEvent = { e -> main.post { broadcastEvent(e) } },
             log = { line -> log.write("machine", line) },
+            // Boucle bloquée et rien ne la débloque : le chien de garde a déjà envoyé des STOP ; on abandonne le
+            // processus. Android relance le service (START_STICKY) et la nouvelle boucle émet des trames STOP.
+            onUnrecoverable = {
+                log.write("machine", "boucle bloquée : le processus machine est abandonné pour repartir proprement")
+                Process.killProcess(Process.myPid())
+            },
         )
         loop = l
         l.start()
         log.write("machine", "boucle démarrée en mode ${mode.label}")
+    }
+
+    /** Retient le sens du capteur du bol constaté par le contrôleur, pour reconnaître un bol retiré dès le prochain démarrage. */
+    private fun rememberBowlSense(s: Snapshot) {
+        if (!s.bowlSenseKnown) return
+        val seated = !s.bowlSenseInverted
+        if (!learned.contains(BOWL_BIT_SEATED) || learned.getBoolean(BOWL_BIT_SEATED, seated) != seated)
+            learned.edit().putBoolean(BOWL_BIT_SEATED, seated).apply()
     }
 
     private fun publish(s: Snapshot) {
@@ -313,6 +337,8 @@ class MachineService : Service() {
     companion object {
         private const val NOTIFICATION_ID = 7
         private const val CHANNEL = "machine"
+        /** Valeur du bit « bol » quand le bol est en place sur ce robot (voir MachineController.bowlBitSeated). */
+        private const val BOWL_BIT_SEATED = "bowlBitSeated"
 
         fun formatClock(ms: Long): String {
             val s = (ms + 999) / 1000

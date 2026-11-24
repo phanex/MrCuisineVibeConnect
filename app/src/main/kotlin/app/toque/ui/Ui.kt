@@ -17,6 +17,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import app.toque.core.look.ColourWheel
 
 /**
  * Thème et utilitaires de mise en page, à l'échelle d'un écran de référence 1024×600.
@@ -65,11 +66,34 @@ object Ui {
         0xFF1C2B3E.toInt(), 0xFF35301A.toInt(), 0xFF1E3320.toInt(), 0xFF3A2A1C.toInt(),
     )
 
-    const val COOL = 0xFF5CC8FF.toInt()
-    const val OK = 0xFF3DDC97.toInt()
-    const val WARN = 0xFFFFC14D.toInt()
-    const val DANGER = 0xFFFF5A5F.toInt()
+    /**
+     * Couleurs d'état : information, réussi, avertissement, danger. Claires sur le thème sombre ;
+     * sur le thème clair, des teintes foncées, lisibles en texte et en icône sur un fond clair
+     * (les mêmes servent aux jauges et aux boutons, avec [ON_COOL] et [ON_WARN] pour le texte posé dessus).
+     */
+    var COOL = COOL_ON_DARK
+        private set
+    var OK = OK_ON_DARK
+        private set
+    var WARN = WARN_ON_DARK
+        private set
+    var DANGER = DANGER_ON_DARK
+        private set
+    /** Texte posé sur un fond [COOL] (bouton) ou [WARN] (Turbo maintenu). */
+    var ON_COOL = 0xFF04131C.toInt()
+        private set
+    var ON_WARN = 0xFF1A1405.toInt()
+        private set
 
+    /** Les couleurs d'état du thème sombre, pour ce qui reste sombre quel que soit le thème (veille). */
+    const val COOL_ON_DARK = 0xFF5CC8FF.toInt()
+    const val OK_ON_DARK = 0xFF3DDC97.toInt()
+    const val WARN_ON_DARK = 0xFFFFC14D.toInt()
+    const val DANGER_ON_DARK = 0xFFFF5A5F.toInt()
+    /** Texte posé sur le voile sombre d'une photo (pastille « Perso », langue de la recette) : clair dans les deux thèmes. */
+    const val ON_PHOTO = 0xFFF3F5F9.toInt()
+
+    /** L'accent en fond : boutons primaires, puces choisies, pastilles pleines, jauges. */
     var ACCENT = ACCENTS[0]
         private set
     var ACCENT_DIM = 0x33FF8A3D
@@ -77,13 +101,41 @@ object Ui {
     /** Texte posé sur l'accent (boutons primaires, puces sélectionnées). */
     var ON_ACCENT = 0xFF1A0E05.toInt()
         private set
+    /**
+     * L'accent en texte, en icône fine ou en trait (cadre d'une carte choisie) sur les surfaces du
+     * thème : l'accent lui-même sur le sombre ; sur le clair, la même teinte assombrie jusqu'à 4,5:1
+     * sur le fond et les surfaces (une couleur vive y est trop pâle pour du texte ou un trait).
+     * Les fonds gardent [ACCENT].
+     */
+    var ACCENT_INK = ACCENTS[0]
+        private set
 
+    /** [color] peut être l'accent : une des dix, ou une couleur qui passe la garde de la roue (ColourWheel). */
+    fun accepts(color: Int): Boolean = color in ACCENTS || ColourWheel.accepts(color)
+
+    /** Choisit l'accent ; une couleur refusée ([accepts]) laisse l'orange d'origine. */
     fun setAccent(color: Int) {
-        val c = if (color in ACCENTS) color else ACCENTS[0]
+        val opaque = color or (0xFF shl 24)
+        val c = if (color in ACCENTS) color else if (accepts(opaque)) opaque else ACCENTS[0]
         ACCENT = c
         ACCENT_DIM = (c and 0x00FFFFFF) or 0x33000000
         fun dark(ch: Int) = (((c shr ch) and 0xFF) * 0.12f).toInt() shl ch
         ON_ACCENT = (0xFF shl 24) or dark(16) or dark(8) or dark(0)
+        ACCENT_INK = inkOf(c)
+    }
+
+    /**
+     * L'encre de [color] sur le thème en cours (voir [ACCENT_INK]) : lisible sur le fond, les surfaces, et
+     * sur le fond discret de l'accent ([ACCENT_DIM] posé sur SURFACE2 : puces, numéros d'étape).
+     */
+    fun inkOf(color: Int): Int {
+        if (!light) return color
+        fun dim(ch: Int): Int {
+            val b = (SURFACE2 shr ch) and 0xFF
+            return Math.round(b + (((color shr ch) and 0xFF) - b) * (0x33 / 255f)) shl ch
+        }
+        val dimBack = (0xFF shl 24) or dim(16) or dim(8) or dim(0)
+        return ColourWheel.ink(color, intArrayOf(BG, SURFACE, SURFACE2, SURFACE3, dimBack))
     }
 
     /** Applique le thème clair ou sombre (fond, surfaces, texte). L'accent est inchangé. */
@@ -101,6 +153,12 @@ object Ui {
             SCRIM = 0x99000000.toInt()
             bgGradient = intArrayOf(0xFFF7F8FB.toInt(), 0xFFEEF1F6.toInt(), 0xFFE4E9F1.toInt())
             rippleColor = 0x22000000
+            COOL = 0xFF0B6FA8.toInt()
+            OK = 0xFF10794D.toInt()
+            WARN = 0xFF9A5B00.toInt()
+            DANGER = 0xFFC62828.toInt()
+            ON_COOL = Color.WHITE
+            ON_WARN = Color.WHITE
             placeholders = intArrayOf(
                 0xFFE8D5C4.toInt(), 0xFFC5DDD4.toInt(), 0xFFD4CDE4.toInt(), 0xFFE4CCD2.toInt(),
                 0xFFC8D5E4.toInt(), 0xFFE0DBC4.toInt(), 0xFFC9DEC9.toInt(), 0xFFE4D4C4.toInt(),
@@ -121,7 +179,14 @@ object Ui {
                 0xFF3A2416.toInt(), 0xFF16302A.toInt(), 0xFF2B2140.toInt(), 0xFF3B1E26.toInt(),
                 0xFF1C2B3E.toInt(), 0xFF35301A.toInt(), 0xFF1E3320.toInt(), 0xFF3A2A1C.toInt(),
             )
+            COOL = COOL_ON_DARK
+            OK = OK_ON_DARK
+            WARN = WARN_ON_DARK
+            DANGER = DANGER_ON_DARK
+            ON_COOL = 0xFF04131C.toInt()
+            ON_WARN = 0xFF1A1405.toInt()
         }
+        ACCENT_INK = inkOf(ACCENT)
     }
 
     val LIGHT: Typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
@@ -164,6 +229,9 @@ object Ui {
             typeface = face
             includeFontPadding = false
         }
+
+    /** Espaces insécables à l'intérieur des guillemets : un retour à la ligne ne sépare plus « du mot qui suit, ni » de celui qui précède. */
+    fun guillemets(s: String): String = s.replace("« ", "« ").replace(" »", " »")
 
     /** Texte d'une seule ligne, rapetissé de [size] jusqu'à [min] pour tenir dans sa largeur (jamais de retour à la ligne). */
     fun fitText(c: Context, size: Float, min: Float, color: Int = TEXT, face: Typeface = REGULAR): TextView =
@@ -255,7 +323,7 @@ object Ui {
             Style.SECONDARY -> SURFACE3 to TEXT
             Style.DANGER -> DANGER to Color.WHITE
             Style.GHOST -> Color.TRANSPARENT to TEXT2
-            Style.COOL -> COOL to 0xFF04131C.toInt()
+            Style.COOL -> COOL to ON_COOL
         }
         val row = horizontal(c, Gravity.CENTER)
         row.minimumHeight = u(height)
@@ -321,7 +389,7 @@ object Ui {
     /** Couleur liée à une température : froid -> bleu, tiède -> orange, chaud -> rouge. */
     fun tempColor(c: Int): Int = when {
         c >= 90 -> DANGER
-        c >= 60 -> ACCENT
+        c >= 60 -> ACCENT_INK
         c >= 40 -> WARN
         else -> COOL
     }

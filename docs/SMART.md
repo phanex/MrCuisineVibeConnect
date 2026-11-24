@@ -24,10 +24,10 @@
   de recettes du site Lidl (`MC2.0` pour le Connect, `MC3.0` pour le Smart).
 - **Détection sans risque** : Toque regarde l'appli d'origine installée, la version d'Android et les
   ports présents, **sans rien envoyer à la base**. Au premier démarrage, la personne confirme son
-  robot (Réglages › Robot pour changer). En « Machine réelle », la liaison avec la base reste fermée
+  robot (Réglages › Avancé › Robot pour changer). En « Machine réelle », la liaison avec la base reste fermée
   tant que le robot n'est pas confirmé.
 - **Chaque robot ne voit que les recettes qu'il peut faire** : celles que le site lui destine, dont
-  chaque réglage existe sur ce robot. Les autres sont comptées dans Réglages › Recettes Lidl
+  chaque réglage existe sur ce robot. Les autres sont comptées dans Réglages › Recettes › Lidl
   (« N recettes masquées »). Les écrans (programmes, cuisson manuelle, éditeur) ne proposent que ce
   que le robot sait faire.
 - Sur le Connect, rien ne change : même protocole, mêmes limites, et le tri des recettes reste léger.
@@ -45,7 +45,7 @@
 - **Programmes du Smart** : mixer, smoothie, cuire des œufs, sous-vide (40 à 85 °C), mijoter (60 à
   100 °C), fermenter (30 à 50 °C), cuire du riz, chauffer l'eau, prélaver, nettoyage long. Sous-vide,
   mijoter et fermenter vont jusqu'à la durée de l'appli d'origine (12 h au plus).
-- **Recettes Lidl du Smart** : Réglages › Recettes Lidl › Synchroniser (la première fois, toutes les
+- **Recettes Lidl du Smart** : Réglages › Recettes › Lidl › Synchroniser (la première fois, toutes les
   fiches sont relues).
 - **Pas encore** : chauffe sans mélange (vitesse 0) en cuisson manuelle ; import de la base de
   l'appli d'origine ; liste des codes d'erreur de la base.
@@ -63,13 +63,14 @@ Smart : suivez celui de [Camybrith Cooking](https://github.com/Tidusneo24150/cam
    par `Toque-smart`** : l'autre APK est celui du Connect et ne marche pas sur la tablette du Smart), puis,
    depuis le dossier du dépôt :
    `powershell -ExecutionPolicy Bypass -File tools\install-robot.ps1 -Apk Toque-smart-x.y.z.apk`
-   (ou `adb install -r` puis `tools/robot/setup-root.sh` en root). Ensuite, Réglages › Mises à jour
-   prend tout seul l'APK du Smart.
+   (macOS : `bash tools/install-robot.sh --apk Toque-smart-x.y.z.apk`, ou `adb install -r` puis
+   `tools/robot/setup-root.sh` en root). Ensuite, Réglages › Mises à jour prend tout seul l'APK du
+   Smart.
 
    Vous aviez une version de test `0.8.0-smart.N` ? Installez la 0.8.0 par-dessus avec la même
    commande, une seule fois : l'outil de mise à jour de ces versions de test ne la propose pas.
 3. Au démarrage, « Quel est votre robot ? » : **Monsieur Cuisine Smart**.
-4. Réglages › Machine › **Machine réelle** › Appliquer. **Premier essai bol vide**, main sur
+4. Réglages › Avancé › Machine › **Machine réelle** › Appliquer. **Premier essai bol vide**, main sur
    l'interrupteur principal.
 
 ## À tester, dans l'ordre
@@ -77,7 +78,7 @@ Smart : suivez celui de [Camybrith Cooking](https://github.com/Tidusneo24150/cam
 Bol vide d'abord, puis avec de l'eau. À chaque étape, ce qui compte : le robot fait-il ce qu'affiche
 Toque, et s'arrête-t-il quand il le faut ?
 
-1. **Liaison** : Réglages › Outils › Diagnostic de la base moteur : trames reçues, poids, couvercle, bol.
+1. **Liaison** : Réglages › Avancé › Diagnostic de la base moteur : trames reçues, poids, couvercle, bol.
 2. **Manuel** vitesse 2, 10 s ; recommencer en ouvrant le couvercle pendant la rotation (pause
    immédiate, reprise après fermeture).
 3. **Chauffe** avec 500 ml d'eau : 37 °C vitesse 1 pendant 1 min, puis 40 °C.
@@ -97,9 +98,10 @@ Toque, et s'arrête-t-il quand il le faut ?
 
 Dans l'issue d'appel aux testeurs du Smart (ou une nouvelle issue) : la référence sous le robot
 (SKMS 1200 A1…), la version d'Android et le firmware de la base (écran Diagnostic), ce qui marche et
-ce qui ne marche pas, et le journal (Réglages › Outils › Journal).
+ce qui ne marche pas, et le journal (Réglages › Avancé › Journal).
 
 ## Revenir à l'appli d'origine
 
-`tools\restore-robot.ps1` réactive l'appli d'origine (son service du port série compris) ;
-`tools\restore-robot.ps1 -Uninstall` désinstalle aussi Toque.
+`tools\restore-robot.ps1` (macOS : `bash tools/restore-robot.sh`) réactive l'appli d'origine (son
+service du port série compris) ; ajouter `-Uninstall` (macOS : `--uninstall`) désinstalle aussi
+Toque.

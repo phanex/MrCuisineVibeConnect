@@ -22,8 +22,9 @@ import app.toque.ui.Ui
 /**
  * Programmes automatiques : pétrir, vapeur, rissoler (ceux de l'appli d'origine), nettoyage (+ Turbo).
  * Seulement ceux du robot choisi : le Smart a en plus ses propres programmes (mixer, sous-vide…).
+ * [openOnCleaning] : ouvert sur le nettoyage (fin de recette) ; le programme part comme d'habitude, par « Démarrer » ou la molette.
  */
-class ProgramsScreen(a: MainActivity) : Screen(a) {
+class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(a) {
     override val title = tr("Programmes")
 
     private class Prog(
@@ -74,7 +75,7 @@ class ProgramsScreen(a: MainActivity) : Screen(a) {
     )
     private val progs = all.filter { RobotProfiles.active.capabilities.has(it.feature) }
     private val cleaning = progs.indexOfFirst { it.feature == Feature.CLEANING }
-    private var selected = 0
+    private var selected = if (openOnCleaning && cleaning >= 0) cleaning else 0
     private lateinit var turbo: HoldButton
 
     override fun build(): View {
@@ -96,7 +97,7 @@ class ProgramsScreen(a: MainActivity) : Screen(a) {
             p.card = card
             val badge = FrameLayout(c)
             badge.background = Ui.round(Ui.ACCENT_DIM, 28f)
-            badge.addView(Icon(c, p.icon, Ui.ACCENT), Ui.flp(Ui.u(32), Ui.u(32), Gravity.CENTER))
+            badge.addView(Icon(c, p.icon, Ui.ACCENT_INK), Ui.flp(Ui.u(32), Ui.u(32), Gravity.CENTER))
             card.addView(badge, LinearLayout.LayoutParams(Ui.u(56), Ui.u(56)))
             card.addView(Ui.ellipsize(Ui.text(c, p.name, 26f, Ui.TEXT, Ui.MEDIUM)), Ui.lp(t = 14))
             card.addView(Ui.text(c, p.text, 16f, Ui.TEXT2).apply { setLineSpacing(0f, 1.15f) }, Ui.lp(t = 6))
@@ -184,7 +185,7 @@ class ProgramsScreen(a: MainActivity) : Screen(a) {
             }
             p.unit.text = if (s < 60) "s" else if (s >= 3600) "h" else "min"
             p.temp?.text = "${p.celsius} °C"
-            p.card.background = Ui.round(Ui.SURFACE, 26f, if (i == selected) Ui.ACCENT else Ui.STROKE, if (i == selected) 2.5f else 1f)
+            p.card.background = Ui.round(Ui.SURFACE, 26f, if (i == selected) Ui.ACCENT_INK else Ui.STROKE, if (i == selected) 2.5f else 1f)
         }
     }
 

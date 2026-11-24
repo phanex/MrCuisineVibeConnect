@@ -35,6 +35,20 @@ object ZoneLookup {
 
     fun isZoneId(text: String?): Boolean = text != null && ID.matches(text)
 
+    /**
+     * 1er janvier 2025 : en dessous, l'horloge du robot n'est pas encore réglée (pas de pile
+     * d'horloge) et les certificats HTTPS ne sont pas encore valides. La seule limite de « date
+     * plausible » de Toque : TimeSync s'en sert aussi.
+     */
+    const val PLAUSIBLE_SINCE_MS = 1_735_689_600_000L
+
+    /**
+     * Une horloge trop fausse fait refuser les certificats : les services HTTPS sont alors
+     * inutiles, mais celui en HTTP simple reste utilisable (son en-tête Date remet l'heure d'aplomb).
+     */
+    fun usable(url: String, nowMs: Long): Boolean =
+        nowMs >= PLAUSIBLE_SINCE_MS || !url.startsWith("https:")
+
     /** Fuseau trouvé dans la réponse d'un des services, sinon null. */
     fun zoneOf(json: String): String? {
         val root = try {

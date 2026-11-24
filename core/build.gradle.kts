@@ -21,4 +21,8 @@ dependencies {
 tasks.test {
     // TwinIntegrationTest s'exécute seulement si tools/twin.py tourne (sinon ignoré).
     testLogging { events("passed", "skipped", "failed") }
+    // I18nTest lit les fichiers de langue et les textes du code de l'appli. Sans eux parmi les entrées de
+    // la tâche, Gradle la disait « à jour » quand eux seuls avaient changé, et ne la relançait pas.
+    inputs.dir("../app/src/main/assets/lang").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir("../app/src/main/kotlin").withPathSensitivity(PathSensitivity.RELATIVE)
 }

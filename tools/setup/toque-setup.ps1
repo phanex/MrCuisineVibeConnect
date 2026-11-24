@@ -1,5 +1,6 @@
-# Toque setup for the Monsieur Cuisine Connect (SKMC 1200), step by step, from a Windows PC.
-# Written to be driven by an AI agent (see AGENTS.md) or by hand. Every step is safe to re-run.
+# Toque setup for the Monsieur Cuisine Connect (SKMC 1200 and SKMC 1100 A1), step by step, from a
+# Windows PC. Written to be driven by an AI agent (see AGENTS.md) or by hand. Every step is safe to
+# re-run.
 #
 #   powershell -ExecutionPolicy Bypass -File tools\setup\toque-setup.ps1 -Step status
 #
@@ -7,13 +8,19 @@
 # install, wifi, cleanup. Lines starting with "HUMAN:" are actions only a person can do
 # (unscrewing, cables, power switch, Windows security prompts, a tap on the robot's screen).
 # A step that needs one stops and says so; run it again once the person is done.
-# SKMC 1100 A1 only: one more step, own-twrp, right after backup (see AGENTS.md).
+#
+# The robot is recognised from its own boot backup, and the TWRP image the flash steps write
+# follows from it: the guide's image on an SKMC 1200, the same TWRP rebuilt around the robot's own
+# kernel on an SKMC 1100 A1 (built on the PC when a flash step needs it; 'own-twrp' builds it ahead
+# of time). -Twrp guide or -Twrp own-kernel makes the choice for a robot this guide does not know.
 param(
     [ValidateSet("status", "prepare", "driver", "backup", "own-twrp", "flash-twrp", "root", "flash-root", "android", "install", "wifi", "cleanup")]
     [string]$Step = "status",
     [string]$Work = "C:\Toque",
     [string]$Apk = "",
     [string]$Ip = "",
+    [ValidateSet("auto", "guide", "own-kernel")]
+    [string]$Twrp = "auto",
     [int]$WaitSeconds = 180
 )
 $ErrorActionPreference = "Stop"
@@ -40,6 +47,14 @@ $Known = @{
 }
 $PartitionSize = 16777216   # boot and recovery: 16 MiB each
 $ByName = "/dev/block/platform/mtk-msdc.0/11120000.msdc0/by-name"
+
+# Robots this guide has been run on, by the project name compiled into their kernel (the name
+# Android also reports as its device). The guide's TWRP carries a kernel of the first one; a kernel
+# built for another project may lack a driver the robot needs (SKMC 1100 A1: no touch, issue #10).
+$Robots = @{
+    "l706_dfbh_v_695" = @{ Name = "SKMC 1200"; Twrp = "guide" }
+    "spm188a"         = @{ Name = "SKMC 1100 A1"; Twrp = "own-kernel" }
+}
 
 # ---------------------------------------------------------------- helpers
 
@@ -160,17 +175,19 @@ function Get-BytesSha([byte[]]$bytes) {
     finally { $sha.Dispose() }
 }
 
-# Parses an Android boot image (header version 0: boot, recovery and the TWRP image all use it).
-function Read-BootImage([string]$path, [string]$what) {
+# Parses an Android boot image (header version 0: boot, recovery and the TWRP image all use it; a
+# partition read back from the robot is one too, followed by whatever was there before). Returns
+# its parts, or a sentence that says why the file is not one.
+function Read-BootImageParts([string]$path) {
     $b = [IO.File]::ReadAllBytes($path)
-    if ($b.Length -lt 4096 -or [Text.Encoding]::ASCII.GetString($b, 0, 8) -ne "ANDROID!") { Fail "$what is not an Android boot image: $path" }
+    if ($b.Length -lt 4096 -or [Text.Encoding]::ASCII.GetString($b, 0, 8) -ne "ANDROID!") { return "is not an Android boot image: $path" }
     $kSize = [long][BitConverter]::ToUInt32($b, 8)
     $rSize = [long][BitConverter]::ToUInt32($b, 16)
     $page = [long][BitConverter]::ToUInt32($b, 36)
-    if ($page -lt 2048 -or $page -gt 16384 -or ($page -band ($page - 1)) -ne 0) { Fail "$what has an unexpected page size ($page)." }
+    if ($page -lt 2048 -or $page -gt 16384 -or ($page -band ($page - 1)) -ne 0) { return "has an unexpected page size ($page)." }
     $kOff = $page
     $rOff = $kOff + [long][Math]::Ceiling($kSize / $page) * $page
-    if ($kSize -le 0 -or $rSize -le 0 -or ($rOff + $rSize) -gt $b.Length) { Fail "$what is truncated or its header is invalid." }
+    if ($kSize -le 0 -or $rSize -le 0 -or ($rOff + $rSize) -gt $b.Length) { return "is truncated or its header is invalid." }
     return [pscustomobject]@{
         Bytes       = $b
         PageSize    = $page
@@ -183,6 +200,13 @@ function Read-BootImage([string]$path, [string]$what) {
         Kernel      = (Copy-Bytes $b $kOff $kSize)
         Ramdisk     = (Copy-Bytes $b $rOff $rSize)
     }
+}
+
+# The same, for a file that must be a boot image: stops otherwise.
+function Read-BootImage([string]$path, [string]$what) {
+    $r = Read-BootImageParts $path
+    if ($r -is [string]) { Fail "$what $r" }
+    return $r
 }
 
 # The id mkbootimg stores in the header: SHA-1 over each part followed by its 32-bit size.
@@ -198,43 +222,180 @@ function Get-BootImageId([byte[]]$kernel, [byte[]]$ramdisk) {
     } finally { $sha.Dispose() }
 }
 
-# "Linux version ..." line of a kernel taken from a boot image (zImage with a gzip payload).
-function Get-KernelVersion([byte[]]$kernel) {
-    $buf = New-Object byte[] (32MB)
+# ASCII text of the gzip stream that starts at $offset of $bytes ("" when there is none).
+function Expand-GzipText([byte[]]$bytes, [int]$offset, [int]$max) {
+    $buf = New-Object byte[] $max
+    $n = 0
+    $ms = New-Object IO.MemoryStream -ArgumentList @($bytes, $offset, ($bytes.Length - $offset), $false)
+    $gz = New-Object IO.Compression.GZipStream -ArgumentList @($ms, [IO.Compression.CompressionMode]::Decompress)
+    try {
+        while ($n -lt $buf.Length) {
+            $r = $gz.Read($buf, $n, $buf.Length - $n)
+            if ($r -le 0) { break }
+            $n += $r
+        }
+    } catch {} finally { $gz.Dispose(); $ms.Dispose() }
+    if ($n -le 0) { return "" }
+    return [Text.Encoding]::ASCII.GetString($buf, 0, $n)
+}
+
+# What a kernel taken from a boot image (zImage with a gzip payload) says about itself: its "Linux
+# version ..." line, and the project it was built for (the name of the board's source folder, kept
+# in a driver's messages: .../camera_project/<project>/...).
+function Get-KernelFacts([byte[]]$kernel) {
+    $version = "(version not found)"
+    $project = ""
     $limit = [Math]::Min($kernel.Length - 3, 131072)
     for ($i = 0; $i -lt $limit; $i++) {
         if ($kernel[$i] -ne 0x1F -or $kernel[$i + 1] -ne 0x8B -or $kernel[$i + 2] -ne 8) { continue }
-        $n = 0
-        $ms = New-Object IO.MemoryStream -ArgumentList @($kernel, $i, ($kernel.Length - $i), $false)
-        $gz = New-Object IO.Compression.GZipStream -ArgumentList @($ms, [IO.Compression.CompressionMode]::Decompress)
-        try {
-            while ($n -lt $buf.Length) {
-                $r = $gz.Read($buf, $n, $buf.Length - $n)
-                if ($r -le 0) { break }
-                $n += $r
-            }
-        } catch {} finally { $gz.Dispose(); $ms.Dispose() }
-        if ($n -gt 0) {
-            $m = [regex]::Match([Text.Encoding]::ASCII.GetString($buf, 0, $n), "Linux version [\x20-\x7e]+")
-            if ($m.Success) { return $m.Value }
-        }
+        $text = Expand-GzipText $kernel $i (32MB)
+        $m = [regex]::Match($text, "Linux version [\x20-\x7e]+")
+        if (-not $m.Success) { continue }
+        $version = $m.Value
+        $p = [regex]::Match($text, "/camera_project/([A-Za-z0-9_.-]{2,64})/")
+        if ($p.Success) { $project = $p.Groups[1].Value }
+        break
     }
-    return "(version not found)"
+    return [pscustomobject]@{ Version = $version; Project = $project }
 }
 
-# The TWRP image the flash steps write: the guide's, or the one built by 'own-twrp'.
-function Get-TwrpImage {
-    $s = Get-State
-    if ($s.ContainsKey("twrp-own-kernel-sha256")) {
-        $own = Join-Path $Work "twrp-own-kernel.img"
-        if (-not (Test-Path $own)) { Fail "twrp-own-kernel.img is missing: run 'own-twrp' again." }
-        if ((Sha $own) -ne $s["twrp-own-kernel-sha256"]) { Fail "twrp-own-kernel.img does not match the checksum recorded by 'own-twrp': run 'own-twrp' again." }
-        return $own
+function Get-KernelVersion([byte[]]$kernel) { return (Get-KernelFacts $kernel).Version }
+
+# The device Android was built for, from a boot image's ramdisk (default.prop:
+# ro.bootimage.build.fingerprint=brand/product/device:release/...). "" when it is not there.
+function Get-RamdiskDevice([byte[]]$ramdisk) {
+    if ($ramdisk.Length -lt 3 -or $ramdisk[0] -ne 0x1F -or $ramdisk[1] -ne 0x8B) { return "" }
+    $text = Expand-GzipText $ramdisk 0 (32MB)
+    $m = [regex]::Match($text, "ro\.bootimage\.build\.fingerprint=[^/\s]+/[^/\s]+/([A-Za-z0-9_.-]{2,64}):")
+    if ($m.Success) { return $m.Groups[1].Value }
+    return ""
+}
+
+# What a boot backup says about the robot. Project: the kernel's project, or failing that the
+# device name. Name and Rule come from $Robots; both are "" for a robot that is not listed there.
+function Get-RobotFacts([string]$bootPath) {
+    $img = Read-BootImage $bootPath "boot-original.img"
+    $k = Get-KernelFacts $img.Kernel
+    $device = Get-RamdiskDevice $img.Ramdisk
+    $project = $k.Project
+    if ($project -eq "") { $project = $device }
+    $known = $null
+    if ($project -ne "" -and $Robots.ContainsKey($project)) { $known = $Robots[$project] }
+    return [pscustomobject]@{
+        Project   = $project
+        Device    = $device
+        Kernel    = $k.Version
+        KernelSha = (Get-BytesSha $img.Kernel)
+        Name      = $(if ($known) { $known.Name } else { "" })
+        Rule      = $(if ($known) { $known.Twrp } else { "" })
     }
+}
+
+function Format-Robot($robot) {
+    $name = $(if ($robot.Name -ne "") { $robot.Name } else { "a model this guide does not know" })
+    $project = $(if ($robot.Project -ne "") { $robot.Project } else { "not found" })
+    return ("{0} (project {1}; {2})" -f $name, $project, $robot.Kernel)
+}
+
+# The robot, from the boot backup that 'backup' verified.
+function Get-Robot {
+    $s = Get-State
+    if (-not $s.ContainsKey("done-backup")) { Fail "Run 'backup' first: the robot is recognised from its own boot backup." }
+    $boot = Join-Path $Backup "boot-original.img"
+    Test-BootImage $boot "boot-original.img"
+    if ((Sha $boot) -ne $s["boot-original-sha256"]) { Fail "boot-original.img no longer matches the checksum recorded by 'backup': do not continue." }
+    return Get-RobotFacts $boot
+}
+
+# Which TWRP suits this robot: Choice is "guide" or "own-kernel", or "" with the reason in Problem.
+# A known robot follows $Robots. -Twrp decides for the others (and may ask for the robot's own
+# kernel on any robot); the choice made at 'flash-twrp' is remembered for the later steps.
+function Resolve-TwrpChoice($robot) {
+    $refused = ("The guide's TWRP does not suit this robot, " + (Format-Robot $robot) + ": its kernel was built for another board, and this robot's touch screen does not work with it (issue #10). Run the step again without -Twrp guide.")
+    if ($Twrp -eq "own-kernel") { return @{ Choice = "own-kernel"; Problem = "" } }
+    if ($Twrp -eq "guide") {
+        if ($robot.Rule -eq "own-kernel") { return @{ Choice = ""; Problem = $refused } }
+        return @{ Choice = "guide"; Problem = "" }
+    }
+    $s = Get-State
+    $kept = $s["twrp-choice"]
+    # An install begun with an earlier version of this script: its 'flash-twrp' wrote the image of
+    # 'own-twrp' when that step had been run, the guide's otherwise.
+    if (-not $kept -and $s.ContainsKey("done-flash-twrp")) { $kept = $(if ($s.ContainsKey("twrp-own-kernel-sha256")) { "own-kernel" } else { "guide" }) }
+    if ($kept -eq "own-kernel") { return @{ Choice = "own-kernel"; Problem = "" } }
+    if ($robot.Rule -ne "") { return @{ Choice = $robot.Rule; Problem = "" } }
+    if ($kept -eq "guide") { return @{ Choice = "guide"; Problem = "" } }
+    # A robot that is not listed, but whose kernel is the very one inside the guide's TWRP.
+    $guide = Join-Path $Work "hack\recovery.img"
+    if ((Test-Path $guide) -and (Sha $guide) -eq $Known.Twrp.Sha) {
+        $t = Read-BootImage $guide "TWRP"
+        if ((Get-BytesSha $t.Kernel) -eq $robot.KernelSha) { return @{ Choice = "guide"; Problem = "" } }
+    }
+    $list = ($Robots.Keys | Sort-Object | ForEach-Object { $_ + " = " + $Robots[$_].Name }) -join ", "
+    return @{ Choice = ""; Problem = ("This robot is not one this guide knows: " + (Format-Robot $robot) + ". Known: " + $list + ". Check the label under the robot: a Monsieur Cuisine Smart (SKMS 1200) is different hardware, stop there. For another Monsieur Cuisine Connect, choose the TWRP yourself: run 'flash-twrp' with -Twrp own-kernel (the guide's TWRP rebuilt around this robot's own kernel: the choice for a board the guide's kernel was not built for) or with -Twrp guide (the image used on the SKMC 1200); the later steps remember it. Please report the model on the label, the project name above and how it went in an issue.") }
+}
+
+function Get-TwrpChoice($robot) {
+    $c = Resolve-TwrpChoice $robot
+    if ($c.Choice -eq "") { Fail $c.Problem }
+    return $c.Choice
+}
+
+# The guide's TWRP, checked.
+function Get-GuideTwrp {
     $twrp = Join-Path $Work "hack\recovery.img"
     if (-not (Test-Path $twrp)) { Fail "TWRP missing: run 'prepare'." }
     if ((Sha $twrp) -ne $Known.Twrp.Sha) { Fail "TWRP checksum mismatch." }
     return $twrp
+}
+
+# The TWRP image the flash steps write on this robot: the guide's, or the same TWRP with the
+# robot's own kernel. That one is built here when it is not there yet, or no longer the one that
+# was built from this boot backup: it only depends on two checked files, so building it again is
+# always safe.
+function Get-TwrpImage($robot) {
+    $guide = Get-GuideTwrp
+    if ((Get-TwrpChoice $robot) -eq "guide") { return $guide }
+    $own = Join-Path $Work "twrp-own-kernel.img"
+    $s = Get-State
+    if ((Test-Path $own) -and $s["twrp-own-kernel-sha256"] -eq (Sha $own) -and $s["twrp-own-kernel-boot-sha256"] -eq $s["boot-original-sha256"]) { return $own }
+    $built = Build-OwnTwrp
+    if ($built -eq "") { return $guide }
+    return $built
+}
+
+# Reads a 16 MiB partition of the robot ("boot" or "recovery") into $local. In Android the read
+# needs root (su); in TWRP the shell is root already. True when the whole partition arrived.
+function Read-RobotPartition([string]$name, [string]$local, [switch]$InTwrp) {
+    if (Test-Path $local) { Remove-Item -Force $local }
+    $mib = [int]($PartitionSize / 1048576)
+    if ($InTwrp) {
+        $tmp = "/tmp/toque-$name-check.img"
+        Say (Adb shell "B=`$(ls -d /dev/block/platform/*/by-name /dev/block/platform/*/*/by-name 2>/dev/null | head -n 1); dd if=`$B/$name of=$tmp bs=1048576 count=$mib")
+        Say (Adb pull $tmp $local)
+        Say (Adb shell "rm -f $tmp")
+    } else {
+        # /data/adb/magisk/busybox only exists after 'install' (setup-root.sh), and Android 6's
+        # toolbox has no sha256sum: the partition is hashed on the PC.
+        $tmp = "/data/local/tmp/toque-$name-check.img"
+        Say (Adb shell "su -c 'dd if=$ByName/$name of=$tmp bs=1048576 count=$mib && chmod 644 $tmp'")
+        Say (Adb pull $tmp $local)
+        Say (Adb shell "su -c 'rm -f $tmp'")
+    }
+    return ((Test-Path $local) -and (Get-Item $local).Length -eq $PartitionSize)
+}
+
+# "" when the partition read back holds this boot image: same kernel and same ramdisk (what
+# follows the image in the 16 MiB does not matter). Otherwise, what differs.
+function Compare-PartitionImage([string]$dump, [string]$image) {
+    $d = Read-BootImageParts $dump
+    if ($d -is [string]) { return "the partition " + $d }
+    $e = Read-BootImage $image (Split-Path $image -Leaf)
+    $diff = @()
+    if ((Get-BytesSha $d.Kernel) -ne (Get-BytesSha $e.Kernel)) { $diff += ("another kernel (" + (Get-KernelVersion $d.Kernel) + ")") }
+    if ((Get-BytesSha $d.Ramdisk) -ne (Get-BytesSha $e.Ramdisk)) { $diff += "another ramdisk" }
+    if ($diff.Count -eq 0) { return "" }
+    return ("the partition holds " + ($diff -join " and "))
 }
 
 function Get-FlashTool {
@@ -303,7 +464,7 @@ function Invoke-FlashTool([string]$config, [string]$what) {
     if (-not $tool) { Fail "SP Flash Tool missing: run 'prepare'." }
     Human "Robot switched OFF with its rear switch, USB A-A cable in the right-hand port marked 'Android USB'. Switch the robot ON as soon as the next line appears (the tool waits up to 1 hour)."
     Say ("Running SP Flash Tool (console mode): " + $what)
-    $out = Join-Path $Work ("spft-" + [IO.Path]::GetFileNameWithoutExtension($config) + "-out.txt")
+    $out = Join-Path $Work ([IO.Path]::GetFileNameWithoutExtension($config) + "-out.txt")
     $p = Start-Process -FilePath $tool -ArgumentList @("-i", "`"$config`"") -WorkingDirectory (Split-Path $tool) -Wait -PassThru -NoNewWindow -RedirectStandardOutput $out
     Say ("flash_tool exit code: " + $p.ExitCode + " (output: " + $out + ")")
     return $p.ExitCode
@@ -319,7 +480,15 @@ function Step-Status {
     Say ("MediaTek driver installed: " + $(if (Test-MtkDriver) { "yes" } else { "no" }))
     $tool = Get-FlashTool
     Say ("SP Flash Tool: " + $(if ($tool) { $tool } else { "missing" }))
-    Say ("TWRP image for the flash steps: " + $(if ($s.ContainsKey("twrp-own-kernel-sha256")) { "twrp-own-kernel.img (built by 'own-twrp' around this robot's kernel)" } else { "hack\recovery.img (the guide's)" }))
+    $boot = Join-Path $Backup "boot-original.img"
+    if ($s.ContainsKey("done-backup") -and (Test-Path $boot)) {
+        $robot = Get-RobotFacts $boot
+        Say ("Robot, from its boot backup: " + (Format-Robot $robot))
+        $c = Resolve-TwrpChoice $robot
+        if ($c.Choice -eq "guide") { Say "TWRP image for the flash steps: hack\recovery.img (the guide's)" }
+        elseif ($c.Choice -eq "own-kernel") { Say "TWRP image for the flash steps: twrp-own-kernel.img (the guide's TWRP rebuilt around this robot's own kernel; built on the PC when a flash step needs it)" }
+        else { Say ("TWRP image for the flash steps: not chosen yet. " + $c.Problem) }
+    } else { Say "Robot: not known yet (it is recognised from its boot backup, step 'backup')." }
     $adb = $null
     try { $adb = Get-Adb } catch {}
     if ($adb) { Say ("adb state: " + $(Get-AdbState)) }
@@ -361,7 +530,7 @@ function Step-Prepare {
         Remove-Item -Recurse -Force $tmp
     }
     if ((Sha $twrp) -ne $Known.Twrp.Sha) { Fail "TWRP (recovery.img) checksum mismatch: do not flash it." }
-    if ((Sha $scatter) -ne $Known.Scatter.Sha) { Fail "Scatter file checksum mismatch: this guide is only for the SKMC 1200." }
+    if ((Sha $scatter) -ne $Known.Scatter.Sha) { Fail "Scatter file checksum mismatch: do not continue (this guide covers the SKMC 1200 and the SKMC 1100 A1, which share this partition layout)." }
     Ok "TWRP and scatter file"
 
     # Toque APK (latest release)
@@ -452,32 +621,35 @@ function Step-Backup {
     Set-State "recovery-original-sha256" (Sha $rec)
     Set-State "done-backup" (Get-Date).ToString("s")
     Ok "Backups verified (16 MiB Android boot images). Keep $Backup safe: it is the only way back."
+    $robot = Get-RobotFacts $boot
+    Set-State "robot-project" $robot.Project
+    Say ("Robot: " + (Format-Robot $robot))
+    $c = Resolve-TwrpChoice $robot
+    if ($c.Choice -eq "guide") { Say "TWRP for this robot: the guide's image." }
+    elseif ($c.Choice -eq "own-kernel") { Say "TWRP for this robot: the guide's TWRP rebuilt around the robot's own kernel (built on the PC by 'flash-twrp', nothing to do)." }
+    else { Human $c.Problem }
     Human "Copy the folder $Backup to a second place (USB stick, cloud)."
     Ok "backup done. Next: flash-twrp"
 }
 
-# SKMC 1100 A1: its kernel (2022) is newer than the one inside the guide's TWRP (2018). This step
-# builds, on the PC, a TWRP image made of the guide's TWRP (header and ramdisk, unchanged) and the
-# robot's own kernel and device tree, taken from the boot backup. Nothing is sent to the robot;
-# flash-twrp and flash-root then write this image instead of hack\recovery.img.
-function Step-OwnTwrp {
+# The guide's TWRP (header and ramdisk, unchanged) with the robot's own kernel and device tree,
+# taken from the boot backup: for a robot whose board the guide's kernel was not built for (SKMC
+# 1100 A1: its kernel is from 2022, the guide's from 2018 and without its touch driver). Built and
+# checked on the PC; nothing is sent to the robot. Returns the image's path, or "" when the guide's
+# TWRP already carries this robot's kernel.
+function Build-OwnTwrp {
     $s = Get-State
     if (-not $s.ContainsKey("done-backup")) { Fail "Run 'backup' first: the image is built from the robot's own boot backup." }
     $boot = Join-Path $Backup "boot-original.img"
     Test-BootImage $boot "boot-original.img"
     if ((Sha $boot) -ne $s["boot-original-sha256"]) { Fail "boot-original.img no longer matches the checksum recorded by 'backup': do not continue." }
-    $twrp = Join-Path $Work "hack\recovery.img"
-    if (-not (Test-Path $twrp)) { Fail "TWRP missing: run 'prepare'." }
-    if ((Sha $twrp) -ne $Known.Twrp.Sha) { Fail "TWRP checksum mismatch." }
+    $twrp = Get-GuideTwrp
 
     $r = Read-BootImage $boot "boot-original.img"
     $t = Read-BootImage $twrp "TWRP"
     Say ("Robot kernel: " + (Get-KernelVersion $r.Kernel))
     Say ("TWRP kernel : " + (Get-KernelVersion $t.Kernel))
-    if ((Get-BytesSha $r.Kernel) -eq (Get-BytesSha $t.Kernel)) {
-        Ok "The guide's TWRP already carries this robot's kernel: nothing to build. Next: flash-twrp"
-        return
-    }
+    if ((Get-BytesSha $r.Kernel) -eq (Get-BytesSha $t.Kernel)) { return "" }
     # Both images must share the same layout, or the robot's bootloader would not load the result.
     foreach ($f in "PageSize", "KernelAddr", "RamdiskAddr", "SecondAddr", "TagsAddr") {
         if ($r.$f -ne $t.$f) { Fail ("The robot's boot image and TWRP differ on {0} (0x{1:x} / 0x{2:x}): not building. Report this robot's model and image version." -f $f, $r.$f, $t.$f) }
@@ -512,23 +684,45 @@ function Step-OwnTwrp {
         Fail "The image written does not read back correctly: nothing to flash."
     }
     Set-State "twrp-own-kernel-sha256" (Sha $out)
+    Set-State "twrp-own-kernel-boot-sha256" $s["boot-original-sha256"]
+    Ok ("TWRP with this robot's own kernel: $out ({0} bytes)." -f $size)
+    return $out
+}
+
+function Step-OwnTwrp {
+    $robot = Get-Robot
+    Say ("Robot: " + (Format-Robot $robot))
+    $out = Build-OwnTwrp
+    if ($out -eq "") { Ok "The guide's TWRP already carries this robot's kernel: nothing to build. Next: flash-twrp"; return }
     Set-State "done-own-twrp" (Get-Date).ToString("s")
-    Ok ("TWRP with this robot's own kernel: $out ({0} bytes). 'flash-twrp' and 'flash-root' will write it instead of hack\recovery.img." -f $size)
+    $c = Resolve-TwrpChoice $robot
+    if ($c.Choice -eq "own-kernel") { Ok "'flash-twrp' and 'flash-root' will write this image instead of hack\recovery.img." }
+    elseif ($c.Choice -eq "guide") { Say "Note: on this robot the flash steps keep the guide's image (hack\recovery.img). Run 'flash-twrp' with -Twrp own-kernel to write this one instead." }
+    else { Say "Note: this robot is not one this guide knows: run 'flash-twrp' with -Twrp own-kernel to write this image." }
     Ok "own-twrp done. Next: flash-twrp"
 }
 
 function Step-FlashTwrp {
     if (-not (Get-State).ContainsKey("done-backup")) { Fail "Run 'backup' first: never flash without the backups." }
-    $twrp = Get-TwrpImage
+    # Which robot is this, and which TWRP suits it: decided from the backup, before anything is written.
+    $robot = Get-Robot
+    Say ("Robot: " + (Format-Robot $robot))
+    $choice = Get-TwrpChoice $robot
+    $twrp = Get-TwrpImage $robot
+    Say ("TWRP image for this robot: " + $twrp)
+    Set-State "twrp-choice" $choice
     $cfg = Write-DownloadConfig "flash-twrp" $twrp ""
     $code = Invoke-FlashTool $cfg ("TWRP into boot (" + (Split-Path $twrp -Leaf) + ")")
     if ($code -ne 0) { Fail ("SP Flash Tool reported an error ($code). Use the GUI: AGENTS.md, 'GUI fallback: Download Only' with boot = $twrp only.") }
     Set-State "done-flash-twrp" (Get-Date).ToString("s")
     Human "Switch the robot OFF, UNPLUG the USB cable, switch it ON: TWRP (a blue/black recovery screen) appears. Then plug the cable back in. (Switched on with the cable in, the robot stops on a battery screen.)"
-    Ok "flash-twrp done. Next: root (with TWRP on the robot's screen)"
+    Ok "flash-twrp done ('root' checks what the boot partition now holds). Next: root (with TWRP on the robot's screen)"
 }
 
 function Step-Root {
+    # The TWRP that 'flash-twrp' was to write, found first: TWRP restarts by itself after a few
+    # minutes, so nothing slow may happen once it is up.
+    $twrp = Get-TwrpImage (Get-Robot)
     $st = Wait-AdbState @("recovery") $WaitSeconds
     if ($st -ne "recovery") { NeedHuman "adb does not see TWRP (state: '$st'). The robot must show TWRP and the cable must be plugged in AFTER it started." }
     # This TWRP restarts by itself about 6 min 40 s after it started (watchdog): the step takes
@@ -537,6 +731,18 @@ function Step-Root {
     [void][double]::TryParse(((Adb shell "cat /proc/uptime") -split " ")[0], [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$uptime)
     if ($uptime -gt 300) {
         NeedHuman ("TWRP has been running for {0:N0} s and restarts by itself at about 400 s. Restart it now (off, unplug, on, plug in once TWRP shows; swipe 'Allow Modifications' if asked), then run 'root' again right away." -f $uptime)
+    }
+    # Is the TWRP on screen the one this robot needs? A TWRP built for another board starts too,
+    # but without touch: the step would fail further down, on a /system that cannot be unlocked.
+    $dump = Join-Path $Work "boot-check.img"
+    if (Read-RobotPartition "boot" $dump -InTwrp) {
+        $diff = Compare-PartitionImage $dump $twrp
+        Remove-Item -Force $dump
+        if ($diff -ne "") { Fail ("The boot partition does not hold " + (Split-Path $twrp -Leaf) + ", the TWRP this robot needs: " + $diff + ". Nothing was changed. Run 'flash-twrp' again (or the GUI fallback with boot = $twrp), then 'root'.") }
+        Ok ("boot partition = " + (Split-Path $twrp -Leaf))
+    } else {
+        if (Test-Path $dump) { Remove-Item -Force $dump }
+        Say "WARNING: could not read the boot partition back to check it; TWRP is running, so the step goes on."
     }
     $boot = Join-Path $Backup "boot-original.img"
     Test-BootImage $boot "boot-original.img"
@@ -568,13 +774,17 @@ function Step-FlashRoot {
     if (-not (Get-State).ContainsKey("done-root")) { Fail "Run 'root' first." }
     $patched = Join-Path $Work "boot-magisk.img"
     Test-BootImage $patched "boot-magisk.img"
-    $twrp = Get-TwrpImage
+    if ((Sha $patched) -ne (Get-State)["boot-magisk-sha256"]) { Fail "boot-magisk.img no longer matches the checksum recorded by 'root': run 'root' again." }
+    $robot = Get-Robot
+    Say ("Robot: " + (Format-Robot $robot))
+    $twrp = Get-TwrpImage $robot
+    Say ("TWRP image for this robot: " + $twrp)
     $cfg = Write-DownloadConfig "flash-root" $patched $twrp
     $code = Invoke-FlashTool $cfg ("Magisk boot into boot, TWRP into recovery (" + (Split-Path $twrp -Leaf) + ")")
     if ($code -ne 0) { Fail ("SP Flash Tool reported an error ($code). Use the GUI: AGENTS.md, 'GUI fallback: Download Only' with boot = $patched and recovery = $twrp.") }
     Set-State "done-flash-root" (Get-Date).ToString("s")
     Human "Switch the robot OFF, UNPLUG the USB cable, switch it ON: the stock Monsieur Cuisine app starts. Then plug the cable back in."
-    Ok "flash-root done. Next: android"
+    Ok "flash-root done ('android' checks what boot and recovery now hold). Next: android"
 }
 
 function Step-Android {
@@ -594,48 +804,73 @@ function Step-Android {
     if ($id -ne "0") {
         NeedHuman "Root was not granted to 'Shell'. If the prompt was missed, Magisk now refuses for good: open the Magisk app > Superuser, switch 'Shell' on. Then run 'android' again."
     }
+    # What 'flash-root' wrote is read back from the robot and compared on the PC. A difference stops
+    # here, before Toque is installed: a boot that is not the patched one, or a recovery that is not
+    # TWRP, would only show up later, when it is needed.
     $expected = (Get-State)["boot-magisk-sha256"]
-    if ($expected) {
-        # Read the partition back and hash it on the PC: /data/adb/magisk/busybox only exists after
-        # 'install' (setup-root.sh), and Android 6's toolbox has no sha256sum.
-        $tmp = "/data/local/tmp/toque-boot-check.img"
+    $patched = Join-Path $Work "boot-magisk.img"
+    if (-not $expected -and (Test-Path $patched)) { $expected = Sha $patched }
+    if (-not $expected) { Say "WARNING: no boot-magisk.img from the 'root' step on this PC: the boot partition cannot be compared with it." }
+    else {
         $local = Join-Path $Work "boot-check.img"
-        $mib = [int]($PartitionSize / 1048576)
-        Say (Adb shell "su -c 'dd if=$ByName/boot of=$tmp bs=1048576 count=$mib && chmod 644 $tmp'")
-        if (Test-Path $local) { Remove-Item -Force $local }
-        Say (Adb pull $tmp $local)
-        Say (Adb shell "su -c 'rm -f $tmp'")
-        if (-not (Test-Path $local)) { Say "WARNING: could not read the boot partition back to check it." }
-        elseif ((Sha $local) -ne $expected) { Say ("WARNING: the boot partition differs from boot-magisk.img (" + (Sha $local) + ")") }
-        else { Ok "boot partition = boot-magisk.img" }
-        if (Test-Path $local) { Remove-Item -Force $local }
+        if (-not (Read-RobotPartition "boot" $local)) {
+            if (Test-Path $local) { Remove-Item -Force $local }
+            Fail "Could not read the boot partition back to check it. Run 'android' again (root must be granted to 'Shell')."
+        }
+        $got = Sha $local
+        Remove-Item -Force $local
+        if ($got -ne $expected) { Fail ("The boot partition differs from boot-magisk.img ($got). Do not go on: run 'flash-root' again, then 'android'. (Never use 'Direct install' in the Magisk app: it rewrites boot.)") }
+        Ok "boot partition = boot-magisk.img"
     }
+    $twrp = Get-TwrpImage (Get-Robot)
+    $local = Join-Path $Work "recovery-check.img"
+    if (-not (Read-RobotPartition "recovery" $local)) {
+        if (Test-Path $local) { Remove-Item -Force $local }
+        Fail "Could not read the recovery partition back to check it. Run 'android' again."
+    }
+    $diff = Compare-PartitionImage $local $twrp
+    Remove-Item -Force $local
+    if ($diff -ne "") { Fail ("The recovery partition does not hold " + (Split-Path $twrp -Leaf) + ": " + $diff + ". Run 'flash-root' again (or the GUI fallback with recovery = $twrp), then 'android'.") }
+    Ok ("recovery partition = " + (Split-Path $twrp -Leaf))
     Set-State "done-android" (Get-Date).ToString("s")
     Ok "Root works (uid 0). Next: install"
 }
 
+# The Toque APK to install when -Apk is not given: the highest version among downloads\Toque-X.Y.Z.apk
+# (by its number, not by the date of the file: an older release downloaded later must not win).
+# The Smart's APK, Toque-smart-X.Y.Z.apk, never matches: it is not for a Connect.
+function Get-ToqueApk {
+    $best = $null
+    $bestVersion = $null
+    foreach ($f in @(Get-ChildItem $Downloads -Filter "Toque-*.apk" -ErrorAction SilentlyContinue)) {
+        $m = [regex]::Match($f.Name, "^Toque-(\d+(\.\d+){1,3})\.apk$")
+        if (-not $m.Success) { continue }
+        $v = [version]$m.Groups[1].Value
+        if ($null -eq $bestVersion -or $v -gt $bestVersion) { $best = $f; $bestVersion = $v }
+    }
+    if ($best) { return $best.FullName }
+    return ""
+}
+
 function Step-Install {
     $apkPath = $Apk
-    if ($apkPath -eq "") {
-        $latest = Get-ChildItem $Downloads -Filter "Toque-*.apk" -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike "Toque-smart-*" } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-        if ($latest) { $apkPath = $latest.FullName }
-    }
+    if ($apkPath -eq "") { $apkPath = Get-ToqueApk }
     if ($apkPath -eq "" -or -not (Test-Path $apkPath)) { Fail "No Toque APK: run 'prepare' (downloads the latest release) or pass -Apk <file>." }
+    Say ("Toque APK: " + $apkPath)
     $adb = Get-Adb
-    $env:Path = (Split-Path $adb) + ";" + $env:Path
-    Push-Location $Repo
-    try {
-        if ($Ip -ne "") { & (Join-Path $Repo "tools\install-robot.ps1") -Apk $apkPath -Ip $Ip }
-        else { & (Join-Path $Repo "tools\install-robot.ps1") -Apk $apkPath }
-    } finally { Pop-Location }
+    $installArgs = @{ Apk = $apkPath; Adb = $adb }
+    if ($Ip -ne "") { $installArgs["Ip"] = $Ip }
+    $global:LASTEXITCODE = 0
+    & (Join-Path $Repo "tools\install-robot.ps1") @installArgs
+    if ($LASTEXITCODE -ne 0) { Fail "Toque was not installed (see the lines above): the step is not marked as done." }
     $ver = Adb shell "dumpsys package app.toque | grep versionName"
     if ($ver -notmatch "versionName") { Fail "Toque is not installed." }
     $mode = Get-MachineMode
     if ($mode -ne "" -and $mode -ne "hardware") {
-        NeedHuman ("Toque is in '" + $mode + "' mode, so the motor is not driven. On the robot, EMPTY bowl, lid closed, hand near the main switch: Toque > Settings > Machine > Real machine > Apply, then run the install step again so the mode can be verified. Success: the badge reads Ready/« Prête » with no Demo or Twin marker AND the journal must show the real link, e.g. 'liaison ouverte : Base moteur (/dev/ttyMT...)'; the simulated-base line means the mode was not applied.")
+        NeedHuman ("Toque is in '" + $mode + "' mode, so the motor is not driven. On the robot, EMPTY bowl, lid closed, hand near the main switch: Toque > Settings > Advanced > Machine > Real machine > Apply (in demo mode, a dot marks 'Advanced' in the menu on the left of Settings), then run the install step again so the mode can be verified. Success: the badge reads Ready/« Base prête » with no Demo or Twin marker AND the journal must show the real link, e.g. 'liaison ouverte : Base moteur (/dev/ttyMT...)'; the simulated-base line means the mode was not applied.")
     }
     if ($mode -eq "hardware") { Ok "Toque machine mode: hardware (real machine)." }
-    elseif ($mode -eq "") { Say "WARNING: Toque machine mode could not be verified (su or prefs unreadable). On the robot, Settings > Machine > Real machine must be applied before the motor can run." }
+    elseif ($mode -eq "") { Say "WARNING: Toque machine mode could not be verified (su or prefs unreadable). On the robot, Settings > Advanced > Machine > Real machine must be applied before the motor can run." }
     Set-State "done-install" (Get-Date).ToString("s")
     Ok ("Toque installed: " + $ver.Trim())
     Ok "install done. Next: wifi (optional)"

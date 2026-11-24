@@ -4,15 +4,19 @@ import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
-import app.toque.TimeSync
 import app.toque.core.i18n.I18n
 import app.toque.core.i18n.tr
+import app.toque.core.machine.Snapshot
 import app.toque.core.recipes.CommunityRecipes
 import app.toque.core.recipes.UserRecipes
 import app.toque.ui.Icon
+import app.toque.ui.MachineBar
+import app.toque.ui.KnobFocus
 import app.toque.ui.MainActivity
 import app.toque.ui.Screen
+import app.toque.ui.TouchWatch
 import app.toque.ui.Ui
+import app.toque.ui.WallClock
 import java.text.SimpleDateFormat
 import java.util.Date
 
@@ -28,11 +32,23 @@ class HomeScreen(a: MainActivity) : Screen(a) {
     private lateinit var resumeCard: LinearLayout
     private lateinit var resumeText: TextView
     private lateinit var knobChip: LinearLayout
+    private lateinit var searchHint: TextView
+    /** Titre de la recette guidée cherché dans la base (catalogue pas encore chargé) : une fois par recette. */
+    private var titleLookup = ""
+    /** Éléments que la molette parcourt, dans l'ordre de lecture, avec le rayon de leurs coins. */
+    private val knobTargets = ArrayList<Pair<View, Float>>()
+    private lateinit var recipesTile: View
+    private val knob by lazy { KnobFocus(view, HomeKnob()) }
     private var unsub: (() -> Unit)? = null
+    /** Ce qui s'adapte dans une tuile quand la barre du bas lui prend de la hauteur. */
+    private class TileParts(val top: View, val text: View, val sub: TextView)
+    private val tiles = ArrayList<TileParts>()
+    private var compact = false
     private val tick = object : Runnable {
         override fun run() {
             refreshClock()
-            view.postDelayed(this, 10_000)
+            // Heure pas encore réglée : on regarde souvent, pour l'afficher dès qu'elle l'est.
+            view.postDelayed(this, WallClock.nextMs(a, 10_000))
         }
     }
 
@@ -58,25 +74,28 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         search.setPadding(Ui.u(24), 0, Ui.u(24), 0)
         search.background = Ui.pressable(Ui.round(Ui.SURFACE, 36f, Ui.STROKE, 1f), 36f)
         search.addView(Icon(c, Icon.Kind.SEARCH, Ui.TEXT2), LinearLayout.LayoutParams(Ui.u(28), Ui.u(28)).apply { rightMargin = Ui.u(14) })
-        search.addView(Ui.text(c, tr("Rechercher une recette…"), 21f, Ui.TEXT3))
+        searchHint = Ui.ellipsize(Ui.text(c, tr("Rechercher une recette…"), 21f, Ui.TEXT3))
+        search.addView(searchHint, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
         search.isClickable = true
         search.setOnClickListener { a.push(RecipesScreen(a, focusSearch = true)) }
         left.addView(search, Ui.lp(Ui.MATCH, Ui.u(72), t = 34))
 
         // Raccourcis sous la recherche : dernières recettes cuisinées, et les plus cuisinées.
         val shortcuts = Ui.horizontal(c)
-        shortcuts.addView(Ui.button(c, tr("Récentes"), Ui.Style.SECONDARY, Icon.Kind.CLOCK, height = 56, textSize = 18f) {
+        val recent = Ui.button(c, tr("Récentes"), Ui.Style.SECONDARY, Icon.Kind.CLOCK, height = 56, textSize = 18f) {
             a.push(RecipesScreen(a, initialUsage = RecipesScreen.Usage.RECENT))
-        }, LinearLayout.LayoutParams(0, Ui.WRAP, 1f).apply { rightMargin = Ui.u(12) })
-        shortcuts.addView(Ui.button(c, tr("Fréquentes"), Ui.Style.SECONDARY, Icon.Kind.FLAME, height = 56, textSize = 18f) {
+        }
+        shortcuts.addView(recent, LinearLayout.LayoutParams(0, Ui.WRAP, 1f).apply { rightMargin = Ui.u(12) })
+        val most = Ui.button(c, tr("Fréquentes"), Ui.Style.SECONDARY, Icon.Kind.FLAME, height = 56, textSize = 18f) {
             a.push(RecipesScreen(a, initialUsage = RecipesScreen.Usage.MOST))
-        }, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
+        }
+        shortcuts.addView(most, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
         left.addView(shortcuts, Ui.lp(Ui.MATCH, Ui.WRAP, t = 14))
 
         resumeCard = Ui.horizontal(c)
         resumeCard.setPadding(Ui.u(22), Ui.u(16), Ui.u(18), Ui.u(16))
         resumeCard.background = Ui.pressable(Ui.round(Ui.ACCENT_DIM, 24f), 24f)
-        resumeCard.addView(Icon(c, Icon.Kind.PLAY, Ui.ACCENT), LinearLayout.LayoutParams(Ui.u(26), Ui.u(26)).apply { rightMargin = Ui.u(14) })
+        resumeCard.addView(Icon(c, Icon.Kind.PLAY, Ui.ACCENT_INK), LinearLayout.LayoutParams(Ui.u(26), Ui.u(26)).apply { rightMargin = Ui.u(14) })
         resumeText = Ui.ellipsize(Ui.text(c, "", 19f, Ui.TEXT, Ui.MEDIUM), 2)
         resumeCard.addView(resumeText, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
         // Zone de toucher plus grande que l'icône (au doigt, sur la carte).
@@ -92,6 +111,10 @@ class HomeScreen(a: MainActivity) : Screen(a) {
             val r = a.app.recipes.getAdjusted(a.prefs.guidedRecipe)
             if (r != null) a.push(CookScreen(a, r, a.prefs.guidedStep)) else { a.prefs.guidedRecipe = ""; refresh() }
         }
+        knobTargets += search to 36f
+        knobTargets += recent to 28f
+        knobTargets += most to 28f
+        knobTargets += resumeCard to 24f
         left.addView(resumeCard, Ui.lp(Ui.MATCH, Ui.WRAP, t = 16))
         root.addView(left, LinearLayout.LayoutParams(0, Ui.MATCH, 0.42f).apply { rightMargin = Ui.u(28) })
 
@@ -100,6 +123,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         val row2 = Ui.horizontal(c)
         val (t1, s1) = tile(Icon.Kind.BOOK, tr("Recettes")) { a.push(RecipesScreen(a)) }
         recipesSub = s1
+        recipesTile = t1
         row1.addView(t1, tileLp(true))
         row1.addView(tile(Icon.Kind.POT, tr("Cuisson\nmanuelle"), hasSub = false) { a.push(ManualScreen(a)) }.first, tileLp(true))
         row1.addView(tile(Icon.Kind.KNEAD, tr("Programmes"), tr("Pétrir, vapeur, rissoler, nettoyage")) { a.push(ProgramsScreen(a)) }.first, tileLp(false))
@@ -110,12 +134,49 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         // Sous-titre seulement quand une nouvelle version de Toque attend d'être installée.
         val (t6, s6) = tile(Icon.Kind.SETTINGS, tr("Réglages")) { a.push(SettingsScreen(a)) }
         settingsSub = s6
-        settingsSub.setTextColor(Ui.ACCENT)
+        settingsSub.setTextColor(Ui.ACCENT_INK)
         row2.addView(t6, tileLp(false))
         grid.addView(row1, LinearLayout.LayoutParams(Ui.MATCH, 0, 1f).apply { bottomMargin = Ui.u(16) })
         grid.addView(row2, LinearLayout.LayoutParams(Ui.MATCH, 0, 1f))
         root.addView(grid, LinearLayout.LayoutParams(0, Ui.MATCH, 0.58f))
-        return root
+        // Un toucher de l'écran efface le cadre de la molette.
+        val watch = TouchWatch(c) { knob.hide() }
+        watch.addView(root, Ui.flp())
+        return watch
+    }
+
+    /** La molette sur l'accueil : recherche, raccourcis, carte « Reprendre », puis les six tuiles. */
+    private inner class HomeKnob : KnobFocus.Slots {
+        override val size: Int get() = knobTargets.size
+        /** Au premier cran : la recette en cours s'il y en a une, sinon « Recettes ». */
+        override fun start(): Int {
+            val resume = knobTargets.indexOfFirst { it.first === resumeCard }
+            if (usable(resume)) return resume
+            return knobTargets.indexOfFirst { it.first === recipesTile }
+        }
+        override fun usable(i: Int): Boolean {
+            if (i !in knobTargets.indices) return false
+            var v: View? = knobTargets[i].first
+            while (v != null && v !== view) {
+                if (v.visibility != View.VISIBLE) return false
+                v = v.parent as? View
+            }
+            return knobTargets[i].first.isEnabled
+        }
+        override fun mark(i: Int, on: Boolean) = KnobFocus.frame(knobTargets[i].first, on, knobTargets[i].second)
+        override fun activate(i: Int) {
+            knobTargets[i].first.performClick()
+        }
+    }
+
+    override fun onKnob(delta: Int): Boolean {
+        knob.turn(delta)
+        return true
+    }
+
+    override fun onKnobPress(): Boolean {
+        knob.press()
+        return true
     }
 
     private fun tileLp(gap: Boolean) = LinearLayout.LayoutParams(0, Ui.MATCH, 1f).apply { if (gap) rightMargin = Ui.u(16) }
@@ -127,27 +188,52 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         val t = Ui.vertical(c, Gravity.CENTER_HORIZONTAL)
         t.setPadding(Ui.u(14), Ui.u(14), Ui.u(14), Ui.u(14))
         t.background = Ui.pressable(Ui.round(Ui.SURFACE, 26f, Ui.STROKE, 1f), 26f)
-        t.addView(View(c), LinearLayout.LayoutParams(1, 0, 2f))
+        t.addView(View(c), LinearLayout.LayoutParams(1, 0, 1f))
         val badge = android.widget.FrameLayout(c)
-        badge.background = Ui.round(Ui.ACCENT_DIM, 44f)
-        badge.addView(Icon(c, icon, Ui.ACCENT), Ui.flp(Ui.u(46), Ui.u(46), Gravity.CENTER))
+        // Le rond prend la couleur choisie (Réglages › Apparence) et l'icône se dessine dessus en foncé :
+        // elle reste nette avec toutes les couleurs, sur le thème sombre comme sur le clair.
+        badge.background = Ui.round(Ui.ACCENT, 44f)
+        badge.addView(Icon(c, icon, Ui.ON_ACCENT), Ui.flp(Ui.u(46), Ui.u(46), Gravity.CENTER))
         t.addView(badge, LinearLayout.LayoutParams(Ui.u(84), Ui.u(84)))
         val text = Ui.vertical(c, Gravity.CENTER_HORIZONTAL or Gravity.TOP)
         text.addView(Ui.text(c, title, 22f, Ui.TEXT, Ui.MEDIUM).apply { gravity = Gravity.CENTER }, Ui.lp(Ui.WRAP, Ui.WRAP, t = 12))
         val s = Ui.ellipsize(Ui.text(c, sub, 15f, Ui.TEXT2).apply { gravity = Gravity.CENTER }, 2)
         if (hasSub) text.addView(s, Ui.lp(Ui.WRAP, Ui.WRAP, t = 4))
-        t.addView(text, LinearLayout.LayoutParams(Ui.MATCH, 0, 3f))
+        // Deux tiers de la place libre au texte : deux lignes de sous-titre y tiennent en entier.
+        t.addView(text, LinearLayout.LayoutParams(Ui.MATCH, 0, 2f))
         t.isClickable = true
         t.setOnClickListener { onClick() }
+        tiles += TileParts(t.getChildAt(0), text, s)
+        knobTargets += t to 26f
         return t to s
     }
 
+    /**
+     * La barre du bas (programme, Turbo, alerte) prend de la hauteur aux tuiles : la pastille remonte
+     * et le sous-titre tient sur une ligne, pour que le texte ne soit pas rogné. La pastille reste à
+     * la même hauteur dans toutes les tuiles.
+     */
+    private fun setCompact(on: Boolean) {
+        if (on == compact) return
+        compact = on
+        for (p in tiles) {
+            (p.text.layoutParams as LinearLayout.LayoutParams).weight = if (on) 8f else 2f
+            p.sub.maxLines = if (on) 1 else 2
+            p.text.requestLayout()
+        }
+    }
+
+    override fun onSnapshot(s: Snapshot) = setCompact(MachineBar.shownFor(s))
+
     private fun refreshClock() {
-        // Heure et date masquées tant qu'elles ne sont pas réglées (voir TimeSync.showClock) ; la
-        // place reste réservée pour que l'accueil ne saute pas quand elles apparaissent.
-        val show = TimeSync.showClock(a)
-        clock.visibility = if (show) View.VISIBLE else View.INVISIBLE
-        date.visibility = if (show) View.VISIBLE else View.INVISIBLE
+        // Après une coupure de courant, la tablette se croit en 2010 : rien de faux tant que l'heure n'est pas réglée.
+        if (!WallClock.known(a)) {
+            clock.text = WallClock.UNKNOWN
+            date.text = tr("Réglage de l'heure…")
+            // Salut neutre : « Bonjour » se traduit ailleurs par « Good morning ».
+            greeting.text = tr("Bonjour !")
+            return
+        }
         clock.text = MainActivity.now()
         date.text = SimpleDateFormat(tr("EEEE d MMMM"), I18n.locale).format(Date()).replaceFirstChar { it.uppercaseChar() }
         val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
@@ -174,15 +260,49 @@ class HomeScreen(a: MainActivity) : Screen(a) {
             ).joinToString("\n")
         }
         val favs = repo.index.entries.count { it.favorite }
-        favSub.text = if (favs == 0) tr("Aucun favori") else if (favs == 1) tr("1 favori") else tr("%d favoris", favs)
+        favSub.text = when {
+            !repo.loaded -> tr("Chargement…")
+            favs == 0 -> tr("Aucun favori")
+            favs == 1 -> tr("1 favori")
+            else -> tr("%d favoris", favs)
+        }
+        searchHint.text = if (repo.loaded) tr("Rechercher une recette…") else tr("Catalogue en préparation…")
         knobChip.visibility = if (a.prefs.knobReady) View.GONE else View.VISIBLE
         val update = a.updates.available
         settingsSub.text = if (update != null) tr("Version %s disponible", update.version) else ""
         settingsSub.visibility = if (update != null) View.VISIBLE else View.GONE
-        val guided = a.prefs.guidedRecipe
-        val title = if (guided.isEmpty()) null else repo.index.entries.firstOrNull { it.id == guided }?.title
+        val title = guidedTitle()
         resumeCard.visibility = if (title != null) View.VISIBLE else View.GONE
         if (title != null) resumeText.text = tr("Reprendre « %s » — étape %d", title, a.prefs.guidedStep + 1)
+    }
+
+    /**
+     * Titre de la recette guidée en cours, ou null (aucune, ou retirée du catalogue). Catalogue pas
+     * encore chargé : le titre gardé dans les préférences, sinon lu dans la base à part (une ligne),
+     * pour que la carte « Reprendre » soit là tout de suite.
+     */
+    private fun guidedTitle(): String? {
+        val guided = a.prefs.guidedRecipe
+        if (guided.isEmpty()) return null
+        val repo = a.app.recipes
+        if (repo.loaded) {
+            val title = repo.index.entries.firstOrNull { it.id == guided }?.title ?: return null
+            if (a.prefs.guidedTitle != "$guided\t$title") a.prefs.guidedTitle = "$guided\t$title"
+            return title
+        }
+        val kept = a.prefs.guidedTitle
+        if (kept.startsWith("$guided\t")) return kept.substring(guided.length + 1)
+        if (titleLookup != guided) {
+            titleLookup = guided
+            Thread {
+                val title = try { repo.get(guided)?.title } catch (_: Exception) { null }
+                if (title != null) {
+                    a.prefs.guidedTitle = "$guided\t$title"
+                    view.post { if (a.current === this) refresh() }
+                }
+            }.apply { name = "toque-reprise" }.start()
+        }
+        return null
     }
 
     override fun onShow() {
@@ -191,10 +311,12 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         unsub = a.app.recipes.onChange { refresh() }
         a.updates.onChange = { refresh() }
         view.removeCallbacks(tick)
-        view.postDelayed(tick, 10_000)
+        view.postDelayed(tick, WallClock.nextMs(a, 10_000))
     }
 
     override fun onHide() {
+        // De retour sur l'accueil, le premier cran repart de la recette en cours (ou de « Recettes »).
+        knob.reset()
         unsub?.invoke()
         a.updates.onChange = null
         view.removeCallbacks(tick)

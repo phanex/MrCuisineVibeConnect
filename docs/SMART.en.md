@@ -23,10 +23,10 @@
   recipes (`MC2.0` for the Connect, `MC3.0` for the Smart).
 - **Safe detection**: Toque looks at the installed stock app, the Android version and the ports
   present, **without sending anything to the base**. On first start the person confirms the robot
-  (Settings › Robot to change it). In "Real machine", the link to the base stays closed until the
+  (Settings › Advanced › Robot to change it). In "Real machine", the link to the base stays closed until the
   robot is confirmed.
 - **Each robot only sees the recipes it can make**: the ones the site makes for it, whose every
-  setting exists on that robot. The others are counted in Settings › Lidl recipes ("N recipes
+  setting exists on that robot. The others are counted in Settings › Recipes › Lidl ("N recipes
   hidden"). Screens (programs, manual cooking, editor) only offer what the robot can do.
 - On the Connect nothing changes: same protocol, same limits, and sorting the recipes stays light.
 
@@ -42,7 +42,7 @@
 - **Smart programs**: blend, smoothie, boil eggs, sous-vide (40 to 85 °C), slow cooking (60 to
   100 °C), ferment (30 to 50 °C), cook rice, heat water, pre-rinse, long cleaning. Sous-vide, slow
   cooking and ferment can run as long as in the stock app (12 h at most).
-- **The Smart's Lidl recipes**: Settings › Lidl recipes › Sync (the first time, every recipe is read
+- **The Smart's Lidl recipes**: Settings › Recipes › Lidl › Sync (the first time, every recipe is read
   again).
 - **Not yet**: heating without stirring (speed 0) in manual cooking; importing the stock app's
   database; the list of the base's error codes.
@@ -60,13 +60,14 @@ follow [Camybrith Cooking's](https://github.com/Tidusneo24150/camybrith-cooking/
    `Toque-smart`**: the other APK is the Connect's and does not work on the Smart's tablet), then, from the
    repository folder:
    `powershell -ExecutionPolicy Bypass -File tools\install-robot.ps1 -Apk Toque-smart-x.y.z.apk`
-   (or `adb install -r`, then `tools/robot/setup-root.sh` as root). After that, Settings › Updates
-   takes the Smart APK by itself.
+   (macOS: `bash tools/install-robot.sh --apk Toque-smart-x.y.z.apk`, or `adb install -r` then
+   `tools/robot/setup-root.sh` as root). After that, Settings › Updates takes the Smart APK by
+   itself.
 
    Had a `0.8.0-smart.N` test version? Install 0.8.0 over it with the same command, once: the updater
    of those test versions does not offer it.
 3. On start, "Which robot is this?": **Monsieur Cuisine Smart**.
-4. Settings › Machine › **Real machine** › Apply. **First run with an empty bowl**, hand on the main
+4. Settings › Advanced › Machine › **Real machine** › Apply. **First run with an empty bowl**, hand on the main
    switch.
 
 ## What to test, in this order
@@ -74,7 +75,7 @@ follow [Camybrith Cooking's](https://github.com/Tidusneo24150/camybrith-cooking/
 Empty bowl first, then with water. At each step what matters is: does the robot do what Toque shows,
 and does it stop when it should?
 
-1. **Link**: Settings › Tools › Motor base diagnostics: frames received, weight, lid, bowl.
+1. **Link**: Settings › Advanced › Motor base diagnostics: frames received, weight, lid, bowl.
 2. **Manual** speed 2, 10 s; again, opening the lid while it turns (immediate pause, resumes after
    closing).
 3. **Heating** with 500 ml of water: 37 °C speed 1 for 1 min, then 40 °C.
@@ -93,9 +94,10 @@ and does it stop when it should?
 
 In the Smart testers issue (or a new issue): the model under the robot (SKMS 1200 A1…), the Android
 version and the base firmware (Diagnostics screen), what works and what doesn't, and the log
-(Settings › Tools › Log).
+(Settings › Advanced › Log).
 
 ## Back to the stock app
 
-`tools\restore-robot.ps1` gives the motor back to the stock app (its serial-port service included);
-`tools\restore-robot.ps1 -Uninstall` also uninstalls Toque.
+`tools\restore-robot.ps1` (macOS: `bash tools/restore-robot.sh`) gives the motor back to the stock
+app (its serial-port service included); add `-Uninstall` (macOS: `--uninstall`) to also uninstall
+Toque.

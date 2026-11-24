@@ -1,5 +1,7 @@
 package app.toque.ui
 
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -12,7 +14,6 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import app.toque.Prefs
-import app.toque.TimeSync
 import app.toque.core.i18n.tr
 import app.toque.core.machine.JobState
 import app.toque.core.machine.LinkState
@@ -38,27 +39,43 @@ abstract class Screen(val a: MainActivity) {
     open fun canLeave(proceed: () -> Unit): Boolean = true
     /** Empêche la mise en veille tant que cet écran est affiché (balance). */
     open val keepAwake: Boolean get() = false
+    /** Une recette guidée affichée attend un geste de la personne : l'anneau de la molette passe au vert. */
+    open val cookWaiting: Boolean get() = false
 }
 
-/** Barre supérieure : retour, titre, état de la base, heure. */
+/** Barre supérieure : retour, titre, minuteurs, état de la base, heure. */
 class TopBar(private val a: MainActivity) : LinearLayout(a) {
     private val back = Icon(a, Icon.Kind.BACK, Ui.TEXT)
     private val titleView = Ui.ellipsize(Ui.text(a, "", 24f, Ui.TEXT, Ui.MEDIUM))
-    private val temp = Ui.chip(a, "", Icon.Kind.THERMO, Ui.TEXT2)
-    private val lid = Ui.chip(a, tr("Couvercle ouvert"), Icon.Kind.LID, Ui.WARN, 0x33FFC14D)
-    private val bowl = Ui.chip(a, tr("Bol retiré"), Icon.Kind.POT, Ui.WARN, 0x33FFC14D)
-    private val link = Ui.chip(a, "", Icon.Kind.LINK, Ui.TEXT2)
-    private val clock = Ui.chip(a, "", Icon.Kind.CLOCK, Ui.TEXT)
+    private val temp = barChip("", Icon.Kind.THERMO, Ui.TEXT2)
+    private val tempIcon = temp.getChildAt(0) as Icon
+    /** Triangle rouge sur la température, qui clignote tant que le bol est chaud (≥ 60 °C). */
+    private val hotWarning = Icon(a, Icon.Kind.WARNING_FILLED, Ui.DANGER)
+    private val blink = ObjectAnimator.ofFloat(hotWarning, "alpha", 1f, 0.12f).apply {
+        duration = 500
+        repeatMode = ValueAnimator.REVERSE
+        repeatCount = ValueAnimator.INFINITE
+    }
+    private val lid = barChip(tr("Couvercle ouvert"), Icon.Kind.LID, Ui.WARN, 0x33FFC14D)
+    private val bowl = barChip(tr("Bol retiré"), Icon.Kind.POT, Ui.WARN, 0x33FFC14D)
+    private val link = barChip("", Icon.Kind.LINK, Ui.TEXT2)
+    private val clock = barChip("", Icon.Kind.CLOCK, Ui.TEXT)
     private val home = Icon(a, Icon.Kind.HOME, Ui.TEXT)
+    /** Minuteur de cuisine : bouton rond au repos, pastille orange (temps restant, nombre) quand il en tourne. */
+    private val timerButton = Icon(a, Icon.Kind.TIMER, Ui.TEXT)
+    private val timerChip = Ui.chip(a, "", Icon.Kind.TIMER, Ui.ACCENT, Ui.ACCENT_DIM)
+    private val timerText = Ui.chipText(timerChip)
+    private val timerCount = Ui.text(a, "", 14f, Ui.ON_ACCENT, Ui.BOLD).apply {
+        gravity = Gravity.CENTER
+        background = Ui.round(Ui.ACCENT, 12f)
+        minWidth = Ui.u(24)
+    }
     private val handler = Handler(Looper.getMainLooper())
     private val tick = object : Runnable {
         override fun run() {
-            // Pastille masquée tant que l'heure n'est pas réglée ou que le Wi-Fi est coupé : une heure
-            // fausse (2010, 01:00 au démarrage) trompe plus qu'une heure absente.
-            val show = TimeSync.showClock(a)
-            if (show) Ui.chipText(clock).text = MainActivity.now()
-            clock.visibility = if (show) View.VISIBLE else View.GONE
-            handler.postDelayed(this, if (show) 10_000 else 2_000)
+            // « --:-- » tant que l'heure n'est pas réglée ou que le Wi-Fi est coupé (voir WallClock).
+            Ui.chipText(clock).text = WallClock.text(a)
+            handler.postDelayed(this, WallClock.nextMs(a, 10_000))
         }
     }
     private var adminTaps = 0
@@ -67,21 +84,34 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
     init {
         orientation = HORIZONTAL
         setGravity(Gravity.CENTER_VERTICAL)
-        setPadding(Ui.u(10), 0, Ui.u(18), 0)
+        // Un peu d'air au-dessus : sans lui, les pastilles touchent le bord de l'écran.
+        setPadding(Ui.u(10), Ui.u(TOP_GAP), Ui.u(18), 0)
         // Transparente : le dégradé du fond passe aussi derrière la barre du haut.
         roundButton(back) { a.back() }
-        addView(back, LayoutParams(Ui.u(52), Ui.u(52)))
+        addView(back, LayoutParams(Ui.u(TOUCH), Ui.u(TOUCH)))
         addView(titleView, LayoutParams(0, Ui.WRAP, 1f).apply { leftMargin = Ui.u(6) })
-        addView(lid, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
-        addView(bowl, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
-        addView(temp, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
-        addView(link, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
-        addView(clock, Ui.lp(Ui.WRAP, Ui.WRAP, r = 8))
+        roundButton(timerButton) { TimerPanel.open(a) }
+        timerButton.contentDescription = tr("Minuteur")
+        addView(timerButton, LayoutParams(Ui.u(TOUCH), Ui.u(TOUCH)).apply { rightMargin = Ui.u(4) })
+        timerChip.addView(timerCount, LayoutParams(Ui.WRAP, Ui.u(24)).apply { leftMargin = Ui.u(8) })
+        timerChip.background = Ui.pressable(Ui.round(Ui.ACCENT_DIM, 40f, Ui.ACCENT, 1.5f), 40f)
+        timerChip.isClickable = true
+        timerChip.setOnClickListener { TimerPanel.open(a) }
+        timerChip.visibility = View.GONE
+        addView(timerChip, chipParams(10))
+        addView(lid, chipParams(10))
+        addView(bowl, chipParams(10))
+        addView(temp, chipParams(10))
+        addView(link, chipParams(10))
+        addView(clock, chipParams(8))
         roundButton(home) { a.home() }
-        addView(home, LayoutParams(Ui.u(52), Ui.u(52)))
+        addView(home, LayoutParams(Ui.u(TOUCH), Ui.u(TOUCH)))
         lid.visibility = View.GONE
         bowl.visibility = View.GONE
         temp.visibility = View.GONE
+        hotWarning.contentDescription = tr("Bol chaud")
+        hotWarning.visibility = View.GONE
+        temp.addView(hotWarning, 0, LayoutParams(Ui.u(24), Ui.u(24)).apply { rightMargin = Ui.u(6) })
         // Accès caché aux réglages Android : 5 appuis rapides sur l'heure.
         clock.setOnClickListener {
             val now = System.currentTimeMillis()
@@ -93,12 +123,45 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
         }
     }
 
-    /** Bouton rond de 44 au centre d'une zone tactile de 52, de la même famille que les pastilles ; l'icône fait 26. */
+    /**
+     * Bouton rond de [ITEM] au centre d'une zone tactile de [TOUCH] (toute la hauteur utile de la barre), de
+     * la même famille que les pastilles ; l'icône fait 30.
+     */
     private fun roundButton(icon: Icon, onClick: () -> Unit) {
-        icon.background = InsetDrawable(Ui.pressable(Ui.round(Ui.SURFACE2, 22f, Ui.STROKE, 1f), 22f), Ui.u(4))
+        val r = ITEM / 2f
+        icon.background = InsetDrawable(Ui.pressable(Ui.round(Ui.SURFACE2, r, Ui.STROKE, 1f), r), Ui.u((TOUCH - ITEM) / 2))
         // Après le fond : un fond qui porte une marge impose sinon la sienne à la vue.
-        icon.setPadding(Ui.u(13), Ui.u(13), Ui.u(13), Ui.u(13))
+        icon.setPadding(Ui.u(15), Ui.u(15), Ui.u(15), Ui.u(15))
         icon.setOnClickListener { onClick() }
+    }
+
+    /** Pastille de la barre : aussi haute que les boutons ronds, pour une barre homogène. */
+    private fun barChip(label: String, icon: Icon.Kind, color: Int, bg: Int = Ui.SURFACE2): LinearLayout =
+        Ui.chip(a, label, icon, color, bg, CHIP_TEXT).apply { setPadding(Ui.u(16), 0, Ui.u(18), 0) }
+
+    private fun chipParams(right: Int) = LayoutParams(Ui.WRAP, Ui.u(ITEM)).apply { rightMargin = Ui.u(right) }
+
+    /** Seul le triangle clignote : la température à côté reste lisible. */
+    private fun showHot(hot: Boolean) {
+        if (hot == (hotWarning.visibility == View.VISIBLE)) return
+        if (hot) {
+            hotWarning.alpha = 1f
+            hotWarning.visibility = View.VISIBLE
+            blink.start()
+        } else {
+            blink.cancel()
+            hotWarning.visibility = View.GONE
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        blink.cancel()
+        super.onDetachedFromWindow()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (hotWarning.visibility == View.VISIBLE && !blink.isStarted) blink.start()
     }
 
     fun startClock() {
@@ -108,6 +171,19 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
 
     fun stopClock() = handler.removeCallbacks(tick)
 
+    /** Pastille du minuteur qui finit le premier (et nombre de minuteurs en cours), ou le bouton rond. */
+    fun showTimers(t: Timers) {
+        val running = t.running
+        val first = running.firstOrNull()
+        timerButton.visibility = if (first == null) View.VISIBLE else View.GONE
+        timerChip.visibility = if (first == null) View.GONE else View.VISIBLE
+        if (first == null) return
+        val text = Ui.clock(first.remaining(t.now()))
+        if (timerText.text.toString() != text) timerText.text = text
+        timerCount.text = running.size.toString()
+        timerCount.visibility = if (running.size > 1) View.VISIBLE else View.GONE
+    }
+
     fun setTitle(t: String, canGoBack: Boolean) {
         titleView.text = t
         back.visibility = if (canGoBack) View.VISIBLE else View.INVISIBLE
@@ -116,25 +192,29 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
 
     fun update(s: Snapshot) {
         lid.visibility = if (s.hasSample && s.lidOpen) View.VISIBLE else View.GONE
-        // Seulement si la détection du bol est exigée : la personne a vérifié que le capteur est
-        // fiable (sens réglé), sinon la pastille resterait affichée à tort.
-        bowl.visibility = if (s.hasSample && a.prefs.requireBowl && !s.bowlDetected) View.VISIBLE else View.GONE
+        // Bol retiré : pour la base le couvercle est « ouvert », mais ce n'est pas lui qu'il faut fermer.
+        Ui.chipText(lid).text = if (s.bowlRemoved) tr("Bol retiré") else tr("Couvercle ouvert")
+        (lid.getChildAt(0) as Icon).set(if (s.bowlRemoved) Icon.Kind.POT else Icon.Kind.LID)
+        // Capteur du bol seul : seulement si la détection du bol est exigée (la personne a alors vérifié que
+        // le capteur est fiable, sens réglé). Jamais deux fois « Bol retiré ».
+        bowl.visibility = if (s.hasSample && a.prefs.requireBowl && !s.bowlDetected && !s.bowlRemoved) View.VISIBLE else View.GONE
         if (s.hasSample) {
             temp.visibility = View.VISIBLE
             Ui.chipText(temp).text = "${s.actualTempC} °C"
             val col = if (s.actualTempC >= 40) Ui.tempColor(s.actualTempC) else Ui.TEXT2
             Ui.chipText(temp).setTextColor(col)
-            (temp.getChildAt(0) as Icon).color = col
+            tempIcon.color = col
         } else temp.visibility = View.GONE
+        showHot(s.hot)
         val mode = a.prefs.mode
         val simulated = mode != Prefs.Mode.HARDWARE
         val (label, color) = when {
             s.hasFault -> tr("Alerte") to Ui.DANGER
             s.link == LinkState.READY -> {
                 val label = when (mode) {
-                    Prefs.Mode.DEMO -> tr("Démo · Prête")
-                    Prefs.Mode.TWIN -> tr("Jumeau · Prête")
-                    Prefs.Mode.HARDWARE -> tr("Prête")
+                    Prefs.Mode.DEMO -> tr("Démo · Base prête")
+                    Prefs.Mode.TWIN -> tr("Jumeau · Base prête")
+                    Prefs.Mode.HARDWARE -> tr("Base prête")
                 }
                 label to (if (simulated) Ui.COOL else Ui.OK)
             }
@@ -145,6 +225,18 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
         Ui.chipText(link).text = label
         Ui.chipText(link).setTextColor(color)
         (link.getChildAt(0) as Icon).color = color
+    }
+
+    companion object {
+        /** Hauteur commune des boutons ronds et des pastilles. */
+        const val ITEM = 50
+        /** Zone tactile des boutons ronds : toute la hauteur utile de la barre. */
+        const val TOUCH = 60
+        /** Espace entre le haut de l'écran et la barre. */
+        const val TOP_GAP = 8
+        /** Hauteur de la barre, espace du haut compris. */
+        const val HEIGHT = TOUCH + TOP_GAP
+        private const val CHIP_TEXT = 18f
     }
 }
 
@@ -173,13 +265,17 @@ class ProgressLine(c: Context) : View(c) {
 /**
  * Barre machine persistante : visible dès qu'un programme tourne, est en pause, vient de
  * finir, ou qu'une alerte est active — sur tous les écrans.
+ *
+ * Une carte arrondie détachée des bords de l'écran, alignée sur les cartes des écrans ([SIDE]) ; ses
+ * boutons sont à la même distance ([INSET]) de son bord en haut, en bas et à droite.
  */
 class MachineBar(private val a: MainActivity) : FrameLayout(a) {
     private val jobRow = Ui.horizontal(a)
     private val faultRow = Ui.horizontal(a)
     private val label = Ui.ellipsize(Ui.text(a, "", 20f, Ui.TEXT, Ui.MEDIUM))
     private val state = Ui.ellipsize(Ui.text(a, "", 16f, Ui.TEXT2))
-    private val time = Ui.text(a, "", 40f, Ui.TEXT, Ui.LIGHT)
+    /** Rapetissé plutôt que coupé quand les pastilles prennent la place (libellés longs, trois pastilles). */
+    private val time = Ui.fitText(a, 40f, 24f, Ui.TEXT, Ui.LIGHT)
     private val progress = ProgressLine(a)
     private val chips = Ui.horizontal(a)
     private val speedChip = Ui.chip(a, "", Icon.Kind.SPEED, Ui.TEXT)
@@ -192,13 +288,15 @@ class MachineBar(private val a: MainActivity) : FrameLayout(a) {
     private var last: Snapshot? = null
 
     init {
-        setBackgroundColor(Ui.SURFACE)
+        // Transparente autour de la carte : le dégradé du fond passe derrière, comme pour la barre du haut.
+        setPadding(Ui.u(SIDE), 0, Ui.u(SIDE), Ui.u(BOTTOM_GAP))
         // Programme
-        jobRow.setPadding(Ui.u(22), Ui.u(12), Ui.u(18), Ui.u(12))
+        jobRow.background = Ui.round(Ui.SURFACE, RADIUS, Ui.STROKE, 1f)
+        jobRow.setPadding(Ui.u(TEXT_INSET), Ui.u(INSET), Ui.u(INSET), Ui.u(INSET))
         val left = Ui.vertical(a)
         left.addView(label)
         left.addView(state, Ui.lp(t = 4))
-        jobRow.addView(left, LinearLayout.LayoutParams(Ui.u(230), Ui.WRAP))
+        jobRow.addView(left, LinearLayout.LayoutParams(Ui.u(210), Ui.WRAP))
         val mid = Ui.vertical(a, Gravity.CENTER_HORIZONTAL)
         mid.addView(time, Ui.lp(Ui.WRAP, Ui.WRAP))
         mid.addView(progress, Ui.lp(Ui.MATCH, Ui.u(6), t = 6))
@@ -207,21 +305,23 @@ class MachineBar(private val a: MainActivity) : FrameLayout(a) {
         chips.addView(tempChip, Ui.lp(Ui.WRAP, Ui.WRAP, r = 8))
         chips.addView(dirChip, Ui.lp(Ui.WRAP, Ui.WRAP, r = 8))
         jobRow.addView(chips)
-        pauseBtn = Ui.button(a, "", Ui.Style.SECONDARY, Icon.Kind.PAUSE, height = 64) { onPause() }
-        stopBtn = Ui.button(a, "", Ui.Style.DANGER, Icon.Kind.STOP, height = 64) {
+        pauseBtn = Ui.button(a, "", Ui.Style.SECONDARY, Icon.Kind.PAUSE, height = BUTTON) { onPause() }
+        stopBtn = Ui.button(a, "", Ui.Style.DANGER, Icon.Kind.STOP, height = BUTTON) {
             a.machine.stop()
         }
-        okBtn = Ui.button(a, "OK", Ui.Style.SECONDARY, Icon.Kind.CHECK, height = 64) { a.machine.clearFinished() }
+        okBtn = Ui.button(a, "OK", Ui.Style.SECONDARY, Icon.Kind.CHECK, height = BUTTON) { a.machine.clearFinished() }
         jobRow.addView(pauseBtn, Ui.lp(Ui.u(84), Ui.WRAP, l = 6))
         jobRow.addView(stopBtn, Ui.lp(Ui.u(84), Ui.WRAP, l = 10))
         jobRow.addView(okBtn, Ui.lp(Ui.WRAP, Ui.WRAP, l = 10))
         addView(jobRow, Ui.flp(Ui.MATCH, Ui.WRAP))
-        // Alerte
-        faultRow.setPadding(Ui.u(22), Ui.u(14), Ui.u(18), Ui.u(14))
-        faultRow.setBackgroundColor(0xFF3A1416.toInt())
+        // Alerte : la même carte, en rouge sombre ; en rouge pâle sur le thème clair, où le texte est foncé.
+        faultRow.background = if (Ui.light) Ui.round(0xFFFDE7E7.toInt(), RADIUS, 0xFFF2C4C4.toInt(), 1f)
+            else Ui.round(0xFF3A1416.toInt(), RADIUS, 0xFF6B2529.toInt(), 1f)
+        faultRow.setPadding(Ui.u(TEXT_INSET), Ui.u(INSET), Ui.u(INSET), Ui.u(INSET))
+        faultRow.minimumHeight = Ui.u(BUTTON + 2 * INSET)
         faultRow.addView(Icon(a, Icon.Kind.WARNING, Ui.DANGER), LinearLayout.LayoutParams(Ui.u(34), Ui.u(34)).apply { rightMargin = Ui.u(14) })
-        faultRow.addView(faultText, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
-        faultRow.addView(Ui.button(a, tr("Acquitter"), Ui.Style.SECONDARY, Icon.Kind.CHECK, height = 60) {
+        faultRow.addView(faultText, LinearLayout.LayoutParams(0, Ui.WRAP, 1f).apply { rightMargin = Ui.u(14) })
+        faultRow.addView(Ui.button(a, tr("Acquitter"), Ui.Style.SECONDARY, Icon.Kind.CHECK, height = BUTTON) {
             a.machine.acknowledge { v -> a.refusal(v) }
         })
         addView(faultRow, Ui.flp(Ui.MATCH, Ui.WRAP))
@@ -247,7 +347,7 @@ class MachineBar(private val a: MainActivity) : FrameLayout(a) {
         last = s
         val st = s.state
         val showJob = s.jobActive || s.turboActive
-        visibility = if (showJob || s.hasFault) View.VISIBLE else View.GONE
+        visibility = if (shownFor(s)) View.VISIBLE else View.GONE
         faultRow.visibility = if (s.hasFault) View.VISIBLE else View.GONE
         jobRow.visibility = if (!s.hasFault && showJob) View.VISIBLE else View.GONE
         if (s.hasFault) {
@@ -307,4 +407,21 @@ class MachineBar(private val a: MainActivity) : FrameLayout(a) {
         chips.visibility = if (turbo) View.GONE else View.VISIBLE
     }
 
+    companion object {
+        /** Marge de chaque côté : celle des écrans, la carte s'aligne sur les leurs. */
+        const val SIDE = 24
+        /** Espace entre la carte et le bas de l'écran. */
+        const val BOTTOM_GAP = 14
+        /** Hauteur des boutons. */
+        const val BUTTON = 64
+        /** Distance des boutons au bord de la carte, la même en haut, en bas et à droite. */
+        const val INSET = 8
+        /** Retrait du texte à gauche, dans l'arrondi de la carte. */
+        const val TEXT_INSET = 28
+        /** Bouts arrondis du rayon des boutons plus [INSET] : le bouton de droite épouse le bord de la carte. */
+        const val RADIUS = BUTTON / 2f + INSET
+
+        /** La barre est affichée pour [s] : un programme (même terminé, jusqu'à « OK »), Turbo ou une alerte. */
+        fun shownFor(s: Snapshot): Boolean = s.jobActive || s.turboActive || s.hasFault
+    }
 }

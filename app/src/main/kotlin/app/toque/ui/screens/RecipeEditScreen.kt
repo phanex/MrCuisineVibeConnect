@@ -84,12 +84,17 @@ private object Edit {
         return box
     }
 
+    /** Côté d'un bouton de ligne (flèches, croix) : assez grand pour un doigt mouillé ou fariné. */
+    const val CONTROL = 56
+    /** Écart entre deux boutons voisins. */
+    const val GAP = 10
+
     fun iconButton(c: Context, icon: Icon.Kind, color: Int, description: String, rotation: Float = 0f, onClick: () -> Unit): View {
         val b = FrameLayout(c)
         val i = Icon(c, icon, color)
         i.rotation = rotation
-        b.addView(i, Ui.flp(Ui.u(22), Ui.u(22), Gravity.CENTER))
-        b.background = Ui.pressable(Ui.round(0, 24f), 24f)
+        b.addView(i, Ui.flp(Ui.u(24), Ui.u(24), Gravity.CENTER))
+        b.background = Ui.pressable(Ui.round(Ui.SURFACE2, 14f, Ui.STROKE, 1f), 14f)
         b.contentDescription = description
         b.isClickable = true
         b.setOnClickListener { onClick() }
@@ -107,6 +112,11 @@ private object Edit {
  * besoin. Les réglages passent par les mêmes limites de sécurité que la cuisson manuelle.
  */
 class RecipeEditScreen(a: MainActivity, start: Recipe, private val isNew: Boolean) : Screen(a) {
+    companion object {
+        /** Durée du message « Ingrédient supprimé · Rétablir ». */
+        const val UNDO_MS = 6000L
+    }
+
     override val title = if (isNew) tr("Nouvelle recette") else tr("Modifier la recette")
     private var draft = start
     /** Une copie d'une recette Lidl est déjà une nouveauté à enregistrer. */
@@ -114,6 +124,16 @@ class RecipeEditScreen(a: MainActivity, start: Recipe, private val isNew: Boolea
     private val metaBox by lazy { Ui.vertical(c) }
     private val ingredientsBox by lazy { Ui.vertical(c) }
     private val stepsBox by lazy { Ui.vertical(c) }
+
+    /**
+     * Dernière ligne retirée, que « Rétablir » remet en place pendant quelques secondes : la liste des
+     * ingrédients d'avant (groupes et titres compris), ou l'étape et son rang. Toute autre modification
+     * des lignes l'oublie, pour que l'annulation remette exactement ce qui a été retiré.
+     */
+    private class Removed(val step: Step?, val index: Int, val ingredientsBefore: List<IngredientGroup>,
+                          val group: Int, val groupKept: Boolean)
+    private var removed: Removed? = null
+    private val forget = Runnable { if (removed != null) { removed = null; renderIngredients(); renderSteps() } }
 
     override fun build(): View {
         val root = Ui.horizontal(c, Gravity.TOP)
@@ -130,8 +150,8 @@ class RecipeEditScreen(a: MainActivity, start: Recipe, private val isNew: Boolea
         renderMeta()
         form.addView(metaBox, Ui.lp(t = 14))
         form.addView(Edit.label(c, tr("Ingrédients")), Ui.lp(t = 18))
-        form.addView(Ui.text(c, tr("Une ligne chacun, la quantité d'abord : « 500 g de farine ». Les quantités suivent le nombre de personnes."),
-            14f, Ui.TEXT3).apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 4))
+        form.addView(Ui.text(c, Ui.guillemets(tr("Une ligne chacun, la quantité d'abord : « 500 g de farine ». Les quantités suivent le nombre de personnes.")),
+            16f, Ui.TEXT2).apply { setLineSpacing(0f, 1.15f) }, Ui.lp(t = 4))
         renderIngredients()
         form.addView(ingredientsBox, Ui.lp(t = 6))
         form.addView(Ui.button(c, tr("Ajouter un ingrédient"), Ui.Style.GHOST, Icon.Kind.PLUS, height = 50, textSize = 16f) { editIngredient(null) },
@@ -208,27 +228,36 @@ class RecipeEditScreen(a: MainActivity, start: Recipe, private val isNew: Boolea
         ingredientsBox.removeAllViews()
         if (draft.allIngredients.isEmpty()) {
             ingredientsBox.addView(Ui.text(c, tr("Aucun ingrédient pour l'instant."), 17f, Ui.TEXT3), Ui.lp(t = 4))
+            removed?.takeIf { it.step == null }?.let { ingredientsBox.addView(undoBar(it), undoLp()) }
             return
         }
+        val gone = removed?.takeIf { it.step == null }
+        var placed = gone == null
         var k = 0
-        for (group in draft.ingredients) {
-            if (group.title.isNotBlank()) ingredientsBox.addView(Ui.text(c, group.title, 16f, Ui.ACCENT, Ui.MEDIUM), Ui.lp(t = 10, b = 2))
+        for ((g, group) in draft.ingredients.withIndex()) {
+            // Ligne retirée en fin de groupe, ou groupe vidé : le message passe avant le titre suivant.
+            if (!placed && gone!!.index == k && (!gone.groupKept || g != gone.group)) { ingredientsBox.addView(undoBar(gone), undoLp()); placed = true }
+            if (group.title.isNotBlank()) ingredientsBox.addView(Ui.text(c, group.title, 16f, Ui.ACCENT_INK, Ui.MEDIUM), Ui.lp(t = 10, b = 2))
             for (i in group.items) {
+                if (!placed && gone!!.index == k) { ingredientsBox.addView(undoBar(gone), undoLp()); placed = true }
                 val index = k++
                 val row = Ui.horizontal(c)
                 row.addView(Ui.text(c, "•", 18f, Ui.TEXT3), Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
                 row.addView(Ui.text(c, i.display, 18f, Ui.TEXT).apply { setLineSpacing(0f, 1.1f) }, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
-                row.addView(Edit.iconButton(c, Icon.Kind.CLOSE, Ui.TEXT3, tr("Retirer")) { removeIngredient(index) },
-                    LinearLayout.LayoutParams(Ui.u(48), Ui.u(48)))
+                row.addView(Edit.iconButton(c, Icon.Kind.CLOSE, Ui.DANGER, tr("Retirer")) { removeIngredient(index) },
+                    LinearLayout.LayoutParams(Ui.u(Edit.CONTROL), Ui.u(Edit.CONTROL)).apply { leftMargin = Ui.u(Edit.GAP) })
                 row.background = Ui.pressable(Ui.round(0, 12f), 12f)
                 row.isClickable = true
                 row.setOnClickListener { editIngredient(index) }
-                ingredientsBox.addView(row, Ui.lp(t = 2))
+                ingredientsBox.addView(row, Ui.lp(t = 4))
             }
         }
+        if (!placed) ingredientsBox.addView(undoBar(gone!!), undoLp())
     }
 
     private fun setIngredient(index: Int?, item: Ingredient?) {
+        forgetRemoval()
+        val before = draft.ingredients
         val groups = draft.ingredients.map { it.items.toMutableList() }.toMutableList()
         val titles = draft.ingredients.map { it.title }.toMutableList()
         if (index == null) {
@@ -237,7 +266,10 @@ class RecipeEditScreen(a: MainActivity, start: Recipe, private val isNew: Boolea
             groups.last().add(item)
         } else {
             val (g, k) = positions().getOrNull(index) ?: return
-            if (item == null) groups[g].removeAt(k) else groups[g][k] = item
+            if (item == null) {
+                groups[g].removeAt(k)
+                remember(Removed(null, index, before, g, groups[g].isNotEmpty()))
+            } else groups[g][k] = item
         }
         draft = draft.copy(ingredients = groups.indices.filter { groups[it].isNotEmpty() }.map { IngredientGroup(titles[it], groups[it]) })
         dirty = true
@@ -305,14 +337,17 @@ class RecipeEditScreen(a: MainActivity, start: Recipe, private val isNew: Boolea
 
     private fun renderSteps() {
         stepsBox.removeAllViews()
+        val gone = removed?.takeIf { it.step != null }
         if (draft.steps.isEmpty()) {
             stepsBox.addView(Ui.text(c, tr("Aucune étape pour l'instant."), 17f, Ui.TEXT3), Ui.lp(t = 10))
+            gone?.let { stepsBox.addView(undoBar(it), undoLp()) }
             return
         }
         val last = draft.steps.size - 1
         for ((i, s) in draft.steps.withIndex()) {
+            if (gone != null && gone.index == i) stepsBox.addView(undoBar(gone), undoLp())
             val row = Ui.horizontal(c, Gravity.TOP)
-            val num = Ui.text(c, "${i + 1}", 17f, Ui.ACCENT, Ui.MEDIUM).apply { gravity = Gravity.CENTER }
+            val num = Ui.text(c, "${i + 1}", 17f, Ui.ACCENT_INK, Ui.MEDIUM).apply { gravity = Gravity.CENTER }
             num.background = Ui.round(Ui.ACCENT_DIM, 18f)
             row.addView(num, LinearLayout.LayoutParams(Ui.u(36), Ui.u(36)).apply { rightMargin = Ui.u(14); topMargin = Ui.u(4) })
             val col = Ui.vertical(c)
@@ -323,27 +358,86 @@ class RecipeEditScreen(a: MainActivity, start: Recipe, private val isNew: Boolea
             s.machine?.let { m ->
                 val ok = m.valid
                 chips.addView(Ui.chip(c, m.summary, if (ok) Icon.Kind.POT else Icon.Kind.WARNING,
-                    if (ok) Ui.ACCENT else Ui.WARN, if (ok) Ui.ACCENT_DIM else 0x33FFC14D, 15f))
+                    if (ok) Ui.ACCENT_INK else Ui.WARN, if (ok) Ui.ACCENT_DIM else 0x33FFC14D, 15f))
             }
             if (chips.childCount > 0) col.addView(chips, Ui.lp(t = 6))
             col.background = Ui.pressable(Ui.round(0, 12f), 12f)
             col.isClickable = true
             col.setOnClickListener { editStep(i) }
             row.addView(col, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
-            // Côte à côte : une étape d'une ligne n'est pas plus haute que les flèches (espacement régulier).
+            // Côte à côte et espacées : une étape d'une ligne n'est pas plus haute que les flèches.
             val move = Ui.horizontal(c)
-            move.addView(Edit.iconButton(c, Icon.Kind.CHEVRON, Ui.TEXT2, tr("Monter"), -90f) { moveStep(i, -1) }.also { Ui.setButtonEnabled(it, i > 0) },
-                LinearLayout.LayoutParams(Ui.u(44), Ui.u(44)))
-            move.addView(Edit.iconButton(c, Icon.Kind.CHEVRON, Ui.TEXT2, tr("Descendre"), 90f) { moveStep(i, 1) }.also { Ui.setButtonEnabled(it, i < last) },
-                LinearLayout.LayoutParams(Ui.u(44), Ui.u(44)))
-            row.addView(move, Ui.lp(Ui.WRAP, Ui.WRAP, l = 6))
+            move.addView(Edit.iconButton(c, Icon.Kind.CHEVRON, Ui.TEXT, tr("Monter"), -90f) { moveStep(i, -1) }.also { Ui.setButtonEnabled(it, i > 0) },
+                LinearLayout.LayoutParams(Ui.u(Edit.CONTROL), Ui.u(Edit.CONTROL)))
+            move.addView(Edit.iconButton(c, Icon.Kind.CHEVRON, Ui.TEXT, tr("Descendre"), 90f) { moveStep(i, 1) }.also { Ui.setButtonEnabled(it, i < last) },
+                LinearLayout.LayoutParams(Ui.u(Edit.CONTROL), Ui.u(Edit.CONTROL)).apply { leftMargin = Ui.u(Edit.GAP) })
+            row.addView(move, Ui.lp(Ui.WRAP, Ui.WRAP, l = 10))
             stepsBox.addView(row, Ui.lp(t = 12))
         }
+        if (gone != null && gone.index > last) stepsBox.addView(undoBar(gone), undoLp())
     }
+
+    // ------------------------------------------------------------------ annuler une suppression
+
+    private fun remember(r: Removed) {
+        removed = r
+        view.removeCallbacks(forget)
+        view.postDelayed(forget, UNDO_MS)
+    }
+
+    /** Une autre modification des lignes : la suppression précédente devient définitive. */
+    private fun forgetRemoval() {
+        if (removed == null) return
+        removed = null
+        view.removeCallbacks(forget)
+        renderIngredients()
+        renderSteps()
+    }
+
+    /** Remet la ligne retirée à sa place, avec son contenu ; la recette reste à enregistrer. */
+    private fun undo(r: Removed) {
+        if (removed !== r) return
+        removed = null
+        view.removeCallbacks(forget)
+        val step = r.step
+        if (step == null) {
+            draft = draft.copy(ingredients = r.ingredientsBefore)
+            renderIngredients()
+        } else {
+            val list = draft.steps.toMutableList()
+            list.add(r.index.coerceIn(0, list.size), step)
+            draft = draft.copy(steps = list)
+            renderSteps()
+        }
+        dirty = true
+    }
+
+    /** « Ingrédient supprimé · Rétablir », à la place de la ligne retirée. */
+    private fun undoBar(r: Removed): View {
+        val bar = Ui.horizontal(c)
+        bar.background = Ui.round(Ui.SURFACE3, 28f, Ui.STROKE, 1f)
+        bar.setPadding(Ui.u(22), 0, Ui.u(4), 0)
+        bar.minimumHeight = Ui.u(Edit.CONTROL)
+        bar.addView(Ui.text(c, if (r.step == null) tr("Ingrédient supprimé") else tr("Étape supprimée"), 17f, Ui.TEXT),
+            Ui.lp(Ui.WRAP, Ui.WRAP, r = 8))
+        // « Rétablir » et non « Annuler » : ce dernier est déjà traduit par « Cancel », « Abbrechen »…
+        val undo = Ui.text(c, tr("Rétablir"), 18f, Ui.ACCENT, Ui.MEDIUM).apply {
+            gravity = Gravity.CENTER
+            setPadding(Ui.u(18), 0, Ui.u(18), 0)
+            background = Ui.pressable(Ui.round(0, 24f), 24f)
+            isClickable = true
+            setOnClickListener { undo(r) }
+        }
+        bar.addView(undo, LinearLayout.LayoutParams(Ui.WRAP, Ui.u(Edit.CONTROL)))
+        return bar
+    }
+
+    private fun undoLp() = Ui.lp(Ui.WRAP, Ui.WRAP, t = 8, b = 4).apply { gravity = Gravity.CENTER_HORIZONTAL }
 
     private fun moveStep(i: Int, dir: Int) {
         val j = i + dir
         if (j !in draft.steps.indices) return
+        forgetRemoval()
         val list = draft.steps.toMutableList()
         val s = list.removeAt(i)
         list.add(j, s)
@@ -357,9 +451,10 @@ class RecipeEditScreen(a: MainActivity, start: Recipe, private val isNew: Boolea
         a.hideKeyboard()
         val step = draft.steps.getOrNull(index) ?: Step("")
         a.push(StepEditScreen(a, step, if (index < 0) draft.steps.size + 1 else index + 1, isNew = index < 0) { result ->
+            forgetRemoval()
             val list = draft.steps.toMutableList()
             when {
-                result == null -> if (index >= 0) list.removeAt(index)
+                result == null -> if (index >= 0) remember(Removed(list.removeAt(index), index, draft.ingredients, -1, false))
                 index < 0 -> list += result
                 else -> list[index] = result
             }
@@ -449,7 +544,7 @@ class StepEditScreen(
         weighRow.addView(weigh, LinearLayout.LayoutParams(Ui.u(150), Ui.WRAP))
         weighRow.addView(Ui.text(c, "g", 20f, Ui.TEXT2), Ui.lp(Ui.WRAP, Ui.WRAP, l = 10))
         left.addView(weighRow, Ui.lp(t = 6))
-        left.addView(Ui.text(c, tr("La balance s'affiche à cette étape et sonne une fois le poids atteint."), 14f, Ui.TEXT3), Ui.lp(t = 6))
+        left.addView(Ui.text(c, tr("La balance s'affiche à cette étape et sonne une fois le poids atteint."), 16f, Ui.TEXT2).apply { setLineSpacing(0f, 1.15f) }, Ui.lp(t = 6))
         left.addView(Ui.spacer(c, weight = 1f), LinearLayout.LayoutParams(1, 0, 1f))
         val actions = Ui.horizontal(c)
         if (!isNew) actions.addView(Ui.button(c, tr("Supprimer l'étape"), Ui.Style.GHOST, Icon.Kind.TRASH, height = 58, textSize = 17f) {
@@ -516,7 +611,7 @@ class StepEditScreen(
                 Ui.lp(t = 10))
         } else when (m.program) {
             StepProgram.MANUAL -> {
-                box.addView(Ui.text(c, m.summary, 22f, Ui.ACCENT, Ui.MEDIUM), Ui.lp(t = 10))
+                box.addView(Ui.text(c, m.summary, 22f, Ui.ACCENT_INK, Ui.MEDIUM), Ui.lp(t = 10))
                 box.addView(Ui.button(c, tr("Régler durée, température et vitesse"), Ui.Style.SECONDARY, Icon.Kind.POT, height = 56, textSize = 17f) {
                     openManual()
                 }, Ui.lp(Ui.WRAP, Ui.WRAP, t = 12))
@@ -542,7 +637,7 @@ class StepEditScreen(
                     StepProgram.TOAST -> tr("Dorer oignons, lardons, viandes à 130 °C, avec un brassage doux en sens inverse.")
                     else -> tr("Pâtes à pain, pizza, brioche. Alterne sens inverse et normal à vitesse 4.")
                 }
-                box.addView(Ui.text(c, hint, 15f, Ui.TEXT3).apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 10))
+                box.addView(Ui.text(c, hint, 16f, Ui.TEXT2).apply { setLineSpacing(0f, 1.15f) }, Ui.lp(t = 10))
             }
             StepProgram.MIXER, StepProgram.SMOOTHIE, StepProgram.SOUS_VIDE, StepProgram.SLOW_COOK, StepProgram.FERMENT -> {
                 // Bornes de l'appli d'origine du Smart pour ce programme.
@@ -564,8 +659,8 @@ class StepEditScreen(
                         { set(m.copy(tempC = (m.tempC - 1).coerceAtLeast(sp.minCelsius))) },
                         { set(m.copy(tempC = (m.tempC + 1).coerceAtMost(sp.maxCelsius))) }), Ui.lp(Ui.WRAP, Ui.WRAP, t = 6))
                 }
-                box.addView(Ui.text(c, tr("Programme du Monsieur Cuisine Smart, comme sur son appli d'origine."), 15f, Ui.TEXT3)
-                    .apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 10))
+                box.addView(Ui.text(c, tr("Programme du Monsieur Cuisine Smart, comme sur son appli d'origine."), 16f, Ui.TEXT2)
+                    .apply { setLineSpacing(0f, 1.15f) }, Ui.lp(t = 10))
             }
         }
         m?.violations()?.firstOrNull()?.let { v -> box.addView(Ui.text(c, v.message, 16f, Ui.WARN), Ui.lp(t = 10)) }

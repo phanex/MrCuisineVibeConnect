@@ -12,6 +12,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Date et heure du robot, réglées toutes seules :
@@ -34,7 +35,15 @@ class TimeSync(private val context: Context, private val prefs: Prefs, private v
         var source = tr("choix manuel")
         var serverMs = 0L
         if (wanted == ZoneLookup.AUTO) {
+            val nowMs = System.currentTimeMillis()
             for (p in ZoneLookup.PROVIDERS) {
+                // Horloge pas encore réglée : les services HTTPS échouent (TLS) ; on garde le HTTP.
+                if (!ZoneLookup.usable(p.url, nowMs)) {
+                    if (deferredLogged.compareAndSet(false, true)) {
+                        log.write("heure", "horloge pas encore synchronisée, fuseau reporté")
+                    }
+                    continue
+                }
                 try {
                     val (body, date) = get(p.url)
                     if (date > 0) serverMs = date
@@ -112,8 +121,12 @@ class TimeSync(private val context: Context, private val prefs: Prefs, private v
 
     companion object {
         /** 1er janvier 2025 : en dessous, l'heure d'un serveur n'est pas crédible. */
-        private const val MIN_PLAUSIBLE_MS = 1_735_689_600_000L
+        /** Même limite que pour le fuseau (ZoneLookup) : une seule « date plausible » dans Toque. */
+        private const val MIN_PLAUSIBLE_MS = ZoneLookup.PLAUSIBLE_SINCE_MS
         private val available: Set<String> by lazy { TimeZone.getAvailableIDs().toHashSet() }
+
+        /** Une seule ligne de journal neutre par processus pendant l'attente de NTP. */
+        private val deferredLogged = AtomicBoolean(false)
 
         /** Serveurs HTTP (sans TLS) dont l'en-tête Date sert à remettre l'horloge à peu près juste. */
         private val TIME_URLS = listOf(

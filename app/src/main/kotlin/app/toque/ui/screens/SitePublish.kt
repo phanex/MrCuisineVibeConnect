@@ -32,7 +32,7 @@ object SitePublish {
         val card = Ui.card(a, 28f, Ui.SURFACE2)
         card.setPadding(Ui.u(32), Ui.u(28), Ui.u(32), Ui.u(26))
         val head = Ui.horizontal(a)
-        head.addView(Icon(a, Icon.Kind.GLOBE, Ui.ACCENT), LinearLayout.LayoutParams(Ui.u(34), Ui.u(34)).apply { rightMargin = Ui.u(14) })
+        head.addView(Icon(a, Icon.Kind.GLOBE, Ui.ACCENT_INK), LinearLayout.LayoutParams(Ui.u(34), Ui.u(34)).apply { rightMargin = Ui.u(14) })
         head.addView(Ui.text(a, tr("Mettre la recette sur toqueapp.org ?"), 24f, Ui.TEXT, Ui.MEDIUM))
         card.addView(head)
         card.addView(Ui.text(a, tr("Publiée, « %s » est visible par tous sur le site et arrive sur les robots des autres. Sur votre compte seulement, elle reste privée.", r.title),

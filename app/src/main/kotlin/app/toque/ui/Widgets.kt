@@ -71,8 +71,8 @@ class ValueCard(c: Context, label: String, icon: Icon.Kind) : LinearLayout(c) {
     }
 
     private fun refreshBg() {
-        background = Ui.round(Ui.SURFACE, 26f, if (isSel) Ui.ACCENT else Ui.STROKE, if (isSel) 2.5f else 1f)
-        iconView.color = if (isSel) Ui.ACCENT else Ui.TEXT2
+        background = Ui.round(Ui.SURFACE, 26f, if (isSel) Ui.ACCENT_INK else Ui.STROKE, if (isSel) 2.5f else 1f)
+        iconView.color = if (isSel) Ui.ACCENT_INK else Ui.TEXT2
     }
 
     companion object {
@@ -191,7 +191,7 @@ class HoldButton(c: Context, label: String, private val onDown: () -> Unit, priv
         when (e.action) {
             MotionEvent.ACTION_DOWN -> {
                 background = Ui.round(Ui.WARN, 32f)
-                text.setTextColor(0xFF1A1405.toInt())
+                text.setTextColor(Ui.ON_WARN)
                 onDown()
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
