@@ -49,7 +49,8 @@ class Updater(private val context: Context) {
 
     /** Dernière version publiée (lève [Failure] avec un message lisible). */
     fun latest(): Release {
-        val c = open(Releases.LATEST_URL, "application/vnd.github+json")
+        val repo = ToqueApp.of(context).prefs.updateRepo
+        val c = open(Releases.latestUrl(repo), "application/vnd.github+json")
         try {
             when (val code = c.responseCode) {
                 200 -> {}

@@ -7,6 +7,7 @@ import app.toque.core.i18n.tr
 import app.toque.core.i18n.trKey
 import app.toque.core.robot.RobotProfile
 import app.toque.core.robot.RobotProfiles
+import app.toque.core.update.Releases
 
 /**
  * Réglages persistants, lisibles par les deux processus (interface et machine).
@@ -288,6 +289,13 @@ class Prefs(context: Context) {
         set(v) {
             p.edit().putString("weighSound", v).commit()
         }
+    /** Dépôt GitHub pour les mises à jour (par défaut le fork du projet). */
+    var updateRepo: String
+        get() = p.getString("updateRepo", Releases.FORK_REPO) ?: Releases.FORK_REPO
+        set(v) {
+            p.edit().putString("updateRepo", v).commit()
+        }
+
     /** Prévenir quand une nouvelle version de Toque est publiée (au démarrage et au réveil). */
     var updateAlerts: Boolean
         get() = p.getBoolean("updateAlerts", true)

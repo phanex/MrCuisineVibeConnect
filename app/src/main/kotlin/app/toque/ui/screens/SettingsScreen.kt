@@ -671,14 +671,15 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
     private fun renderUpdate() {
         val r = release
         val installed = tr("Version installée : %s", updater.installedVersion)
+        val channel = "GitHub : ${a.prefs.updateRepo}"
         updText.setTextColor(if (upd == Upd.ERROR) Ui.WARN else if (upd == Upd.AVAILABLE) Ui.TEXT else Ui.TEXT2)
         updText.text = when (upd) {
-            Upd.IDLE -> installed + "\n" + tr("Les nouvelles versions sont publiées sur GitHub.")
-            Upd.CHECKING -> installed + "\n" + tr("Recherche sur GitHub…")
-            Upd.UP_TO_DATE -> installed + "\n" + tr("Toque est à jour.")
-            Upd.AVAILABLE -> installed + "\n" + tr("Nouvelle version disponible : %s", r?.version) +
+            Upd.IDLE -> installed + "\n" + channel + "\n" + tr("Les nouvelles versions sont publiées sur GitHub.")
+            Upd.CHECKING -> installed + "\n" + channel + "\n" + tr("Recherche sur GitHub…")
+            Upd.UP_TO_DATE -> installed + "\n" + channel + "\n" + tr("Toque est à jour.")
+            Upd.AVAILABLE -> installed + "\n" + channel + "\n" + tr("Nouvelle version disponible : %s", r?.version) +
                 UpdateFlow.notes(r).let { if (it.isEmpty()) "" else "\n\n" + it }
-            Upd.ERROR -> installed + "\n" + updMessage
+            Upd.ERROR -> installed + "\n" + channel + "\n" + updMessage
         }
         updButtons.removeAllViews()
         when (upd) {

@@ -15,9 +15,15 @@ data class Release(
 
 /** Lecture de l'API GitHub « dernière version » et comparaison de numéros de version. */
 object Releases {
-    const val REPO = "Wuki60/MrCuisineVibeConnect"
-    const val LATEST_URL = "https://api.github.com/repos/$REPO/releases/latest"
-    const val PAGE_URL = "https://github.com/$REPO/releases"
+    const val UPSTREAM_REPO = "Wuki60/MrCuisineVibeConnect"
+    const val FORK_REPO = "phanex/MrCuisineVibeConnect"
+    const val REPO = FORK_REPO
+
+    fun latestUrl(repo: String = REPO) = "https://api.github.com/repos/$repo/releases/latest"
+    fun pageUrl(repo: String = REPO) = "https://github.com/$repo/releases"
+
+    val LATEST_URL get() = latestUrl(REPO)
+    val PAGE_URL get() = pageUrl(REPO)
 
     /** « v0.2.0 » → « 0.2.0 ». */
     fun versionOf(tag: String): String = tag.trim().removePrefix("v").removePrefix("V").trim()
