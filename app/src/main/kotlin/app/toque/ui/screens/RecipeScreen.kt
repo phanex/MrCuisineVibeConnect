@@ -259,11 +259,13 @@ class RecipeScreen(a: MainActivity, val recipe: Recipe) : Screen(a) {
 
     private fun renderNote() {
         noteBox.removeAllViews()
-        noteBox.addView(section(tr("Ma note")))
         if (adjustments.note.isBlank()) {
-            noteBox.addView(Ui.button(c, tr("Ajouter une note"), Ui.Style.GHOST, Icon.Kind.PLUS, height = 46, textSize = 16f) { editNote() },
-                Ui.lp(Ui.WRAP, Ui.WRAP, t = 8))
+            val row = Ui.horizontal(c, Gravity.CENTER_VERTICAL)
+            row.addView(section(tr("Ma note")).apply { setPadding(0, 0, 0, 0) }, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
+            row.addView(Ui.button(c, tr("Ajouter une note"), Ui.Style.GHOST, Icon.Kind.PLUS, height = 46, textSize = 16f) { editNote() })
+            noteBox.addView(row, Ui.lp(Ui.MATCH, Ui.WRAP, t = 10))
         } else {
+            noteBox.addView(section(tr("Ma note")))
             // Deux lignes au plus : un appui ouvre la note entière dans l'éditeur.
             val note = Ui.ellipsize(Ui.text(c, adjustments.note, 16f, Ui.TEXT).apply { setLineSpacing(0f, 1.15f) }, 2)
             note.background = Ui.pressable(Ui.round(Ui.ACCENT_DIM, 16f), 16f)
