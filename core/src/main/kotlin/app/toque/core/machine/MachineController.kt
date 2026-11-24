@@ -180,6 +180,8 @@ class MachineController(
     private fun coldConfirmed(now: Long): Boolean =
         coldConfirmedEpoch == coldEpoch && now - coldConfirmedAtMs in 0..Limits.COLD_CONFIRM_MS
     private var tarePending = false
+    var standby = false
+        private set
 
     // Retour du bol sur le socle (voir [ControllerConfig.bowlAutoZero]).
     /** Bol mémorisé, appris pendant cette session ou lu dans la configuration. */
@@ -433,9 +435,11 @@ class MachineController(
     fun tick(): ByteArray {
         val now = clock.nowMs()
         if ((link == LinkState.READY || link == LinkState.ARMING) && now - latestAtMs > config.staleMs) {
-            setLink(LinkState.LOST)
-            if (job?.active == true || turboStartedAt != null)
-                raiseFault(FaultCode.COMM_LOST, tr("Plus de réponse de la base moteur : tout est arrêté"))
+            if (!standby) {
+                setLink(LinkState.LOST)
+                if (job?.active == true || turboStartedAt != null)
+                    raiseFault(FaultCode.COMM_LOST, tr("Plus de réponse de la base moteur : tout est arrêté"))
+            }
         }
         updateTurbo(now)
         updateJob(now)
@@ -480,6 +484,7 @@ class MachineController(
     private fun desiredSetting(): Setting {
         if (fault != null || link != LinkState.READY) return stopSetting()
         if (turboStartedAt != null) return Programs.turboSetting()
+        if (standby && (job == null || job?.state != JobState.RUNNING)) return Setting(Operation.SLEEP, 0, 0, lastWire.direction)
         val j = job ?: return stopSetting()
         if (j.state != JobState.RUNNING || j.waitingStop != null) return stopSetting()
         val s = j.phase.setting
@@ -735,6 +740,13 @@ class MachineController(
         recentWeights.clear()
         scaleStableComputed = false
         stableSinceMs = null
+    }
+
+    fun setStandby(enabled: Boolean) {
+        standby = enabled
+        if (!enabled) {
+            latestAtMs = clock.nowMs()
+        }
     }
 
     fun acknowledgeFault(): Verdict {

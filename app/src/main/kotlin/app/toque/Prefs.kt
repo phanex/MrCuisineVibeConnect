@@ -157,6 +157,12 @@ class Prefs(context: Context) {
             p.edit().putInt("standbyMinutes", v).commit()
         }
 
+    var deepSleep: Boolean
+        get() = p.getBoolean("deepSleep", true)
+        set(v) {
+            p.edit().putBoolean("deepSleep", v).commit()
+        }
+
     /**
      * Molette pendant la veille : « normal » (inchangée), « dim » (veilleuse blanche faible) ou
      * « off » (éteinte). Reprend l'ancien interrupteur « standbyKnobLight » s'il a été réglé.

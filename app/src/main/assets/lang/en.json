@@ -309,6 +309,8 @@
   "Modifier la recette": "Edit recipe",
   "Moins de personnes": "Fewer people",
   "Molette pendant la veille": "Knob light during standby",
+  "Extinction totale": "Deep sleep (full shutdown)",
+  "Coupe complètement l'alimentation de la machine et éteint l'écran. L'anneau lumineux est éteint (le réglage ci-dessus ne s'applique pas). Un appui sur l'écran ou la molette la réveille instantanément.": "Completely cuts power to the machine and turns off the screen. The light ring is turned off (the setting above does not apply). Tapping the screen or turning the knob wakes it up instantly.",
   "Monsieur Cuisine (recette officielle)": "Monsieur Cuisine (official recipe)",
   "Monter": "Move up",
   "Montée progressive de la vitesse si le contenu est chaud": "Gradual speed-up when the contents are hot",
