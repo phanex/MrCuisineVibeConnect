@@ -30,6 +30,7 @@ import app.toque.core.machine.RootShell
 import app.toque.core.machine.SafetyPolicy
 import app.toque.core.machine.Snapshot
 import app.toque.core.machine.Verdict
+import app.toque.core.ring.RingColour
 import app.toque.core.robot.DeviceFacts
 import app.toque.core.robot.RobotDetector
 import app.toque.core.robot.RobotProfile
@@ -61,9 +62,12 @@ class MainActivity : Activity() {
     private var toastView: TextView? = null
     private var lastKnobMs = 0L
     private lateinit var standby: Standby
+    lateinit var splash: Splash
+        private set
     lateinit var updates: UpdateAlert
         private set
     private var swallowTouch = false
+    private var swallowKnobPress = false
     var knobListener: ((KeyEvent) -> Unit)? = null
     private var knobLongHandled = false
     private var lastKnobPressTime = 0L
@@ -75,6 +79,16 @@ class MainActivity : Activity() {
             back()
         }
     }
+    private lateinit var timerAlarm: TimerAlarm
+    private var unsubscribeTimers: (() -> Unit)? = null
+    /** La fenêtre ouverte laisse la barre machine (et son bouton Stop) hors du voile. */
+    private var overlaySparesBar = false
+
+    /** Molette d'une fenêtre ouverte : tourner ([turn]) et appuyer ([press]). */
+    class OverlayKnob(val turn: (Int) -> Unit, val press: () -> Unit)
+
+    /** Ce que fait la molette dans la fenêtre ouverte ; effacé quand elle se ferme. Sans lui, la molette n'y fait rien. */
+    var overlayKnob: OverlayKnob? = null
 
     val prefs: Prefs get() = app.prefs
     val machine get() = app.machine
@@ -85,6 +99,9 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         app = ToqueApp.of(this)
+        // Le service machine d'abord : son processus démarre et ouvre la liaison avec la base pendant
+        // que l'écran se construit (les barres et le son prennent près d'une demi-seconde sur le robot).
+        app.machine.connect()
         val dm = resources.displayMetrics
         Ui.init(dm.widthPixels, dm.heightPixels)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -94,7 +111,7 @@ class MainActivity : Activity() {
         root.background = Ui.background()
         val column = Ui.vertical(this)
         topBar = TopBar(this)
-        column.addView(topBar, Ui.lp(Ui.MATCH, Ui.u(60)))
+        column.addView(topBar, Ui.lp(Ui.MATCH, Ui.u(TopBar.HEIGHT)))
         content = FrameLayout(this)
         column.addView(content, Ui.lp(Ui.MATCH, 0, 1f))
         machineBar = MachineBar(this)
@@ -104,31 +121,40 @@ class MainActivity : Activity() {
         overlay.visibility = View.GONE
         root.addView(overlay, Ui.flp())
         setContentView(root)
+        timerAlarm = TimerAlarm(this, root)
         standby = Standby(this, root)
+        splash = Splash(this, root)
         updates = UpdateAlert(this)
         standby.onWake = { updates.onWake() }
+        KnobLight.log = { m -> app.log.write("molette", m) }
 
         try {
             tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 85)
         } catch (_: RuntimeException) {
         }
 
-        app.machine.connect()
         app.recipes.load()
         SyncService.schedule(this)
         push(HomeScreen(this))
         if (reopenSettings) {
             reopenSettings = false
-            push(SettingsScreen(this))
+            push(SettingsScreen.reopened(this))
         } else if (!prefs.knobReady && !prefs.knobSetupShown) {
             // Premier lancement : le bouton du robot n'envoie pas les mêmes touches partout.
             prefs.knobSetupShown = true
             push(KnobSetupScreen(this))
         }
         // Robot pas encore confirmé : on le reconnaît sans rien lui envoyer, la personne confirme.
-        // Ensuite (une seule fois) : proposer de relier un compte Toque.
-        if (!prefs.robotConfirmed) root.post { askRobot() }
-        else if (!prefs.siteOffered) root.post { offerSite() }
+        // Pas d'écran de démarrage alors : la base reste fermée jusqu'à la réponse, il cacherait la question.
+        if (!prefs.robotConfirmed) {
+            Splash.done = true
+            root.post { askRobot() }
+        } else {
+            // Par-dessus l'accueil, le temps que la base soit prête.
+            splash.start()
+            // Ensuite (une seule fois) : proposer de relier un compte Toque.
+            if (!prefs.siteOffered) root.post { offerSite() }
+        }
         // Recettes de la communauté (sans compte) : une première fois sans attendre la nuit, puis une
         // fois par jour au plus. Un peu après le démarrage, pour ne pas le ralentir.
         if (prefs.siteCommunity && System.currentTimeMillis() - prefs.siteLastMs > 24 * 3600_000L)
@@ -137,18 +163,18 @@ class MainActivity : Activity() {
 
     /**
      * Une seule fois : relier un compte toqueapp.org (facultatif). « Non merci » : plus jamais
-     * demandé (Réglages › Compte Toque reste là). Sans compte, la communauté arrive quand même.
+     * demandé (Réglages › Recettes › Communauté reste là). Sans compte, la communauté arrive quand même.
      */
     fun offerSite() {
         if (prefs.siteOffered || prefs.siteLinked || overlayShown) return
         val card = Ui.card(this, 28f, Ui.SURFACE2)
         card.setPadding(Ui.u(32), Ui.u(28), Ui.u(32), Ui.u(26))
         val head = Ui.horizontal(this)
-        head.addView(Icon(this, Icon.Kind.PEOPLE, Ui.ACCENT), LinearLayout.LayoutParams(Ui.u(34), Ui.u(34)).apply { rightMargin = Ui.u(14) })
+        head.addView(Icon(this, Icon.Kind.PEOPLE, Ui.ACCENT_INK), LinearLayout.LayoutParams(Ui.u(34), Ui.u(34)).apply { rightMargin = Ui.u(14) })
         head.addView(Ui.text(this, tr("Compte Toque"), 26f, Ui.TEXT, Ui.MEDIUM))
         card.addView(head)
         card.addView(Ui.text(this, tr("Vous avez un compte sur toqueapp.org ? Reliez-le pour retrouver ici vos favoris du site et publier vos recettes depuis le robot.") +
-            "\n\n" + tr("Sans compte, les recettes de la communauté arrivent quand même. Vous pourrez relier un compte plus tard dans Réglages › Compte Toque."),
+            "\n\n" + tr("Sans compte, les recettes de la communauté arrivent quand même. Vous pourrez relier un compte plus tard dans Réglages › Recettes › Communauté."),
             19f, Ui.TEXT2).apply { setLineSpacing(0f, 1.2f) }, Ui.lp(t = 16, b = 26))
         val row = Ui.horizontal(this, Gravity.END or Gravity.CENTER_VERTICAL)
         row.addView(Ui.button(this, tr("Non merci"), Ui.Style.GHOST, height = 60) {
@@ -219,7 +245,7 @@ class MainActivity : Activity() {
         app.recipes.load()
         refreshTitle()
         // Les Réglages ouverts montrent des choses propres au robot (recettes Lidl, import) : on les refait.
-        if (current is SettingsScreen && before !== p) replace(SettingsScreen(this))
+        if (current is SettingsScreen && before !== p) replace(SettingsScreen.reopened(this))
         val msg = if (!p.tested) tr("%s : en test. Vos retours sont attendus sur GitHub.", p.displayName) else tr("Robot : %s", p.displayName)
         toast(msg, if (p.tested) Ui.OK else Ui.WARN)
         if (before != null && before.lidlDevice != p.lidlDevice && app.recipes.count > 0)
@@ -279,11 +305,53 @@ class MainActivity : Activity() {
             machineBar.update(s)
             stack.lastOrNull()?.onSnapshot(s)
             standby.onSnapshot(s)
+            splash.onSnapshot(s, app.machine.heard)
+            knobRing(s)
+            spareMachineBar()
         }
         unsubscribeEvents = app.machine.onEvent { e -> onMachineEvent(e) }
         topBar.startClock()
         standby.start()
         updates.onStart()
+        startTimers()
+    }
+
+    // ------------------------------------------------------------------ minuteurs de cuisine
+
+    /** Pastille de la barre du haut, message de fin ; les minuteurs eux-mêmes tournent sans l'activité ([Timers]). */
+    private fun startTimers() {
+        val timers = Timers.of(this)
+        unsubscribeTimers = timers.listen {
+            topBar.showTimers(timers)
+            // Tant que la sonnerie joue, l'écran ne se met pas en veille.
+            if (timers.alarmActive) standby.poke()
+        }
+        timers.onRing = {
+            standby.poke()
+            timerAlarm.refresh()
+        }
+        topBar.showTimers(timers)
+        timerAlarm.refresh()
+        if (timers.lost.isNotEmpty()) {
+            toast(tr("Minuteur arrêté par le redémarrage du robot : %s", timers.lost.joinToString(", ") { it.label }), Ui.WARN)
+            timers.lost = emptyList()
+        }
+    }
+
+    /** Hauteur de la barre machine quand elle est affichée (à laisser libre), 0 sinon. */
+    fun machineBarSpace(): Int = if (machineBar.visibility == View.VISIBLE) machineBar.height else 0
+
+    private fun spareMachineBar() {
+        val bottom = machineBarSpace()
+        timerAlarm.spare(bottom)
+        if (overlay.visibility == View.VISIBLE) {
+            val lp = overlay.layoutParams as FrameLayout.LayoutParams
+            val want = if (overlaySparesBar) bottom else 0
+            if (lp.bottomMargin != want) {
+                lp.bottomMargin = want
+                overlay.layoutParams = lp
+            }
+        }
     }
 
     override fun onResume() {
@@ -306,12 +374,22 @@ class MainActivity : Activity() {
 
     override fun onStop() {
         main.removeCallbacks(knobLongPressRunnable)
+        unsubscribeTimers?.invoke()
+        unsubscribeTimers = null
+        Timers.of(this).onRing = null
         unsubscribe?.invoke()
         unsubscribeEvents?.invoke()
         topBar.stopClock()
         standby.stop()
+        // Toque n'est plus à l'écran (appli d'origine, paramètres Android…) : blanc du robot.
+        KnobLight.release()
         updates.onStop()
         super.onStop()
+    }
+
+    /** Code couleur de l'anneau de la molette ; KnobLight n'écrit que quand la couleur change. */
+    private fun knobRing(s: Snapshot) {
+        KnobLight.show(if (prefs.knobColours) RingColour.of(s, current?.cookWaiting == true) else null)
     }
 
     override fun onDestroy() {
@@ -387,6 +465,7 @@ class MainActivity : Activity() {
     }
 
     override fun onBackPressed() {
+        if (timerAlarm.shown) return
         if (overlay.visibility == View.VISIBLE) {
             closeOverlay()
             return
@@ -409,12 +488,33 @@ class MainActivity : Activity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.action == KeyEvent.ACTION_DOWN && standby.onKnob()) return true
+        if (event.action == KeyEvent.ACTION_DOWN && standby.onKnob()) {
+            if (knobKind(event.keyCode) == PRESS) swallowKnobPress = true
+            return true
+        }
+        if (swallowKnobPress && knobKind(event.keyCode) == PRESS) {
+            if (event.action == KeyEvent.ACTION_UP || event.action == KeyEvent.ACTION_CANCEL) swallowKnobPress = false
+            return true
+        }
+        // Écran de démarrage : ni la molette ni Retour n'agissent sur les écrans qu'il couvre.
+        if (splash.shown) return true
         // Retour reste Retour (tablettes et émulateur) : jamais un cran du bouton, même appris par erreur.
         val isBack = event.keyCode == KeyEvent.KEYCODE_BACK
         if (!isBack) knobListener?.let { l ->
             if (event.action == KeyEvent.ACTION_DOWN) l(event)
             return true
+        }
+        // Message de fin de minuteur, ou fenêtre ouverte : la molette agit sur eux, jamais sur l'écran dessous ;
+        // une fenêtre sans réglage de molette (confirmation) ne se valide pas d'un appui de molette.
+        if (!isBack && (timerAlarm.shown || overlay.visibility == View.VISIBLE) && currentFocus !is android.widget.EditText) {
+            val k = knobKind(event.keyCode)
+            if (k != 0) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    if (timerAlarm.shown) { if (k == PRESS) timerAlarm.ok() }
+                    else overlayKnob?.let { if (k == PRESS) it.press() else it.turn(k) }
+                }
+                return true
+            }
         }
         if (!isBack && overlay.visibility != View.VISIBLE) {
             val k = event.keyCode
@@ -464,12 +564,33 @@ class MainActivity : Activity() {
         return super.dispatchKeyEvent(event)
     }
 
+    /** -1 / 1 : un cran de la molette, [PRESS] : son appui, 0 : une autre touche. */
+    private fun knobKind(k: Int): Int {
+        val left = prefs.knobLeft.let { if (it >= 0) it == k else k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_F7 }
+        val right = prefs.knobRight.let { if (it >= 0) it == k else k == KeyEvent.KEYCODE_DPAD_RIGHT || k == KeyEvent.KEYCODE_F6 }
+        val press = prefs.knobPress.let {
+            if (it >= 0) it == k else k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER || k == KeyEvent.KEYCODE_F5
+        }
+        return when {
+            press -> PRESS
+            left -> -1
+            right -> 1
+            else -> 0
+        }
+    }
+
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
         if (event.action == MotionEvent.ACTION_SCROLL && standby.onKnob()) return true
+        if (splash.shown) return true
         if (event.action == MotionEvent.ACTION_SCROLL) {
             // Encodeur rotatif (AXIS_SCROLL) ou molette (AXIS_VSCROLL)
             val v = event.getAxisValue(AXIS_SCROLL).let { if (it == 0f) -event.getAxisValue(MotionEvent.AXIS_VSCROLL) else it }
             val now = System.currentTimeMillis()
+            if (v != 0f && (timerAlarm.shown || overlay.visibility == View.VISIBLE)) {
+                if (!timerAlarm.shown && now - lastKnobMs > 40) overlayKnob?.turn(if (v > 0) 1 else -1)
+                lastKnobMs = now
+                return true
+            }
             if (v != 0f && now - lastKnobMs > 40) {
                 lastKnobMs = now
                 if (!prefs.knobSetupDone) prefs.knobSetupDone = true
@@ -516,6 +637,10 @@ class MainActivity : Activity() {
         if (prefs.sound) Sounds.recipeDone()
     }
 
+    fun weighRecordedSound() {
+        if (prefs.sound) Sounds.weighRecorded()
+    }
+
     fun chime(times: Int = 1) {
         if (!prefs.sound) return
         val t = tone ?: return
@@ -553,9 +678,14 @@ class MainActivity : Activity() {
         if (!v.ok) toast(v.message, Ui.WARN)
     }
 
-    /** Affiche une carte modale au centre de l'écran. */
-    fun showOverlay(card: View, width: Int = 640, dismissOnScrim: Boolean = true) {
+    /**
+     * Affiche une carte modale au centre de l'écran. [spareMachineBar] : la barre machine reste hors du voile
+     * (son bouton Stop reste à portée) quand un programme tourne.
+     */
+    fun showOverlay(card: View, width: Int = 640, dismissOnScrim: Boolean = true, spareMachineBar: Boolean = false) {
         hideKeyboard()
+        overlayKnob = null
+        overlaySparesBar = spareMachineBar
         overlay.removeAllViews()
         overlay.setBackgroundColor(Ui.SCRIM)
         overlay.isClickable = true
@@ -563,6 +693,7 @@ class MainActivity : Activity() {
         card.isClickable = true
         overlay.addView(card, Ui.flp(Ui.u(width), Ui.WRAP, Gravity.CENTER))
         overlay.visibility = View.VISIBLE
+        spareMachineBar()
         overlay.alpha = 0f
         overlay.animate().alpha(1f).setDuration(120).start()
     }
@@ -570,15 +701,17 @@ class MainActivity : Activity() {
     fun closeOverlay() {
         overlay.visibility = View.GONE
         overlay.removeAllViews()
+        overlayKnob = null
+        overlaySparesBar = false
     }
 
     /** Dialogue de confirmation. */
     fun confirm(title: String, message: String, yes: String, no: String = tr("Annuler"),
-                danger: Boolean = false, icon: Icon.Kind = Icon.Kind.WARNING, onYes: () -> Unit) {
+                danger: Boolean = false, icon: Icon.Kind = Icon.Kind.WARNING, spareMachineBar: Boolean = false, onYes: () -> Unit) {
         val card = Ui.card(this, 28f, Ui.SURFACE2)
         card.setPadding(Ui.u(32), Ui.u(28), Ui.u(32), Ui.u(26))
         val head = Ui.horizontal(this)
-        head.addView(Icon(this, icon, if (danger) Ui.DANGER else Ui.ACCENT), LinearLayout.LayoutParams(Ui.u(34), Ui.u(34)).apply { rightMargin = Ui.u(14) })
+        head.addView(Icon(this, icon, if (danger) Ui.DANGER else Ui.ACCENT_INK), LinearLayout.LayoutParams(Ui.u(34), Ui.u(34)).apply { rightMargin = Ui.u(14) })
         head.addView(Ui.text(this, title, 26f, Ui.TEXT, Ui.MEDIUM))
         card.addView(head)
         card.addView(Ui.text(this, message, 19f, Ui.TEXT2).apply { setLineSpacing(0f, 1.2f) }, Ui.lp(t = 16, b = 26))
@@ -590,7 +723,7 @@ class MainActivity : Activity() {
             onYes()
         })
         card.addView(row)
-        showOverlay(card, 680)
+        showOverlay(card, 680, spareMachineBar = spareMachineBar)
     }
 
     /**
@@ -730,6 +863,8 @@ class MainActivity : Activity() {
     companion object {
         private var reopenSettings = false
         private const val STORAGE_REQUEST = 7
+        /** Appui de la molette, pour knobKind (les crans sont -1 et 1). */
+        private const val PRESS = 2
 
         /** MotionEvent.AXIS_SCROLL (API 26), valeur fixe pour Android 6. */
         private const val AXIS_SCROLL = 26

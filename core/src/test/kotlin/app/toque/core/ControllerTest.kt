@@ -137,6 +137,60 @@ class ControllerTest {
         assertTrue(v.message, v.ok)
     }
 
+    @Test fun removedBowlIsToldApartFromAnOpenLid() {
+        // Le sens du capteur est constaté couvercle fermé (le bol y est forcément) : cela marche
+        // aussi sur les robots où le bit se lit à l'envers. board.bowlPresent est ici la valeur brute du bit.
+        for (seated in listOf(true, false)) {
+            val b = Bench()
+            b.board.bowlPresent = seated
+            b.ready()
+            b.step(1_000)
+            assertFalse(b.snap.bowlRemoved)
+            assertTrue(b.snap.bowlSenseKnown)
+            assertEquals(!seated, b.snap.bowlSenseInverted)
+            // Le bit « bol » bascule quelques trames avant celui du couvercle : ces trames-là ne changent
+            // pas le sens retenu.
+            b.board.bowlPresent = !seated
+            b.step(300)
+            b.board.lidOpen = true
+            b.step(300)
+            assertTrue(b.snap.bowlRemoved)
+            assertEquals(!seated, b.snap.bowlSenseInverted)
+            b.board.bowlPresent = seated
+            b.step(300)
+            assertTrue(b.snap.lidOpen)
+            assertFalse(b.snap.bowlRemoved)
+            assertEquals("Fermez et verrouillez le couvercle", b.c.startJob(Programs.manual(2, 0, Direction.CLOCKWISE, 10_000)).message)
+            b.board.bowlPresent = !seated
+            b.step(300)
+            assertTrue(b.snap.bowlRemoved)
+            assertEquals("Remettez le bol et fermez le couvercle", b.c.startJob(Programs.manual(2, 0, Direction.CLOCKWISE, 10_000)).message)
+            b.board.bowlPresent = seated
+            b.board.lidOpen = false
+            b.step(300)
+            assertFalse(b.snap.bowlRemoved)
+            assertTrue(b.c.startJob(Programs.manual(2, 0, Direction.CLOCKWISE, 10_000)).ok)
+        }
+        // Couvercle jamais vu fermé : le sens est inconnu, on ne dit que « couvercle ouvert ».
+        val b = Bench()
+        b.board.lidOpen = true
+        b.step(600)
+        assertFalse(b.snap.bowlSenseKnown)
+        assertFalse(b.snap.bowlRemoved)
+        // Fermé depuis moins d'une seconde : pas encore retenu.
+        b.board.lidOpen = false
+        b.step(600)
+        assertFalse(b.snap.bowlSenseKnown)
+        b.step(600)
+        assertTrue(b.snap.bowlSenseKnown)
+        // Sens retenu d'une fois précédente (ici à l'envers) : le bol retiré est reconnu dès le démarrage.
+        val known = Bench(ControllerConfig(bowlBitSeated = false))
+        known.board.lidOpen = true
+        known.step(600)
+        assertTrue(known.snap.bowlSenseKnown)
+        assertTrue(known.snap.bowlRemoved)
+    }
+
     @Test fun lidOpeningPausesAndNothingRestartsAlone() {
         val b = Bench().ready()
         b.c.startJob(Programs.manual(3, 13, Direction.CLOCKWISE, 60_000))

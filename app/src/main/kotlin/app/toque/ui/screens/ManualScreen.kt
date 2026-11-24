@@ -379,12 +379,12 @@ class ManualScreen(
         }
         wasLive = live
         val busy = s.busy
-        startBtn.visibility = if (busy && s.state != JobState.PAUSED) View.GONE else View.VISIBLE
+        // En pause aussi : la reprise est dans la barre du bas (et sur la molette), pas de second bouton ici.
+        startBtn.visibility = if (busy) View.GONE else View.VISIBLE
         if (startBtn.visibility == View.GONE && selected == 5) {
             selected = 0
             refresh()
         }
-        (startBtn.getChildAt(1) as TextView).text = if (s.state == JobState.PAUSED && manualJob) tr("Reprendre") else tr("Démarrer")
         turbo.isEnabled = !busy || s.turboActive
         turbo.alpha = if (turbo.isEnabled) 1f else 0.35f
         if (live) {

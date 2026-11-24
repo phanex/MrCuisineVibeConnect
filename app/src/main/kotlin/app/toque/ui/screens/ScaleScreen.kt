@@ -29,6 +29,7 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
 
     companion object {
         val history = mutableListOf<WeightEntry>()
+        private const val MAX_HISTORY = 50
     }
 
     private lateinit var value: TextView
@@ -173,6 +174,8 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
     }
 
     private fun renderHistory() {
+        // L'historique vit en mémoire le temps que l'appli tourne : borné, pour ne pas grossir sans fin.
+        while (history.size > MAX_HISTORY) history.removeAt(0)
         historyList.removeAllViews()
         if (history.isEmpty()) {
             historyList.gravity = Gravity.CENTER
@@ -335,8 +338,8 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
         pendingAutoWeight = 0
         stableSinceMs = 0L
         lastAutoRecordTimeMs = 0L
-        pendingTare = true
-        tareRequestedAtMs = now
+        // Tare immédiate, comme avant : la pesée retenue est celle qui était stable avant l'appui.
+        executePendingTare(lastWeightG)
     }
 
     private fun executePendingTare(settledWeight: Int) {

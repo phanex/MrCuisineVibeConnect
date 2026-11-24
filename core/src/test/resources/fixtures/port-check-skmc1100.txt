@@ -1,0 +1,8 @@
+0
+BB=/data/adb/magisk/busybox
+DEV=ok
+S
+H 6272 /system/bin/sh -c D=/dev/ttyMT0; B=/data/adb/magisk/busybox; $B stty -F $D 4800 raw -echo cs8 -cstopb -parenb -crtscts clocal cread || exit 3; $B cat $D & R=$!; trap 'kill $R 2>/dev/null' EXIT INT TERM HUP; $B cat > $D; kill $R 2>/dev/null
+H 6274 /data/adb/magisk/busybox cat /dev/ttyMT0
+H 6275 /data/adb/magisk/busybox cat
+END

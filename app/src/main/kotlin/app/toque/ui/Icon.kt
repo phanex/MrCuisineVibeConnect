@@ -13,6 +13,7 @@ class Icon(context: Context, var kind: Kind, color: Int) : View(context) {
         BACK, FORWARD, SEARCH, PLAY, PAUSE, STOP, THERMO, SPEED, CLOCK, REVERSE, SCALE, BOOK, STAR, STAR_FILLED,
         SETTINGS, PLUS, MINUS, CHECK, CLOSE, KNEAD, STEAM, FLAME, BOLT, SYNC, LID, WARNING, HOME, WHISK, BLADE,
         CHEVRON, LINK, INFO, POT, TIMER, DROP, EDIT, TRASH, PEOPLE, DOWNLOAD, UPLOAD, GLOBE, BELL,
+        WARNING_FILLED, SCREEN, KNOB,
     }
 
     var color: Int = color
@@ -32,6 +33,15 @@ class Icon(context: Context, var kind: Kind, color: Int) : View(context) {
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         this.color = color
+    }
+    private val cut = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        this.color = 0xFF0B111C.toInt()
+    }
+    private val cutFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        this.color = 0xFF0B111C.toInt()
     }
     private val path = Path()
     private val rect = RectF()
@@ -172,6 +182,14 @@ class Icon(context: Context, var kind: Kind, color: Int) : View(context) {
                 p.moveTo(12f, 3f); p.lineTo(22f, 20.5f); p.lineTo(2f, 20.5f); p.close(); canvas.drawPath(p, stroke)
                 canvas.drawLine(12f, 9.5f, 12f, 14f, stroke); canvas.drawCircle(12f, 17.3f, 1.2f, fill)
             }
+            Kind.WARNING_FILLED -> {
+                // Triangle plein, point d'exclamation découpé dans la couleur du fond.
+                stroke.strokeWidth = 2.4f
+                p.moveTo(12f, 3f); p.lineTo(22f, 20.5f); p.lineTo(2f, 20.5f); p.close()
+                canvas.drawPath(p, fill); canvas.drawPath(p, stroke)
+                cut.strokeWidth = 2.4f
+                canvas.drawLine(12f, 9.5f, 12f, 13.8f, cut); canvas.drawCircle(12f, 17.2f, 1.35f, cutFill)
+            }
             Kind.HOME -> {
                 p.moveTo(12f, 4.5f)
                 p.lineTo(19.5f, 10.5f)
@@ -241,6 +259,14 @@ class Icon(context: Context, var kind: Kind, color: Int) : View(context) {
                 rect.set(4f, 9f, 20f, 20f); canvas.drawRoundRect(rect, 3f, 3f, stroke)
                 canvas.drawLine(2f, 11f, 4f, 11f, stroke); canvas.drawLine(20f, 11f, 22f, 11f, stroke)
                 canvas.drawLine(7f, 6f, 17f, 6f, stroke); canvas.drawLine(12f, 3.5f, 12f, 6f, stroke)
+            }
+            Kind.SCREEN -> {
+                rect.set(3f, 4.5f, 21f, 16.5f); canvas.drawRoundRect(rect, 2f, 2f, stroke)
+                canvas.drawLine(12f, 16.5f, 12f, 20f, stroke); canvas.drawLine(8.5f, 20f, 15.5f, 20f, stroke)
+            }
+            Kind.KNOB -> {
+                canvas.drawCircle(12f, 12f, 8.5f, stroke); canvas.drawCircle(12f, 12f, 3.5f, stroke)
+                canvas.drawLine(12f, 3.5f, 12f, 6.5f, stroke)
             }
         }
         canvas.restore()

@@ -1,6 +1,7 @@
 package app.toque.core.recipes
 
 import app.toque.core.i18n.I18n
+import app.toque.core.i18n.tr
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -21,6 +22,9 @@ import kotlin.math.roundToLong
 object Portions {
     /** Liquide au maximum dans le bol (notice du SKMC 1200, à vitesse 10). */
     const val BOWL_MAX_G = 2500
+
+    /** « 4 pers. », ou « 6 pots » quand la recette ne compte pas des personnes ([unit]). */
+    fun label(n: Int, unit: String): String = if (unit.isBlank()) tr("%d pers.", n) else "$n $unit"
 
     /** Nombres de personnes proposés pour une recette prévue pour [base] personnes. */
     fun range(base: Int): IntRange = if (base <= 0) IntRange.EMPTY else maxOf(1, ceil(base / 2.0).toInt())..base * 2

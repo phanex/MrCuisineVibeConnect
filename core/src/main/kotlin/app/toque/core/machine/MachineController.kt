@@ -24,7 +24,7 @@ object MonotonicClock : Clock {
 enum class LinkState(private val fr: String) {
     OFFLINE(trKey("Base non connectée")),
     ARMING(trKey("Connexion…")),
-    READY(trKey("Prête")),
+    READY(trKey("Base prête")),
     LOST(trKey("Connexion perdue"));
 
     val label: String get() = tr(fr)
@@ -103,6 +103,10 @@ class ControllerConfig(
     val bowlAutoZero: Boolean = false,
     /** Masse du bol vide (bol, lame, couvercle…) apprise sur ce robot, en g ; 0 = pas encore apprise. */
     val emptyBowlG: Int = 0,
+    /** Valeur du bit « bol » quand le bol est en place, si elle a déjà été constatée sur ce robot (voir bowlBitSeated). */
+    val bowlBitSeated: Boolean? = null,
+    /** Couvercle fermé, le bit « bol » doit garder sa valeur ce temps-là pour être retenu comme « bol en place ». */
+    val bowlSenseMs: Long = 1_000,
 )
 
 /** Réglages de la remise à zéro au retour du bol. */
@@ -213,6 +217,18 @@ class MachineController(
     /** Dernier échantillon où la carte indiquait un moteur en marche. */
     private var lastMotionAtMs = Long.MIN_VALUE / 4
 
+    /**
+     * Valeur du bit « bol » quand le bol est en place, relevée couvercle fermé : le couvercle ne se
+     * verrouille que sur le bol. Elle dépend du robot (sur beaucoup, le bit se lit à l'envers), d'où
+     * l'intérêt de la constater plutôt que de la supposer. Inconnue tant que le couvercle n'a jamais été vu
+     * fermé ; l'appli la retient ensuite d'un démarrage à l'autre (ControllerConfig.bowlBitSeated).
+     */
+    private var bowlBitSeated: Boolean? = config.bowlBitSeated
+
+    /** Valeur du bit « bol » depuis que le couvercle est fermé, et depuis quand (null : couvercle ouvert). */
+    private var closedBowlBit: Boolean? = null
+    private var closedBowlBitSinceMs = 0L
+
     var txFrames = 0L
         private set
     var rxFrames = 0L
@@ -278,6 +294,13 @@ class MachineController(
         rxFrames++
         latest = t
         latestAtMs = now
+        // Le bit n'est retenu comme « bol en place » qu'une fois stable, couvercle fermé : au moment où le
+        // couvercle s'ouvre ou se referme, les deux capteurs ne basculent pas forcément dans la même trame.
+        if (t.lidOpen) closedBowlBit = null
+        else if (closedBowlBit != t.bowlNtcDetected) {
+            closedBowlBit = t.bowlNtcDetected
+            closedBowlBitSinceMs = now
+        } else if (now - closedBowlBitSinceMs >= config.bowlSenseMs) bowlBitSeated = closedBowlBit
 
         recentWeights.addLast(now to t.weight)
         while (recentWeights.isNotEmpty() && now - recentWeights.first().first > 600L) {
@@ -527,6 +550,12 @@ class MachineController(
     /** Bol présent d'après la base, en tenant compte de l'inversion réglée pour ce robot. */
     private fun bowlPresent(t: Telemetry): Boolean = t.bowlNtcDetected != config.invertBowl
 
+    /** Bol retiré, et pas seulement couvercle ouvert : le bit « bol » n'a plus sa valeur « en place ». */
+    private fun bowlRemoved(t: Telemetry): Boolean {
+        val seated = bowlBitSeated ?: return false
+        return t.lidOpen && t.bowlNtcDetected != seated
+    }
+
     private fun fresh(now: Long): Boolean = latest != null && now - latestAtMs <= config.freshMs
 
     private fun baseChecks(now: Long): List<Violation> {
@@ -542,7 +571,7 @@ class MachineController(
             if (v.isEmpty()) v += Violation("stale", tr("Pas de mesure récente de la base"))
             return v
         }
-        if (t.lidOpen) v += Violation("lid", tr("Fermez et verrouillez le couvercle"))
+        if (t.lidOpen) v += Violation("lid", if (bowlRemoved(t)) tr("Remettez le bol et fermez le couvercle") else tr("Fermez et verrouillez le couvercle"))
         if (t.errorDetected) v += Violation("board_error", codec.errorMessage(t.errorCode))
         if (config.requireBowl && !bowlPresent(t)) v += Violation("bowl", tr("Bol non détecté"))
         return v
@@ -1031,6 +1060,9 @@ class MachineController(
             scaleState = t?.androidScaleState ?: "",
             lidOpen = t?.lidOpen ?: false,
             bowlDetected = t?.let { bowlPresent(it) } ?: false,
+            bowlRemoved = t?.let { bowlRemoved(it) } ?: false,
+            bowlSenseKnown = bowlBitSeated != null,
+            bowlSenseInverted = bowlBitSeated == false,
             motorOn = t?.motorOn ?: false,
             heaterOn = t?.heaterOn ?: false,
             boardErrorCode = if (t?.errorDetected == true) t.errorCode else 0,

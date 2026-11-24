@@ -1,0 +1,94 @@
+mtkclient v2.1.4.1 (commit 5a863eece86fcaa97cb8325cf747e0aae3c307e4): fixes for the macOS serial
+driver (--serialport), applied by 'toque-setup.sh prepare' and checked before every download-mode
+step. Found on a real Monsieur Cuisine Connect (MT6580 preloader) on 2026-11-15; without them the
+preloader handshake ends in "Sync error" and the DA upload stops half-way.
+
+1. Port.run_serial_handshake: the preloader sends "READY" as soon as its port opens. Those bytes
+   were read as handshake echoes, shifting every later reply. Drain the input before the handshake
+   and after each mismatch. Reported as bkerler/mtkclient#458 (not fixed upstream as of 2026-11).
+2. SerialClass.usbread: with no timeout given (e.g. a DA ACK), wait up to the class default (1 s)
+   instead of 20 ms.
+3. SerialClass.write / flush: pyserial's flushOutput() is reset_output_buffer(), which discards
+   bytes not yet sent (tcflush TCOFLUSH): the DA then waits forever for the end of a packet. Use
+   flush() (tcdrain). Fixed upstream after v2.1.4.1 (bkerler/mtkclient#367).
+
+diff --git a/mtkclient/Library/Connection/seriallib.py b/mtkclient/Library/Connection/seriallib.py
+index ef62664..4f0fbd1 100644
+--- a/mtkclient/Library/Connection/seriallib.py
++++ b/mtkclient/Library/Connection/seriallib.py
+@@ -161,7 +161,10 @@ class SerialClass(DeviceClass):
+                         return False
+                     pass
+         self.verify_data(bytearray(command), "TX:")
+-        self.device.flushOutput()
++        # Toque (macOS): pyserial's flushOutput() is reset_output_buffer(), which DISCARDS bytes not
++        # yet sent (tcflush TCOFLUSH): the DA then waits forever for the rest of a packet. flush()
++        # waits until everything has been sent (tcdrain).
++        self.device.flush()
+         # timeout = 0
+         time.sleep(0.005)
+         """
+@@ -195,14 +198,19 @@ class SerialClass(DeviceClass):
+         return 0x200
+ 
+     def flush(self):
+-        if self.get_device() is not None:
+-            self.device.flushOutput()
++        # Toque (macOS): no flushOutput() here either, it discards unsent bytes (see write()).
++        if self.get_device() is None:
++            return None
+         return self.device.flush()
+ 
+     def usbread(self, resplen=None, maxtimeout=0, timeout=0, w_max_packet_size=None):
+         # print("Reading {} bytes".format(resplen))
+         if timeout == 0 and maxtimeout != 0:
+             timeout = maxtimeout / 1000  # Some code calls this with ms delays, some with seconds.
++        elif timeout == 0:
++            # Toque (macOS): no timeout given (e.g. waiting for a DA ACK). 20 ms is too short for the
++            # macOS serial driver: a late ACK aborts the DA upload. Use the class default (1 s).
++            timeout = self.timeout / 1000
+         if timeout < 0.02:
+             timeout = 0.02
+         if resplen is None:
+diff --git a/mtkclient/Library/Port.py b/mtkclient/Library/Port.py
+index 8e2a58f..29fa94f 100644
+--- a/mtkclient/Library/Port.py
++++ b/mtkclient/Library/Port.py
+@@ -69,6 +69,9 @@ class Port(metaclass=LogBase):
+         i = 0
+         startcmd = b"\xa0\x0a\x50\x05"  # 5F F5 AF FA
+         length = len(startcmd)
++        # Toque (macOS): the preloader sends "READY" as soon as its port opens. Left in the input
++        # buffer, those bytes are read as handshake echoes and shift every later reply (Sync error).
++        self._drain_serial_input()
+         try:
+             while i < length:
+                 if ep_out(int.to_bytes(startcmd[i], 1, 'little')):
+@@ -77,6 +80,8 @@ class Port(metaclass=LogBase):
+                         i += 1
+                     else:
+                         i = 0
++                        time.sleep(0.02)
++                        self._drain_serial_input()
+             self.info("Device detected :)")
+             return True
+         except Exception as serr:
+@@ -84,6 +89,18 @@ class Port(metaclass=LogBase):
+             time.sleep(0.005)
+         return False
+ 
++    def _drain_serial_input(self):
++        # Toque (macOS): discard bytes already waiting on a serial port (pyserial only).
++        dev = getattr(self.cdc, "device", None)
++        if dev is None or not hasattr(dev, "in_waiting"):
++            return
++        try:
++            pending = dev.in_waiting
++            if pending:
++                dev.read(pending)
++        except Exception as err:
++            self.debug(str(err))
++
+     def serial_handshake(self, maxtries=None, loop=0):
+         counter = 0
+         if not self.cdc.connected:

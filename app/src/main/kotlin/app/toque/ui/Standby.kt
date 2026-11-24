@@ -9,7 +9,6 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import app.toque.TimeSync
 import app.toque.core.i18n.tr
 import app.toque.core.machine.RootShell
 import app.toque.core.machine.Snapshot
@@ -51,6 +50,14 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
             refresh()
             move()
             main.postDelayed(this, 60_000)
+        }
+    }
+
+    /** Heure pas encore réglée : on regarde souvent, pour la montrer dès qu'elle l'est (le reste attend la minute). */
+    private val clockTick = object : Runnable {
+        override fun run() {
+            clock?.text = WallClock.text(a)
+            if (!WallClock.known(a) && view != null) main.postDelayed(this, WallClock.UNKNOWN_TICK_MS)
         }
     }
 
@@ -115,13 +122,18 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
         wasDeepSleep = a.prefs.deepSleep
         if (wasDeepSleep) {
             a.machine.setStandby(true)
-            RootShell.run("echo 0 > /sys/class/leds/lcd-backlight/brightness", 5_000)
+            Thread {
+                if (java.io.File("/sys/class/leds/lcd-backlight/brightness").exists()) {
+                    RootShell.run("echo 0 > /sys/class/leds/lcd-backlight/brightness", 5_000)
+                }
+            }.start()
             KnobLight.start(0)
         } else {
             val b = Ui.vertical(a, Gravity.CENTER_HORIZONTAL)
             val t = Ui.text(a, "", 150f, 0xFF7C828B.toInt(), Ui.THIN)
             b.addView(t, Ui.lp(Ui.WRAP, Ui.WRAP))
-            val h = Ui.text(a, "", 22f, Ui.WARN, Ui.MEDIUM)
+            // La veille est noire dans les deux thèmes : l'avertissement garde sa teinte claire.
+            val h = Ui.text(a, "", 22f, Ui.WARN_ON_DARK, Ui.MEDIUM)
             b.addView(h, Ui.lp(Ui.WRAP, Ui.WRAP, t = 6))
             b.addView(Ui.text(a, tr("Touchez l'écran pour reprendre"), 17f, 0xFF3E434A.toInt()), Ui.lp(Ui.WRAP, Ui.WRAP, t = 18))
             v.addView(b, Ui.flp(Ui.WRAP, Ui.WRAP, Gravity.CENTER))
@@ -137,12 +149,14 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
                 "off" -> KnobLight.start(0)
             }
             main.postDelayed(tick, 60_000)
+            if (!WallClock.known(a)) main.postDelayed(clockTick, WallClock.UNKNOWN_TICK_MS)
         }
     }
 
     private fun wake() {
         val v = view ?: return
         main.removeCallbacks(tick)
+        main.removeCallbacks(clockTick)
         v.animate().cancel()
         root.removeView(v)
         view = null
@@ -150,7 +164,11 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
         clock = null
         hot = null
         if (wasDeepSleep) {
-            RootShell.run("echo 200 > /sys/class/leds/lcd-backlight/brightness", 5_000)
+            Thread {
+                if (java.io.File("/sys/class/leds/lcd-backlight/brightness").exists()) {
+                    RootShell.run("echo 200 > /sys/class/leds/lcd-backlight/brightness", 5_000)
+                }
+            }.start()
             a.machine.setStandby(false)
             wasDeepSleep = false
         }
@@ -160,7 +178,7 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
     }
 
     private fun refresh() {
-        clock?.text = if (TimeSync.showClock(a)) MainActivity.now() else ""
+        clock?.text = WallClock.text(a)
         val temp = a.snapshot.actualTempC
         hot?.let {
             it.text = if (temp >= 50) tr("Bol chaud : %d °C", temp) else ""

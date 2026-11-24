@@ -25,6 +25,12 @@ import app.toque.core.machine.Verdict
 class MachineClient(private val context: Context) {
     var snapshot = Snapshot()
         private set
+    /**
+     * Le service machine a déjà envoyé un état. Faux au démarrage : sur le robot, il ne dit rien
+     * tant qu'il ouvre la liaison série, et [snapshot] est encore celui par défaut.
+     */
+    var heard = false
+        private set
     val connected: Boolean get() = service != null
 
     private val snapshotListeners = ArrayList<(Snapshot) -> Unit>()
@@ -39,6 +45,7 @@ class MachineClient(private val context: Context) {
         when (msg.what) {
             Ipc.SNAPSHOT -> {
                 snapshot = Ipc.bundleToSnapshot(msg.data)
+                heard = true
                 for (l in ArrayList(snapshotListeners)) l(snapshot)
             }
             Ipc.EVENT -> {

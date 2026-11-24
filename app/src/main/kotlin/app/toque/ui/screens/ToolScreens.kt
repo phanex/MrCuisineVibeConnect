@@ -68,6 +68,7 @@ class DiagnosticsScreen(a: MainActivity) : Screen(a) {
             append(tr("Poids").padEnd(17)).append(s.weightG).append(" g · ").append(s.scaleState).append(if (s.scaleStable) " · " + tr("stable") else "").append('\n')
             append(tr("Couvercle ouvert").padEnd(17)).append(yn(s.lidOpen)).append('\n')
             append(tr("Bol détecté").padEnd(17)).append(yn(s.bowlDetected)).append('\n')
+            append(tr("Bol retiré").padEnd(17)).append(yn(s.bowlRemoved)).append('\n')
             append(tr("Erreur base").padEnd(17)).append(if (s.boardErrorCode == 0) tr("aucune") else "${s.boardErrorCode} · ${RobotProfiles.active.validator.errorMessage(s.boardErrorCode)}").append('\n')
             append(tr("Firmware base").padEnd(17)).append(s.firmware).append('\n')
             append(tr("Programme").padEnd(17)).append(s.jobLabel.ifEmpty { "—" }).append(' ').append(s.jobState).append('\n')
@@ -126,7 +127,7 @@ class KnobSetupScreen(a: MainActivity) : Screen(a) {
         root.addView(Ui.text(c, tr("Le bouton rotatif du robot règle les durées, les vitesses et les températures. Ce réglage ne se fait qu'une fois."),
             20f, Ui.TEXT2).apply { gravity = Gravity.CENTER; setLineSpacing(0f, 1.2f) }, Ui.lp(Ui.MATCH, Ui.WRAP))
         root.addView(Ui.spacer(c, weight = 1f), LinearLayout.LayoutParams(1, 0, 1f))
-        stepView = Ui.text(c, "", 22f, Ui.ACCENT, Ui.MEDIUM)
+        stepView = Ui.text(c, "", 22f, Ui.ACCENT_INK, Ui.MEDIUM)
         root.addView(stepView, Ui.lp(Ui.WRAP, Ui.WRAP))
         ask = Ui.text(c, "", 44f, Ui.TEXT, Ui.LIGHT).apply { gravity = Gravity.CENTER }
         root.addView(ask, Ui.lp(Ui.MATCH, Ui.WRAP, t = 12))

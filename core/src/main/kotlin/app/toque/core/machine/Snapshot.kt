@@ -21,6 +21,12 @@ data class Snapshot(
     val scaleState: String = "",
     val lidOpen: Boolean = false,
     val bowlDetected: Boolean = false,
+    /** Couvercle « ouvert » parce que le bol est retiré (sens du capteur constaté couvercle fermé). */
+    val bowlRemoved: Boolean = false,
+    /** Le sens du capteur du bol a été constaté sur ce robot (couvercle fermé, donc bol en place). */
+    val bowlSenseKnown: Boolean = false,
+    /** Ce capteur se lit à l'envers : bit à 0 quand le bol est en place. Ne vaut que si [bowlSenseKnown]. */
+    val bowlSenseInverted: Boolean = false,
     val motorOn: Boolean = false,
     val heaterOn: Boolean = false,
     val boardErrorCode: Int = 0,
@@ -70,6 +76,7 @@ data class Snapshot(
         "sampleAgeMs" to sampleAgeMs, "actualTempC" to actualTempC, "targetTempC" to targetTempC,
         "rpm" to rpm, "speedLevel" to speedLevel, "weightG" to weightG, "scaleStable" to scaleStable,
         "scaleState" to scaleState, "lidOpen" to lidOpen, "bowlDetected" to bowlDetected,
+        "bowlRemoved" to bowlRemoved, "bowlSenseKnown" to bowlSenseKnown, "bowlSenseInverted" to bowlSenseInverted,
         "motorOn" to motorOn, "heaterOn" to heaterOn, "boardErrorCode" to boardErrorCode,
         "firmware" to firmware, "rxHex" to rxHex, "jobActive" to jobActive, "jobKind" to jobKind,
         "jobLabel" to jobLabel, "jobState" to jobState, "pauseReason" to pauseReason,
@@ -96,6 +103,7 @@ data class Snapshot(
                 sampleAgeMs = l("sampleAgeMs"), actualTempC = i("actualTempC"), targetTempC = i("targetTempC"),
                 rpm = i("rpm"), speedLevel = i("speedLevel"), weightG = i("weightG"), scaleStable = b("scaleStable"),
                 scaleState = s("scaleState"), lidOpen = b("lidOpen"), bowlDetected = b("bowlDetected"),
+                bowlRemoved = b("bowlRemoved"), bowlSenseKnown = b("bowlSenseKnown"), bowlSenseInverted = b("bowlSenseInverted"),
                 motorOn = b("motorOn"), heaterOn = b("heaterOn"), boardErrorCode = i("boardErrorCode"),
                 firmware = i("firmware"), rxHex = s("rxHex"), jobActive = b("jobActive"), jobKind = s("jobKind"),
                 jobLabel = s("jobLabel"), jobState = s("jobState"), pauseReason = s("pauseReason"),

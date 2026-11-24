@@ -84,10 +84,10 @@ class ValueCard(c: Context, label: String, icon: Icon.Kind) : LinearLayout(c) {
         val (strokeColor, strokeWidth) = when (focusState) {
             State.IDLE -> Ui.STROKE to 1f
             State.FOCUSED -> Ui.TEXT3 to 2.5f
-            State.EDITING -> Ui.ACCENT to 2.5f
+            State.EDITING -> Ui.ACCENT_INK to 2.5f
         }
         background = Ui.round(Ui.SURFACE, 26f, strokeColor, strokeWidth)
-        iconView.color = if (focusState == State.EDITING) Ui.ACCENT else Ui.TEXT2
+        iconView.color = if (focusState == State.EDITING) Ui.ACCENT_INK else Ui.TEXT2
     }
 
     companion object {
@@ -208,9 +208,9 @@ class HoldButton(c: Context, label: String, icon: Icon.Kind = Icon.Kind.BLADE, p
         if (!isEnabled) return false
         when (e.action) {
             MotionEvent.ACTION_DOWN -> {
-                background = Ui.round(Ui.ACCENT, 32f)
-                text.setTextColor(0xFF1A0E05.toInt())
-                iconView.color = 0xFF1A0E05.toInt()
+                background = Ui.round(Ui.WARN, 32f)
+                text.setTextColor(Ui.ON_WARN)
+                iconView.color = Ui.ON_WARN
                 onDown()
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {

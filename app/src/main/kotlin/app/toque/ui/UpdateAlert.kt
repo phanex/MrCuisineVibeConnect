@@ -147,7 +147,7 @@ object UpdateFlow {
             val card = Ui.card(a, 28f, Ui.SURFACE2)
             card.setPadding(Ui.u(32), Ui.u(28), Ui.u(32), Ui.u(30))
             val head = Ui.horizontal(a)
-            head.addView(Icon(a, Icon.Kind.DOWNLOAD, Ui.ACCENT), LinearLayout.LayoutParams(Ui.u(32), Ui.u(32)).apply { rightMargin = Ui.u(14) })
+            head.addView(Icon(a, Icon.Kind.DOWNLOAD, Ui.ACCENT_INK), LinearLayout.LayoutParams(Ui.u(32), Ui.u(32)).apply { rightMargin = Ui.u(14) })
             head.addView(Ui.text(a, tr("Mise à jour vers la version %s", r.version), 24f, Ui.TEXT, Ui.MEDIUM))
             card.addView(head)
             val text = Ui.text(a, tr("Téléchargement… %d %%", 0), 19f, Ui.TEXT2)

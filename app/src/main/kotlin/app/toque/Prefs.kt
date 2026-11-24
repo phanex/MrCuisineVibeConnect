@@ -42,7 +42,7 @@ class Prefs(context: Context) {
             p.edit().putString("language", v).commit()
         }
 
-    /** Couleur d'accent de l'interface (une de Ui.ACCENTS), 0 = celle d'origine. */
+    /** Couleur d'accent de l'interface (une de Ui.ACCENTS, ou une couleur de la roue que Ui.accepts garde), 0 = celle d'origine. */
     var accentColor: Int
         get() = p.getInt("accentColor", 0)
         set(v) {
@@ -176,6 +176,13 @@ class Prefs(context: Context) {
             p.edit().putBoolean("deepSleep", v).commit()
         }
 
+    /** Code couleur sur l'anneau de la molette (problème, pause, à vous, en cours). */
+    var knobColours: Boolean
+        get() = p.getBoolean("knobColours", true)
+        set(v) {
+            p.edit().putBoolean("knobColours", v).commit()
+        }
+
     /** Fuseau horaire : « auto » (d'après la connexion Internet) ou un identifiant IANA choisi à la main. */
     var timeZone: String
         get() = p.getString("timeZone", "auto") ?: "auto"
@@ -297,11 +304,28 @@ class Prefs(context: Context) {
             p.edit().putInt("guidedStep", v).commit()
         }
 
+    /** Titre connu de la recette guidée, « id⇥titre » : l'accueil le montre avant le chargement du catalogue. */
+    var guidedTitle: String
+        get() = p.getString("guidedTitle", "") ?: ""
+        set(v) {
+            p.edit().putString("guidedTitle", v).apply()
+        }
+
     /** Réglages importés déjà vérifiés (« J'ai vérifié ce réglage »), clé = recette, étape et réglage. */
     var reviewedSteps: Set<String>
         get() = HashSet(p.getStringSet("reviewedSteps", emptySet()) ?: emptySet())
         set(v) {
             p.edit().putStringSet("reviewedSteps", HashSet(v)).commit()
+        }
+
+    /**
+     * Réglages refusés remplacés d'un appui par le réglage permis le plus proche (« Utiliser … »),
+     * clé = recette, étape, réglage de la recette et réglage adopté.
+     */
+    var adaptedSteps: Set<String>
+        get() = HashSet(p.getStringSet("adaptedSteps", emptySet()) ?: emptySet())
+        set(v) {
+            p.edit().putStringSet("adaptedSteps", HashSet(v)).commit()
         }
 
     /** Son joué quand la quantité à peser est atteinte (voir Sounds.WEIGH_SOUNDS). */

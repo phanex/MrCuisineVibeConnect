@@ -10,7 +10,7 @@ import kotlin.math.exp
 import kotlin.math.sin
 
 /**
- * Sons synthétisés (aucun fichier audio) : bip de pesée et mélodie de fin de recette.
+ * Sons synthétisés (aucun fichier audio) : bip de pesée, mélodie de fin de recette, sonnerie de minuteur.
  *
  * Joués sur le flux « musique » : sur le robot, c'est le plus fort par défaut (14/15 contre 8/15
  * pour les notifications), pour que la fin de recette s'entende depuis l'autre bout de la cuisine.
@@ -56,6 +56,19 @@ object Sounds {
         val phrase = listOf(Note(c6, 160), Note(e6, 160), Note(g6, 160), Note(c7, 420), Note(0.0, 260))
         play(phrase + phrase)
     }
+
+    /**
+     * Fin d'un minuteur de cuisine : trois doubles bips aigus puis une cloche, joués fort ; rejoué par
+     * [Timers] toutes les quelques secondes jusqu'à « OK » (deux minutes au plus).
+     */
+    fun timerAlarm() {
+        val hi = 1760.0; val lo = 1318.5
+        val beep = listOf(Note(hi, 120, 1.0, decay = 0.6), Note(0.0, 70), Note(lo, 120, 1.0, decay = 0.6), Note(0.0, 160))
+        play(beep + beep + beep + listOf(Note(880.0, 700, 1.0, decay = 3.0, bell = true)))
+    }
+
+    /** Durée de [timerAlarm], en millisecondes. */
+    const val TIMER_ALARM_MS = 3 * (120 + 70 + 120 + 160) + 700
 
     private fun play(notes: List<Note>) {
         player.execute {
