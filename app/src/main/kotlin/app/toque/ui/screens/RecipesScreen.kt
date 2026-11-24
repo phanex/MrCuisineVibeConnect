@@ -53,12 +53,19 @@ class RecipesScreen(
     /** Listes tirées des cuissons : dernières recettes cuisinées, ou les plus cuisinées. */
     enum class Usage { NONE, RECENT, MOST }
 
+    private var recipeCount = -1
     override val title = when {
         favorites -> tr("Favoris")
         initialUsage == Usage.RECENT -> tr("Récentes")
         initialUsage == Usage.MOST -> tr("Fréquentes")
         else -> tr("Recettes")
     }
+    override val titleCounter: String?
+        get() = when {
+            recipeCount < 0 -> null
+            recipeCount == 1 -> tr("1 recette")
+            else -> tr("%d recettes", recipeCount)
+        }
 
     /**
      * Liste ouverte depuis « Recettes » ou la recherche : elle reprend les pastilles et le tri de la
@@ -82,7 +89,6 @@ class RecipesScreen(
     private lateinit var chipScroller: HorizontalScrollView
     private lateinit var chips: LinearLayout
     private lateinit var grid: GridView
-    private lateinit var count: TextView
     private lateinit var sortButton: LinearLayout
     private lateinit var sortLabel: TextView
     private lateinit var empty: LinearLayout
@@ -135,8 +141,6 @@ class RecipesScreen(
         clear.setOnClickListener { input.setText("") }
         field.addView(clear, LinearLayout.LayoutParams(Ui.u(48), Ui.u(48)))
         bar.addView(field, LinearLayout.LayoutParams(0, Ui.u(64), 1f))
-        count = Ui.text(c, "", 17f, Ui.TEXT2)
-        bar.addView(count, Ui.lp(Ui.WRAP, Ui.WRAP, l = 18))
         if (favorites) {
             // Favoris : reprendre tout de suite ceux du compte toqueapp.org (et les recettes du site).
             refreshBtn = Ui.button(c, tr("Actualiser"), Ui.Style.SECONDARY, Icon.Kind.SYNC, height = 64, textSize = 18f) { refreshFavorites() }
@@ -279,7 +283,13 @@ class RecipesScreen(
         val before = chips.childCount
         chips.removeAllViews()
         for (ch in selection.chips(a.app.recipes.index)) {
-            chips.addView(Ui.toggleChip(c, ch.label, selection.isOn(ch)) { tapChip(ch) }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
+            val (icon, specialColor) = when (ch) {
+                RecipeChip.RECENT -> Icon.Kind.CLOCK to Ui.COOL
+                RecipeChip.FREQUENT -> Icon.Kind.FLAME to Ui.COOL
+                RecipeChip.FAVORITES -> Icon.Kind.STAR to Ui.COOL
+                else -> null to 0
+            }
+            chips.addView(Ui.toggleChip(c, ch.label, selection.isOn(ch), icon = icon, specialColor = specialColor) { tapChip(ch) }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 10))
         }
         // Pastilles ajoutées ou retirées (catalogue chargé) : le cadre repart de zéro ; sinon il reste sur la sienne.
         if (chips.childCount != before && knob.index >= 0) knob.reset()
@@ -338,7 +348,8 @@ class RecipesScreen(
     private fun refreshEmpty() {
         val repo = a.app.recipes
         val none = repo.loaded && repo.count == 0
-        count.text = if (results.isEmpty()) "" else if (results.size == 1) tr("1 recette") else tr("%d recettes", results.size)
+        recipeCount = results.size
+        a.refreshTitle()
         empty.visibility = if (results.isEmpty() && repo.loaded) View.VISIBLE else View.GONE
         emptyText.text = when {
             none && a.prefs.mode == Prefs.Mode.HARDWARE ->
