@@ -47,6 +47,14 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
     private var pendingAutoWeight = 0
     private var lastAutoRecordTimeMs = 0L
 
+    // Rolling stable history (timestamp to weight) for the last 4 seconds
+    private val stableHistory = ArrayDeque<Pair<Long, Int>>()
+
+    // Tare debounce & stabilization state
+    private var pendingTare = false
+    private var tareRequestedAtMs = 0L
+    private var tareTargetWeight = 0
+
     override fun build(): View {
         val root = Ui.horizontal(c, Gravity.TOP)
         root.setPadding(Ui.u(24), Ui.u(10), Ui.u(24), Ui.u(20))
@@ -86,9 +94,15 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
         buttons.addView(tareBtn)
 
         val recordBtn = Ui.button(c, tr("Fixer"), Ui.Style.SECONDARY, Icon.Kind.PLUS, height = 72, textSize = 22f) {
-            if (lastWeightG != 0) {
-                lastAutoLoggedWeight = lastWeightG
-                recordCurrentWeight()
+            val now = System.currentTimeMillis()
+            val cleanEntry = stableHistory.lastOrNull { it.first <= now - 1500L }
+            val w = cleanEntry?.second ?: lastWeightG
+            if (w != 0) {
+                lastAutoLoggedWeight = w
+                val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+                val ing = currentIngredient()
+                history.add(WeightEntry(time, w, ing))
+                renderHistory()
                 a.weighRecordedSound()
             }
         }
@@ -225,13 +239,33 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
             lastWeightG = 0
             stableSinceMs = 0L
             pendingAutoWeight = 0
+            pendingTare = false
             return
         }
+        val now = System.currentTimeMillis()
+
+        if (s.scaleStable) {
+            stableHistory.addLast(now to s.weightG)
+            while (stableHistory.isNotEmpty() && now - stableHistory.first().first > 4000L) {
+                stableHistory.removeFirst()
+            }
+        }
+
+        // Exécution différée du tarage après stabilisation et retrait de la main
+        if (pendingTare) {
+            if (now - tareRequestedAtMs >= 1500L && s.scaleStable) {
+                executePendingTare(s.weightG)
+            } else if (now - tareRequestedAtMs >= 4000L) {
+                executePendingTare(s.weightG)
+            }
+        }
+
         state.visibility = View.VISIBLE
         lastWeightG = s.weightG
         value.text = s.weightG.toString()
 
         val (txt, col, ic) = when {
+            pendingTare -> Triple(tr("Mesure…"), Ui.WARN, Icon.Kind.SCALE)
             s.scaleState == "overload" -> Triple(tr("Surcharge"), Ui.DANGER, Icon.Kind.WARNING)
             s.scaleStable -> Triple(tr("Stable"), Ui.OK, Icon.Kind.CHECK)
             else -> Triple(tr("Mesure…"), Ui.COOL, Icon.Kind.SCALE)
@@ -244,8 +278,7 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
         textView.setTextColor(col)
 
         // Enregistrement automatique après stabilisation > 5s
-        if (s.scaleStable && s.weightG >= 10) {
-            val now = System.currentTimeMillis()
+        if (!pendingTare && s.scaleStable && s.weightG >= 10) {
             if (kotlin.math.abs(s.weightG - pendingAutoWeight) > 5) {
                 pendingAutoWeight = s.weightG
                 stableSinceMs = now
@@ -270,18 +303,42 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
     }
 
     private fun handleTare() {
+        if (pendingTare) return
         val now = System.currentTimeMillis()
         if (lastAutoRecordTimeMs > 0L && now - lastAutoRecordTimeMs <= 5000L && history.isNotEmpty() && lastWeightG >= 10) {
             history.removeAt(history.lastIndex)
             renderHistory()
-        } else if (lastWeightG > 5 && lastWeightG != lastAutoLoggedWeight) {
-            recordCurrentWeight()
+            tareTargetWeight = 0
+        } else {
+            // Échantillonnage du poids propre 1.5s avant l'appui (avant que la main ne touche le bouton)
+            val cleanEntry = stableHistory.lastOrNull { it.first <= now - 1500L }
+            tareTargetWeight = cleanEntry?.second ?: if (lastWeightG > 5) lastWeightG else 0
+        }
+        lastAutoLoggedWeight = 0
+        pendingAutoWeight = 0
+        stableSinceMs = 0L
+        lastAutoRecordTimeMs = 0L
+        pendingTare = true
+        tareRequestedAtMs = now
+    }
+
+    private fun executePendingTare(settledWeight: Int) {
+        pendingTare = false
+        val weightToLog = if (tareTargetWeight > 5) tareTargetWeight else if (settledWeight > 5) settledWeight else 0
+        if (weightToLog > 5 && weightToLog != lastAutoLoggedWeight) {
+            val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+            val ing = currentIngredient()
+            history.add(WeightEntry(time, weightToLog, ing))
+            renderHistory()
             a.weighRecordedSound()
         }
         lastAutoLoggedWeight = 0
         pendingAutoWeight = 0
         stableSinceMs = 0L
         lastAutoRecordTimeMs = 0L
+        tareTargetWeight = 0
+        tareRequestedAtMs = 0L
+        stableHistory.clear()
         a.machine.tare()
     }
 
