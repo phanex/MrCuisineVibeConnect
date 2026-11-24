@@ -284,6 +284,12 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         bottomActions.addView(turbo, LinearLayout.LayoutParams(Ui.WRAP, Ui.WRAP))
         val timerBtn = Ui.button(c, tr("Minuteur"), Ui.Style.SECONDARY, Icon.Kind.TIMER) {
             TimerPanel.open(a)
+        }.apply {
+            (getChildAt(0).layoutParams as LinearLayout.LayoutParams).apply {
+                width = Ui.u(32)
+                height = Ui.u(32)
+                rightMargin = Ui.u(12)
+            }
         }
         bottomActions.addView(timerBtn, LinearLayout.LayoutParams(Ui.WRAP, Ui.WRAP).apply { leftMargin = Ui.u(12) })
         knobTargets += timerBtn to 32f
