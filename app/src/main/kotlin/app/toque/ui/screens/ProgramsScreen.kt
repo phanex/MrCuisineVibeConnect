@@ -202,9 +202,6 @@ class ProgramsScreen(a: MainActivity) : Screen(a) {
             }
             p.card.background = Ui.round(Ui.SURFACE, 26f, strokeColor, strokeWidth)
         }
-        val startFocused = (focusedIndex == progs.size)
-        val startBase = if (startFocused) Ui.round(Ui.ACCENT, 32f, Ui.TEXT3, 3f) else Ui.round(Ui.ACCENT, 32f)
-        startBtn.background = Ui.pressable(startBase, 32f)
     }
 
     override fun onSnapshot(s: Snapshot) {
@@ -217,8 +214,7 @@ class ProgramsScreen(a: MainActivity) : Screen(a) {
         if (editing) {
             bump(progs[selected], delta)
         } else {
-            val maxTarget = if (startBtn.visibility == View.VISIBLE) progs.size else progs.size - 1
-            val next = (focusedIndex + delta).coerceIn(0, maxTarget)
+            val next = (focusedIndex + delta).coerceIn(0, progs.size - 1)
             if (next != focusedIndex) {
                 focusedIndex = next
                 refresh()
@@ -235,20 +231,17 @@ class ProgramsScreen(a: MainActivity) : Screen(a) {
             refresh()
             return true
         }
-        if (focusedIndex < progs.size) {
-            if (focusedIndex != selected) {
-                selected = focusedIndex
-                editing = true
-            } else {
-                editing = !editing
-            }
-            refresh()
-        } else if (focusedIndex == progs.size) {
+        if (editing) {
             if (startBtn.isEnabled && startBtn.visibility == View.VISIBLE) {
                 editing = false
                 val p = progs[selected]
                 a.startJob(p.make(p.seconds * 1000L, p.celsius))
+                refresh()
             }
+        } else {
+            selected = focusedIndex
+            editing = true
+            refresh()
         }
         return true
     }
@@ -256,6 +249,7 @@ class ProgramsScreen(a: MainActivity) : Screen(a) {
     override fun onKnobDoubleClick(): Boolean {
         val s = a.snapshot
         if (!s.busy && startBtn.isEnabled && startBtn.visibility == View.VISIBLE) {
+            selected = focusedIndex
             editing = false
             val p = progs[selected]
             a.startJob(p.make(p.seconds * 1000L, p.celsius))

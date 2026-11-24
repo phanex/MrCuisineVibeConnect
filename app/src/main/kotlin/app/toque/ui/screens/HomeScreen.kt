@@ -39,7 +39,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
     private lateinit var faultIcon: Icon
     private lateinit var modeIcon: Icon
     private val tiles = mutableListOf<LinearLayout>()
-    private var selectedTile = 1
+    private var selectedTile = -1
     private var unsub: (() -> Unit)? = null
     private val tick = object : Runnable {
         override fun run() {
@@ -276,7 +276,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         // Tuile géométriquement alignée : pastille centrée exactement entre le haut et le titre, zone de texte calée en bas.
         val t = Ui.vertical(c, Gravity.CENTER_HORIZONTAL)
         t.setPadding(Ui.u(14), Ui.u(14), Ui.u(14), Ui.u(14))
-        val focused = (index == selectedTile)
+        val focused = (selectedTile >= 0 && index == selectedTile)
         t.background = Ui.pressable(Ui.round(Ui.SURFACE, 26f, if (focused) Ui.TEXT3 else Ui.STROKE, if (focused) 2.5f else 1f), 26f)
 
         // Secteur supérieur : pastille 84x84 strictement centrée entre le bord haut et le titre
@@ -356,6 +356,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
     }
 
     override fun onShow() {
+        selectedTile = -1
         refreshClock()
         refresh()
         refreshTiles()
@@ -431,7 +432,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
 
     private fun refreshTiles() {
         for ((i, t) in tiles.withIndex()) {
-            val focused = (i == selectedTile)
+            val focused = (selectedTile >= 0 && i == selectedTile)
             val strokeColor = if (focused) Ui.TEXT3 else Ui.STROKE
             val strokeWidth = if (focused) 2.5f else 1f
             t.background = Ui.pressable(Ui.round(Ui.SURFACE, 26f, strokeColor, strokeWidth), 26f)
@@ -440,7 +441,11 @@ class HomeScreen(a: MainActivity) : Screen(a) {
 
     override fun onKnob(delta: Int): Boolean {
         if (tiles.isEmpty()) return false
-        val next = (selectedTile + delta).coerceIn(0, tiles.size - 1)
+        val next = if (selectedTile < 0) {
+            if (delta > 0) 0 else tiles.size - 1
+        } else {
+            (selectedTile + delta).coerceIn(0, tiles.size - 1)
+        }
         if (next != selectedTile) {
             selectedTile = next
             refreshTiles()
@@ -449,6 +454,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
     }
 
     override fun onKnobPress(): Boolean {
+        if (selectedTile < 0) return false
         when (selectedTile) {
             0 -> a.push(RecipesScreen(a))
             1 -> a.push(ManualScreen(a))
