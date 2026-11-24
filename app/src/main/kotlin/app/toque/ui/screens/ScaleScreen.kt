@@ -41,14 +41,16 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
     private var lastWeightG = 0
     private var simulated = 0
 
-    // Auto-record timing
+    // Auto-record & continuous stability timing
     private var lastAutoLoggedWeight = 0
     private var stableSinceMs = 0L
     private var pendingAutoWeight = 0
     private var lastAutoRecordTimeMs = 0L
 
-    // Rolling stable history (timestamp to weight) for the last 4 seconds
-    private val stableHistory = ArrayDeque<Pair<Long, Int>>()
+    // Continuous unbroken stability filter (>= 1.5s)
+    private var continuousStableWeight = 0
+    private var continuousStableSinceMs = 0L
+    private var lastConfirmedContinuousWeight = 0
 
     // Tare debounce & stabilization state
     private var pendingTare = false
@@ -94,9 +96,7 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
         buttons.addView(tareBtn)
 
         val recordBtn = Ui.button(c, tr("Fixer"), Ui.Style.SECONDARY, Icon.Kind.PLUS, height = 72, textSize = 22f) {
-            val now = System.currentTimeMillis()
-            val cleanEntry = stableHistory.lastOrNull { it.first <= now - 1500L }
-            val w = cleanEntry?.second ?: lastWeightG
+            val w = if (lastConfirmedContinuousWeight >= 10) lastConfirmedContinuousWeight else lastWeightG
             if (w != 0) {
                 lastAutoLoggedWeight = w
                 val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
@@ -184,14 +184,19 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
             return
         }
 
-        historyList.gravity = Gravity.BOTTOM
+        historyList.gravity = Gravity.TOP
         clearBtn.visibility = View.VISIBLE
 
-        // Entrées empilées chronologiquement
+        // Entrées empilées du haut vers le bas, la plus récente en bas mise en valeur
         for (i in history.indices) {
             val entry = history[i]
+            val isLatest = (i == history.lastIndex)
             val item = Ui.vertical(c)
-            item.background = Ui.round(Ui.SURFACE2, 16f)
+            item.background = if (isLatest) {
+                Ui.round(Ui.SURFACE2, 16f, strokeColor = Ui.ACCENT, strokeWidth = Ui.uf(1.5f))
+            } else {
+                Ui.round(Ui.SURFACE2, 16f)
+            }
             item.setPadding(Ui.u(14), Ui.u(10), Ui.u(14), Ui.u(10))
 
             if (!entry.ingredient.isNullOrBlank()) {
@@ -211,7 +216,7 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
             val r = Ui.horizontal(c, Gravity.CENTER_VERTICAL)
             r.addView(Ui.text(c, entry.time, 15f, Ui.TEXT2, Ui.LIGHT))
             r.addView(Ui.spacer(c, weight = 1f), LinearLayout.LayoutParams(0, 1, 1f))
-            r.addView(Ui.text(c, "${entry.grams} g", 19f, Ui.TEXT, Ui.MEDIUM))
+            r.addView(Ui.text(c, "${entry.grams} g", 19f, if (isLatest) Ui.ACCENT else Ui.TEXT, Ui.MEDIUM))
 
             val del = Icon(c, Icon.Kind.CLOSE, Ui.TEXT3).apply {
                 isClickable = true
@@ -226,7 +231,7 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
             historyList.addView(item, Ui.lp(b = 8))
         }
 
-        // Défilement automatique vers la dernière mesure en bas
+        // Défilement automatique vers le bas pour garder la dernière entrée visible
         historyScroll.post {
             historyScroll.fullScroll(View.FOCUS_DOWN)
         }
@@ -240,20 +245,33 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
             stableSinceMs = 0L
             pendingAutoWeight = 0
             pendingTare = false
+            continuousStableSinceMs = 0L
+            continuousStableWeight = 0
+            lastConfirmedContinuousWeight = 0
             return
         }
         val now = System.currentTimeMillis()
 
-        if (s.scaleStable) {
-            stableHistory.addLast(now to s.weightG)
-            while (stableHistory.isNotEmpty() && now - stableHistory.first().first > 4000L) {
-                stableHistory.removeFirst()
+        // Filtre de stabilité ininterrompue (au moins 1.5s consécutives de repos absolu)
+        if (s.scaleStable && s.weightG >= 10) {
+            if (kotlin.math.abs(s.weightG - continuousStableWeight) > 5) {
+                continuousStableWeight = s.weightG
+                continuousStableSinceMs = now
+            } else if (continuousStableSinceMs > 0L && now - continuousStableSinceMs >= 1500L) {
+                lastConfirmedContinuousWeight = s.weightG
+            }
+        } else {
+            continuousStableSinceMs = 0L
+            continuousStableWeight = 0
+            if (kotlin.math.abs(s.weightG) < 5) {
+                lastConfirmedContinuousWeight = 0
             }
         }
 
-        // Exécution différée du tarage après stabilisation et retrait de la main
+        // Exécution différée du tarage après stabilisation et retrait complet de la main
         if (pendingTare) {
-            if (now - tareRequestedAtMs >= 1500L && s.scaleStable) {
+            val stableDuration = if (continuousStableSinceMs > 0L) now - continuousStableSinceMs else 0L
+            if (now - tareRequestedAtMs >= 1500L && s.scaleStable && stableDuration >= 1000L) {
                 executePendingTare(s.weightG)
             } else if (now - tareRequestedAtMs >= 4000L) {
                 executePendingTare(s.weightG)
@@ -310,9 +328,8 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
             renderHistory()
             tareTargetWeight = 0
         } else {
-            // Échantillonnage du poids propre 1.5s avant l'appui (avant que la main ne touche le bouton)
-            val cleanEntry = stableHistory.lastOrNull { it.first <= now - 1500L }
-            tareTargetWeight = cleanEntry?.second ?: if (lastWeightG > 5) lastWeightG else 0
+            // Échantillonnage du poids validé par au moins 1.5s de repos ininterrompu
+            tareTargetWeight = if (lastConfirmedContinuousWeight >= 10) lastConfirmedContinuousWeight else 0
         }
         lastAutoLoggedWeight = 0
         pendingAutoWeight = 0
@@ -324,8 +341,8 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
 
     private fun executePendingTare(settledWeight: Int) {
         pendingTare = false
-        val weightToLog = if (tareTargetWeight > 5) tareTargetWeight else if (settledWeight > 5) settledWeight else 0
-        if (weightToLog > 5 && weightToLog != lastAutoLoggedWeight) {
+        val weightToLog = if (tareTargetWeight >= 10) tareTargetWeight else if (settledWeight >= 10) settledWeight else 0
+        if (weightToLog >= 10 && weightToLog != lastAutoLoggedWeight) {
             val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
             val ing = currentIngredient()
             history.add(WeightEntry(time, weightToLog, ing))
@@ -338,7 +355,9 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
         lastAutoRecordTimeMs = 0L
         tareTargetWeight = 0
         tareRequestedAtMs = 0L
-        stableHistory.clear()
+        lastConfirmedContinuousWeight = 0
+        continuousStableSinceMs = 0L
+        continuousStableWeight = 0
         a.machine.tare()
     }
 
