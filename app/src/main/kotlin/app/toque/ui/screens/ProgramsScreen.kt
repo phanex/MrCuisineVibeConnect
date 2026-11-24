@@ -114,7 +114,7 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
             }
             card.addView(Ui.spacer(c, weight = 1f), LinearLayout.LayoutParams(1, 0, 1f))
             val dur = Ui.horizontal(c)
-            dur.addView(Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.MINUS, height = 56) { selected = i; bump(p, -1) }, Ui.lp(Ui.u(56), Ui.WRAP))
+            dur.addView(Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.MINUS, height = 56) { selected = i; focusedIndex = i; editing = true; bump(p, -1) }, Ui.lp(Ui.u(56), Ui.WRAP))
             // Le nombre en grand sur une ligne, l'unité en dessous : les cartes sont étroites à 4 par ligne.
             val gauge = Ui.vertical(c, Gravity.CENTER_HORIZONTAL)
             p.value = Ui.fitText(c, 38f, 24f, Ui.TEXT, Ui.LIGHT).apply { gravity = Gravity.CENTER }
@@ -122,16 +122,16 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
             p.unit = Ui.text(c, "", 14f, Ui.TEXT2).apply { gravity = Gravity.CENTER }
             gauge.addView(p.unit, Ui.lp(Ui.MATCH, Ui.WRAP, t = 1))
             dur.addView(gauge, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
-            dur.addView(Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.PLUS, height = 56) { selected = i; bump(p, 1) }, Ui.lp(Ui.u(56), Ui.WRAP))
+            dur.addView(Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.PLUS, height = 56) { selected = i; focusedIndex = i; editing = true; bump(p, 1) }, Ui.lp(Ui.u(56), Ui.WRAP))
             card.addView(dur, Ui.lp(t = 10))
             if (p.maxC > p.minC) {
                 // Température exacte (sous-vide, mijoter, fermenter), dans les bornes de l'appli d'origine.
                 val t = Ui.horizontal(c, Gravity.CENTER_VERTICAL)
-                t.addView(Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.MINUS, height = 48) { selected = i; bumpTemp(p, -1) }
+                t.addView(Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.MINUS, height = 48) { selected = i; focusedIndex = i; editing = true; bumpTemp(p, -1) }
                     .apply { setPadding(0, 0, 0, 0) }, Ui.lp(Ui.u(48), Ui.WRAP))
                 p.temp = Ui.text(c, "", 20f, Ui.TEXT).apply { gravity = Gravity.CENTER }
                 t.addView(p.temp, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
-                t.addView(Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.PLUS, height = 48) { selected = i; bumpTemp(p, 1) }
+                t.addView(Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.PLUS, height = 48) { selected = i; focusedIndex = i; editing = true; bumpTemp(p, 1) }
                     .apply { setPadding(0, 0, 0, 0) }, Ui.lp(Ui.u(48), Ui.WRAP))
                 card.addView(t, Ui.lp(t = 8))
             }
