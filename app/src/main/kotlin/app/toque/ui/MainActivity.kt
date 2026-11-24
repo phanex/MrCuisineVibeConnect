@@ -71,10 +71,7 @@ class MainActivity : Activity() {
         knobLongHandled = true
         val s = current
         val handled = s?.onKnobLongPress() ?: false
-        if (handled) {
-            chime(1)
-        } else if (stack.size > 1) {
-            chime(1)
+        if (!handled && stack.size > 1) {
             back()
         }
     }
