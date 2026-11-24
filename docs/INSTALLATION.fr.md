@@ -87,6 +87,10 @@ erreur peut rendre la tablette du robot inutilisable. Lisez tout avant de commen
    robot : la commande doit afficher `uid=0`. Toque utilise la **busybox** fournie par Magisk
    (`/data/adb/magisk/busybox`).
 
+   > **Astuce — Masquer les notifications Magisk :** Pour éviter les messages « Super-utilisateur accordé »
+   > sur l'écran pendant la cuisine, ouvrez Magisk sur le robot (`adb shell monkey -p com.topjohnwu.magisk 1`),
+   > touchez Paramètres (roue dentée) et réglez **Notification super-utilisateur** sur **Aucune**.
+
 Pour retirer le root : flasher `boot-original.img` dans `boot` avec SP Flash Tool (et
 `recovery-original.img` dans `recovery` pour retirer TWRP).
 
@@ -97,8 +101,11 @@ adb shell su -c "setprop persist.adb.tcp.port 5555"
 adb reboot
 ```
 
-À faire uniquement sur le réseau de la maison : n'importe quel appareil connecté dessus
-pourrait alors accéder au robot.
+À faire sur le réseau de la maison. Comme l'étape 2.1 a déjà enregistré la clé
+`%USERPROFILE%\.android\adbkey.pub` de votre PC parmi les clés autorisées d'Android, seuls vos
+ordinateurs appairés peuvent s'y connecter et exécuter des commandes (les appareils inconnus sont
+refusés). Une fois activé, vous pouvez débrancher le câble USB et effectuer toutes les étapes et
+mises à jour par Wi-Fi (`tools\install-robot.ps1 -Ip <IP du robot>`).
 
 ## 3. Installer Toque
 

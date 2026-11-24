@@ -38,6 +38,27 @@ class UpdateTest {
         assertTrue(r.apkUrl!!.endsWith("/v0.2.0/Toque-0.2.0.apk"))
     }
 
+    @Test fun eachRobotTakesItsOwnApk() {
+        val json = """{"tag_name":"v0.8.0","name":"Toque 0.8.0","body":"","assets":[
+            {"name":"Toque-0.8.0.apk","size":10,"browser_download_url":"https://x/v0.8.0/Toque-0.8.0.apk"},
+            {"name":"Toque-smart-0.8.0.apk","size":11,"browser_download_url":"https://x/v0.8.0/Toque-smart-0.8.0.apk"}]}"""
+        assertEquals("Toque-0.8.0.apk", Releases.parse(json).apkName)
+        assertEquals("Toque-smart-0.8.0.apk", Releases.parse(json, smart = true).apkName)
+        assertEquals(11L, Releases.parse(json, smart = true).apkSize)
+        // Smart déjà joint en premier : le Connect prend quand même le sien.
+        val swapped = json.replace("Toque-0.8.0.apk", "TMP").replace("Toque-smart-0.8.0.apk", "Toque-0.8.0.apk").replace("TMP", "Toque-smart-0.8.0.apk")
+        assertEquals("Toque-0.8.0.apk", Releases.parse(swapped).apkName)
+        // Version sans APK du Smart : pas de mise à jour pour lui (l'APK du Connect plante sur sa tablette).
+        val connectOnly = """{"tag_name":"v0.8.1","assets":[{"name":"Toque-0.8.1.apk","browser_download_url":"https://x/a.apk"}]}"""
+        assertNull(Releases.parse(connectOnly, smart = true).apkUrl)
+        assertEquals("Toque-0.8.1.apk", Releases.parse(connectOnly).apkName)
+        // Les versions de test « 0.8.0-smart.N » restent au-dessus de 0.8.0 : un Smart en test ne prend pas
+        // l'APK du Connect de la 0.8.0 avec son ancien outil de mise à jour.
+        assertFalse(Releases.isNewer("0.8.0", "0.8.0-smart.2"))
+        assertTrue(Releases.isNewer("0.8.1", "0.8.0-smart.2"))
+        assertTrue(Releases.isNewer("0.8.0", "0.7.1"))
+    }
+
     @Test fun releaseWithoutApk() {
         val r = Releases.parse("""{"tag_name":"v0.3.0","name":"","body":null,"assets":[]}""")
         assertEquals("v0.3.0", r.title)

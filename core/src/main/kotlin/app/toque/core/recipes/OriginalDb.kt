@@ -76,6 +76,31 @@ object OriginalDbMapper {
         return m.contains("weigh") || m.contains("scale") || m.contains("waag") || m.contains("pes") || m.contains("wieg")
     }
 
+    /**
+     * Langue à utiliser pour [map] à partir d'une base stock : [preferred] s'il y a des recettes
+     * (hors REMOVE), sinon la plus fréquente dans la table. Évite un import vide quand l'interface
+     * est en anglais/allemand sur un robot français (base uniquement en « fr »).
+     */
+    fun stockLanguage(tables: Map<String, Table>, preferred: String): String {
+        val recipeT = tables.entries.firstOrNull { it.key.equals("RECIPE", true) }?.value
+            ?: return preferred
+        val rLang = recipeT.pick("LANGUAGE", "LANG") ?: return preferred
+        val rRemove = recipeT.pick("REMOVE", "REMOVED", "DELETED")
+        val counts = LinkedHashMap<String, Int>()
+        for (row in recipeT.rows) {
+            if (rRemove != null && row.get(rRemove).asBool()) continue
+            val l = row.get(rLang).asText()?.lowercase()?.trim().orEmpty()
+            if (l.isEmpty()) continue
+            counts[l] = (counts[l] ?: 0) + 1
+        }
+        if (counts.isEmpty()) return preferred
+        val pref = preferred.lowercase().trim()
+        if (pref.isNotEmpty()) {
+            counts.keys.firstOrNull { it.startsWith(pref) }?.let { return it }
+        }
+        return counts.maxByOrNull { it.value }!!.key
+    }
+
     fun map(tables: Map<String, Table>, language: String = "fr", nowMs: Long = System.currentTimeMillis()): Result {
         fun table(vararg names: String): Table? =
             names.firstNotNullOfOrNull { n -> tables.entries.firstOrNull { it.key.equals(n, true) }?.value }

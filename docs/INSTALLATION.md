@@ -84,6 +84,10 @@ Menu names below are those of the English interface (*Settings › Langue · Lan
 4. `adb install Magisk-v31.0.apk`, then `adb shell su -c id` and tap **Grant** on the robot: it
    must print `uid=0`. Toque uses the **busybox** shipped with Magisk (`/data/adb/magisk/busybox`).
 
+   > **Tip — Silencing Magisk toast notifications:** To suppress the on-screen "Granted Superuser"
+   > toasts during cooking, open Magisk on the robot (`adb shell monkey -p com.topjohnwu.magisk 1`),
+   > tap Settings (gear icon) and set **Superuser Notification** to **None**.
+
 To undo the root: flash `boot-original.img` into `boot` with SP Flash Tool (and
 `recovery-original.img` into `recovery` to remove TWRP).
 
@@ -94,7 +98,11 @@ adb shell su -c "setprop persist.adb.tcp.port 5555"
 adb reboot
 ```
 
-Only do this on your home network: anyone on it could then connect to the robot.
+Only do this on your home network. Because step 2.1 already installed your PC's
+`%USERPROFILE%\.android\adbkey.pub` into Android's authorized keys, only your paired PC can connect
+and run commands (unpaired devices on the local network are refused). Once enabled, you can
+disconnect the USB cable and perform all subsequent steps and updates over Wi-Fi
+(`tools\install-robot.ps1 -Ip <robot IP>`).
 
 ## 3. Install Toque
 

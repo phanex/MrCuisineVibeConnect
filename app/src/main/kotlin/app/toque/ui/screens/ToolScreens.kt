@@ -10,7 +10,7 @@ import android.widget.TextView
 import app.toque.Prefs
 import app.toque.core.i18n.tr
 import app.toque.core.machine.Snapshot
-import app.toque.core.protocol.Mcc
+import app.toque.core.robot.RobotProfiles
 import app.toque.ui.Icon
 import app.toque.ui.MainActivity
 import app.toque.ui.Screen
@@ -60,12 +60,15 @@ class DiagnosticsScreen(a: MainActivity) : Screen(a) {
             append(tr("Âge échantillon").padEnd(17)).append(if (s.sampleAgeMs < 0) "—" else "${s.sampleAgeMs} ms").append('\n')
             append(tr("Alerte").padEnd(17)).append(s.faultMessage.ifEmpty { tr("aucune") }).append('\n')
             append(tr("Moteur / chauffe").padEnd(17)).append(yn(s.motorOn)).append(" / ").append(yn(s.heaterOn)).append('\n')
-            append(tr("Régime").padEnd(17)).append(s.rpm).append(" ").append(tr("tr/min (niveau %d)", s.speedLevel)).append("\n")
+            append(tr("Régime").padEnd(17))
+            // Base qui ne mesure pas le régime lame en marche (issue #10) : la vitesse affichée est celle demandée.
+            if (s.motorOn && s.rpm == 0 && s.speedLevel > 0) append(tr("non mesuré · vitesse demandée %d", s.speedLevel)).append("\n")
+            else append(s.rpm).append(" ").append(tr("tr/min (niveau %d)", s.speedLevel)).append("\n")
             append(tr("Température").padEnd(17)).append(s.actualTempC).append(" ").append(tr("°C (consigne %d °C)", s.targetTempC)).append("\n")
             append(tr("Poids").padEnd(17)).append(s.weightG).append(" g · ").append(s.scaleState).append(if (s.scaleStable) " · " + tr("stable") else "").append('\n')
             append(tr("Couvercle ouvert").padEnd(17)).append(yn(s.lidOpen)).append('\n')
             append(tr("Bol détecté").padEnd(17)).append(yn(s.bowlDetected)).append('\n')
-            append(tr("Erreur base").padEnd(17)).append(if (s.boardErrorCode == 0) tr("aucune") else "${s.boardErrorCode} · ${Mcc.boardErrorMessage(s.boardErrorCode)}").append('\n')
+            append(tr("Erreur base").padEnd(17)).append(if (s.boardErrorCode == 0) tr("aucune") else "${s.boardErrorCode} · ${RobotProfiles.active.validator.errorMessage(s.boardErrorCode)}").append('\n')
             append(tr("Firmware base").padEnd(17)).append(s.firmware).append('\n')
             append(tr("Programme").padEnd(17)).append(s.jobLabel.ifEmpty { "—" }).append(' ').append(s.jobState).append('\n')
             append(tr("Commande").padEnd(17)).append(s.wireOperation).append(" v").append(s.wireSpeed).append(" t").append(s.wireTempLevel).append('\n')

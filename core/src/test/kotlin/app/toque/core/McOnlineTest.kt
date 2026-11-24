@@ -1,10 +1,12 @@
 package app.toque.core
 
+import app.toque.core.recipes.McCategories
 import app.toque.core.recipes.McOnline
 import app.toque.core.recipes.RecipeCodec
 import app.toque.core.recipes.StepProgram
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -78,13 +80,28 @@ class McOnlineTest {
         assertEquals(600, s[4].machine!!.seconds)
         assertEquals(StepProgram.TOAST, s[5].machine!!.program)
         assertEquals(StepProgram.KNEAD, s[6].machine!!.program)
-        // Programme absent du Monsieur Cuisine connect : étape manuelle, signalée.
-        assertNull(s[7].machine)
-        assertTrue(s[7].text.startsWith("Cuire sous vide.\n"))
+        // Programme du Monsieur Cuisine Smart : gardé avec sa température ; absent du Connect.
+        with(s[7].machine!!) {
+            assertEquals(StepProgram.SOUS_VIDE, program); assertEquals(60, tempC); assertEquals(3600, seconds)
+        }
+        assertEquals("Cuire sous vide.", s[7].text)
         assertEquals("Servir.", s[8].text)
+        assertEquals(listOf("MC2.0", "MC3.0"), r.devices)
 
-        // Tous les réglages importés passent les règles de sécurité.
-        for (step in s) step.machine?.let { assertTrue("${it.summary} : ${it.violations()}", it.valid) }
+        // Sur le Connect, tous les réglages importés passent les règles de sécurité, sauf le sous-vide
+        // (absent de ce robot : la recette ne lui est pas montrée) ; sur le Smart, tous.
+        for (step in s) step.machine?.let { m ->
+            if (m.program == StepProgram.SOUS_VIDE) assertFalse(m.valid) else assertTrue("${m.summary} : ${m.violations()}", m.valid)
+        }
+        assertFalse(app.toque.core.robot.RecipeCompat.supports(r, app.toque.core.robot.RobotProfiles.MC_CONNECT))
+        assertTrue(app.toque.core.robot.RecipeCompat.reasons(r, app.toque.core.robot.RobotProfiles.MC_SMART).toString(),
+            app.toque.core.robot.RecipeCompat.supports(r, app.toque.core.robot.RobotProfiles.MC_SMART))
+        try {
+            app.toque.core.robot.RobotProfiles.active = app.toque.core.robot.RobotProfiles.MC_SMART
+            for (step in s) step.machine?.let { assertTrue("${it.summary} : ${it.violations()}", it.valid) }
+        } finally {
+            app.toque.core.robot.RobotProfiles.active = app.toque.core.robot.RobotProfiles.MC_CONNECT
+        }
     }
 
     @Test fun rampBecomesOneManualStepPerStage() {
@@ -125,6 +142,32 @@ class McOnlineTest {
         assertEquals(4.6, updated.rating, 0.001); assertEquals(510, updated.ratingCount); assertEquals("Chef d'essai", updated.author)
     }
 
+    @Test fun foreignCategoriesTakeTheNamesOfTheRecipeLanguage() {
+        val es = McCategories.parse(
+            """{"code":0,"data":{"categories":[{"id":313,"name":"Postres","order":11},{"id":487,"name":"Cocina francesa","order":18},""" +
+                """{"id":265,"name":"Platos principales","order":6},{"id":"582","name":"Vegetariano","order":0}]}}""",
+        )
+        assertEquals(mapOf(313L to "Postres", 487L to "Cocina francesa", 265L to "Platos principales", 582L to "Vegetariano"), es)
+        // Française : dessert (307), cuisine française (467) ; revue sans équivalent (497) ; anglaise : végétarien (581).
+        assertEquals("Postres", McCategories.localName(307, es))
+        assertEquals("Cocina francesa", McCategories.localName(467, es))
+        assertEquals("Vegetariano", McCategories.localName(581, es))
+        assertNull(McCategories.localName(497, es))
+        assertNull(McCategories.localName(999999, es))
+        // Même langue : son propre nom.
+        assertEquals("Postres", McCategories.localName(313, es))
+
+        val json = """{"data":{"recipe":{"id":1,"name":"Fondant","categories":[{"id":307,"name":"Dessert"},""" +
+            """{"id":467,"name":"Cuisine française"},{"id":497,"name":"Mon Robot & Moi"},{"id":259,"name":"Plats principaux"}]}}}"""
+        val r = McOnline.parseRecipe(json, es)!!
+        assertEquals("Postres", r.category)
+        assertEquals(listOf("Cocina francesa", "Mon Robot & Moi", "Platos principales"), r.tags)
+        // Sans liste (recette dans la langue des recettes) : les noms de la fiche.
+        val same = McOnline.parseRecipe(json)!!
+        assertEquals("Dessert", same.category)
+        assertEquals(listOf("Cuisine française", "Mon Robot & Moi", "Plats principaux"), same.tags)
+    }
+
     @Test fun unusable() {
         assertNull(McOnline.parseRecipe("""{"data":{"recipe":{"id":1,"name":"  "}}}"""))
         assertNull(McOnline.parseRecipe("""{"code":404,"message":"Recipe not found"}"""))
@@ -135,6 +178,10 @@ class McOnlineTest {
         assertEquals("web", McOnline.headers("fr-FR")["device-type"])
         assertEquals("fr-FR", McOnline.languageFor("fr"))
         assertEquals("en-US", McOnline.languageFor("en"))
+        assertEquals("es-ES", McOnline.languageFor("ca"))
+        assertEquals("es-ES", McOnline.languageFor("ca-ES"))
+        assertEquals("es-ES", McOnline.recipeLanguage("ca", "auto"))
+        assertEquals("fr-FR", McOnline.recipeLanguage("ca", "fr-FR"))
         assertTrue(McOnline.listUrl(2).contains("/page/2/size/100?"))
         assertTrue(McOnline.listUrl(1).contains("MC2.0"))
     }

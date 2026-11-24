@@ -50,8 +50,19 @@ class RecipesTest {
 
     @Test fun textNormalisation() {
         assertEquals("creme brulee", TextNorm.normalize("Crème  Brûlée !"))
+        assertEquals("poulet a l ail", TextNorm.normalize("Poulet à l'ail"))
+        assertEquals("тісто", TextNorm.normalize("Тісто"))
+        assertEquals("мясо", TextNorm.normalize("М'ясо"))
+        assertEquals("мясо", TextNorm.normalize("М’ясо"))
+        assertEquals("pina colada", TextNorm.normalize("Piña colada"))
+        assertEquals("bulka z maslem", TextNorm.normalize("Bułka z masłem"))
+        assertEquals("grosse sosse", TextNorm.normalize("Große Soße"))
         assertEquals(listOf("pomme", "terre"), TextNorm.tokens("Pommes de terre"))
+        assertEquals(listOf("poulet", "ail"), TextNorm.tokens("Poulet à l'ail"))
         assertEquals(listOf("gateau"), TextNorm.tokens("gâteaux"))
+        assertEquals(listOf("тісто", "піци"), TextNorm.tokens("Тісто для піци"))
+        assertEquals(listOf("мясо"), TextNorm.tokens("М'ясо"))
+        assertEquals(listOf("ei", "ol"), TextNorm.tokens("Ei und Öl"))
         assertEquals(1, TextNorm.distance("bechamel", "bechamle", 2))
         assertEquals(1, TextNorm.distance("risoto", "risotto", 2))
     }
@@ -110,6 +121,22 @@ class RecipesTest {
         assertEquals(1, res.recipes.size)
         val r = res.recipes.single()
         assertEquals("mc-4711", r.id)
+        // Langue courte de la base stock (« es ») : le code « es » (issu de « es-ES ») doit matcher.
+        val esOnly = OriginalDbMapper.map(tables, "es")
+        assertEquals(0, esOnly.recipes.size)
+        val frEs = mapOf(
+            "RECIPE" to OriginalDbMapper.Table("RECIPE", listOf(
+                mapOf("_id" to 9L, "NAME" to "Tortilla", "LANGUAGE" to "es", "REMOVE" to 0L),
+            )),
+        )
+        assertEquals(1, OriginalDbMapper.map(frEs, "es").recipes.size)
+        assertEquals(0, OriginalDbMapper.map(frEs, "fr").recipes.size)
+        // Base française + préférence « en » (interface EN) : repli sur « fr », pas d'import vide.
+        assertEquals("fr", OriginalDbMapper.stockLanguage(tables, "en"))
+        assertEquals(1, OriginalDbMapper.map(tables, OriginalDbMapper.stockLanguage(tables, "en")).recipes.size)
+        assertEquals("fr", OriginalDbMapper.stockLanguage(tables, "fr"))
+        assertEquals("es", OriginalDbMapper.stockLanguage(frEs, "es"))
+        assertEquals("es", OriginalDbMapper.stockLanguage(frEs, "de"))
         assertEquals(listOf("Hacher", "Cuire", "Pétrir la pâte"), r.steps.map { it.text })
         val cook = r.steps[1].machine
         assertNotNull(cook)

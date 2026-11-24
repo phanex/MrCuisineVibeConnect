@@ -1,6 +1,10 @@
 package app.toque
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.net.ConnectivityManager
 import app.toque.core.i18n.tr
 import app.toque.core.machine.RootShell
 import app.toque.core.time.ZoneLookup
@@ -123,7 +127,31 @@ class TimeSync(private val context: Context, private val prefs: Prefs, private v
 
         fun clock(): String = SimpleDateFormat("HH:mm", Locale.FRANCE).apply { timeZone = TimeZone.getDefault() }.format(Date())
 
+        /** Vrai quand le robot est connecté à un réseau (le Wi-Fi, sur le robot). */
+        fun online(context: Context): Boolean = try {
+            @Suppress("DEPRECATION")
+            (context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).activeNetworkInfo?.isConnected == true
+        } catch (_: Exception) {
+            false
+        }
+
+        /**
+         * L'heure ne s'affiche qu'une fois réglée et le Wi-Fi connecté : sans pile d'horloge, le robot
+         * repart en 2010 (ou 1970) à chaque démarrage, et une heure fausse à l'écran trompe plus
+         * qu'une heure absente.
+         */
+        fun showClock(context: Context): Boolean = plausible() && online(context)
+
         @Volatile private var started = false
+        @Volatile private var lastOk = false
+        private val lock = Object()
+        private var woken = false
+
+        /** Relance tout de suite le réglage (le réseau vient de changer). */
+        private fun wake() = synchronized(lock) {
+            woken = true
+            lock.notifyAll()
+        }
 
         /**
          * Au lancement de l'interface : réglage dès que le réseau répond (le Wi-Fi met un moment à
@@ -132,6 +160,14 @@ class TimeSync(private val context: Context, private val prefs: Prefs, private v
         fun start(context: Context, prefs: Prefs, log: Logbook) {
             if (started) return
             started = true
+            // Chaque changement de réseau relance le réglage sans attendre le prochain essai, tant
+            // que l'heure n'est pas réglée.
+            context.applicationContext.registerReceiver(object : BroadcastReceiver() {
+                override fun onReceive(c: Context, i: Intent) {
+                    if (isInitialStickyBroadcast) return
+                    if (!lastOk || !plausible()) wake()
+                }
+            }, @Suppress("DEPRECATION") IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION))
             val t = Thread {
                 // Au démarrage, le Wi-Fi arrive au bout de 30 à 60 s : on réessaie souvent d'abord.
                 val retries = longArrayOf(3_000, 5_000, 5_000, 5_000, 10_000, 10_000, 10_000, 15_000, 30_000,
@@ -144,10 +180,20 @@ class TimeSync(private val context: Context, private val prefs: Prefs, private v
                         log.write("heure", "erreur : ${e.message}")
                         Result(false, current(), "")
                     }
+                    lastOk = r.ok
                     val wait = if (r.ok) 12 * 3600_000L else retries[minOf(i++, retries.size - 1)]
                     if (r.ok) i = 0
                     try {
-                        Thread.sleep(wait)
+                        val network = synchronized(lock) {
+                            if (!woken) lock.wait(wait)
+                            val w = woken
+                            woken = false
+                            w
+                        }
+                        if (network) {
+                            i = 0
+                            Thread.sleep(2_000) // laisse au Wi-Fi le temps d'obtenir le DNS
+                        }
                     } catch (_: InterruptedException) {
                         return@Thread
                     }

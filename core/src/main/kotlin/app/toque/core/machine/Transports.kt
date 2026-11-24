@@ -1,6 +1,8 @@
 package app.toque.core.machine
 
 import app.toque.core.i18n.tr
+import app.toque.core.protocol.BoardCodec
+import app.toque.core.protocol.ConnectCodec
 import app.toque.core.protocol.Mcc
 import app.toque.core.protocol.MccStreamParser
 import app.toque.core.protocol.Operation
@@ -15,6 +17,9 @@ import java.util.concurrent.TimeUnit
 /** Liaison d'octets avec la base moteur (réelle, simulée ou jumeau numérique). */
 interface Transport {
     val name: String
+
+    /** Format des trames de la carte au bout de cette liaison. */
+    val codec: BoardCodec get() = ConnectCodec
 
     @Throws(IOException::class)
     fun open()
@@ -164,7 +169,11 @@ class SimBoard(private val clock: Clock) {
     }
 }
 
-class SimTransport(val board: SimBoard) : Transport {
+/**
+ * Base simulée. [codec] : [ConnectCodec], ou [DemoCodec] pour la démo d'un autre robot (la base
+ * simulée parle toujours le protocole du Connect).
+ */
+class SimTransport(val board: SimBoard, override val codec: BoardCodec = ConnectCodec) : Transport {
     override val name: String get() = tr("Démo (base simulée)")
     private val queue = LinkedBlockingQueue<ByteArray>()
     @Volatile private var closed = false

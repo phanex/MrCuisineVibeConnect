@@ -5,6 +5,8 @@ import app.toque.core.i18n.trKey
 import app.toque.core.protocol.Direction
 import app.toque.core.protocol.Mcc
 import app.toque.core.protocol.Operation
+import app.toque.core.protocol.Smart
+import app.toque.core.protocol.SmartProgram
 
 /** Accessoire monté dans le bol : il limite la vitesse autorisée. */
 enum class Accessory(private val fr: String, val maxSpeed: Int) {
@@ -20,9 +22,30 @@ data class Setting(
     val speed: Int,
     val temperatureLevel: Int,
     val direction: Direction,
+    /**
+     * Monsieur Cuisine Smart : programme automatique de l'appli d'origine, envoyé avec sa trame
+     * capturée. [speed], [direction] et [temperatureLevel] sont alors ceux du programme (règles
+     * de sécurité, affichage). Null pour tout le reste.
+     */
+    val program: SmartProgram? = null,
+    /**
+     * Monsieur Cuisine Smart : niveau de sa table à 21 niveaux (0..20), pour une température
+     * absente de la table de Toque (40 °C). [temperatureLevel] vaut alors le niveau de Toque juste
+     * en dessous (37 °C pour 40 °C), utilisé par les règles de sécurité. Null sinon.
+     */
+    val smartLevel: Int? = null,
+    /**
+     * Smart, avec [program] : température exacte choisie (recette), dans la plage que l'appli
+     * d'origine permet pour ce programme ([SmartProgram.allowsCelsius]) ; null = celle de la capture.
+     */
+    val programCelsius: Int? = null,
 ) {
     val heated: Boolean get() = temperatureLevel > 0
-    val temperatureC: Int get() = Mcc.celsiusForLevel(temperatureLevel)
+    val temperatureC: Int get() = when {
+        program != null -> programCelsius ?: program.targetCelsius
+        smartLevel != null -> Smart.celsiusForLevel(smartLevel)
+        else -> Mcc.celsiusForLevel(temperatureLevel)
+    }
     val isRest: Boolean get() = operation == Operation.STOP
 
     companion object {
@@ -36,12 +59,37 @@ enum class JobKind(private val fr: String) {
     KNEAD(trKey("Pétrir")),
     STEAM(trKey("Vapeur")),
     TOAST(trKey("Rissoler")),
-    TURBO(trKey("Turbo"));
+    TURBO(trKey("Turbo")),
+
+    /** Smart : programme automatique de l'appli d'origine ([SmartProgram]), trame capturée. */
+    PROGRAM(trKey("Programme"));
 
     val label: String get() = tr(fr)
 }
 
-data class Phase(val setting: Setting, val durationMs: Long)
+/**
+ * Smart : ce que la minuterie de la trame (octets 25-27) affiche pendant une phase. La carte ne
+ * décompte rien : c'est seulement ce que l'appli d'origine y écrit (capture 16-etapes-mc30).
+ */
+sealed class PhaseTimer {
+    /** Durée totale du travail, la même du début à la fin (Toque ; Saisir de l'appli d'origine). */
+    object Total : PhaseTimer()
+    /** Temps restant au début de la phase (mijoter, fermenter, malaxer, prélavage). */
+    object Remaining : PhaseTimer()
+    /** Valeur fixe, en secondes (nettoyage long : 15 min 30, puis 1 min 45). */
+    data class Fixed(val seconds: Int) : PhaseTimer()
+}
+
+data class Phase(
+    val setting: Setting,
+    val durationMs: Long,
+    val timer: PhaseTimer = PhaseTimer.Total,
+    /**
+     * Smart : la phase finit dès que la carte signale « température atteinte » (bit 5 de l'octet
+     * d'état), au plus après [durationMs] (préchauffe du nettoyage long).
+     */
+    val untilTemperature: Boolean = false,
+)
 
 /**
  * Description complète d'un travail à exécuter. Les phases sont rejouées en boucle si
@@ -55,7 +103,15 @@ data class JobSpec(
     val cyclic: Boolean,
     val accessory: Accessory = Accessory.BLADE,
     val hotBlendConfirmed: Boolean = false,
-)
+    /**
+     * Smart, Malaxer de l'écran Fonctions : comme l'appli d'origine, le pétrissage suivant attend
+     * 30 min ([Limits.KNEAD_COOLDOWN_MS]). Pas posé pour les étapes « Pétrir » des recettes.
+     */
+    val cooldown: Boolean = false,
+) {
+    /** Programme à étapes de l'appli d'origine du Smart : chaque phase est une trame capturée. */
+    val capturedSteps: Boolean get() = phases.size > 1 && phases.all { it.setting.program != null }
+}
 
 /** Raison précise d'un refus, affichable telle quelle. */
 data class Violation(val code: String, val message: String)
@@ -72,7 +128,13 @@ object Limits {
     const val MAX_MS_KNEAD = 120_000L
     const val MAX_MS_TOAST = 840_000L
     const val MAX_MS_TURBO_PRESS = 3_000L
+    /** Smart : durée de validité de la confirmation « contenu froid » avant le Turbo. */
+    const val COLD_CONFIRM_MS = 5 * 60_000L
     const val MIN_MS = 1_000L
+    /** Prélavage et nettoyage long : eau de lavage à 40 °C au plus (appli d'origine : 37 et 40 °C). */
+    const val MAX_C_CLEANING = 40
+    /** Malaxer : l'appli d'origine fait attendre 30 min entre deux pétrissages (refroidissement). */
+    const val KNEAD_COOLDOWN_MS = 30 * 60_000L
 }
 
 /**
@@ -95,8 +157,21 @@ object SafetyPolicy {
         val v = ArrayList<Violation>(2)
         if (setting.speed !in 0..10) v += Violation("speed_range", tr("Vitesse hors plage (0 à 10)"))
         if (setting.temperatureLevel !in 0..19) v += Violation("temp_range", tr("Température hors table"))
+        val sl = setting.smartLevel
+        if (sl != null && (sl !in Smart.TEMPERATURE_LEVELS.indices || Smart.toqueLevelFor(sl) != setting.temperatureLevel))
+            v += Violation("temp_range", tr("Température hors table"))
         if (v.isNotEmpty()) return v
         if (setting.isRest) return v
+        val p = setting.program
+        // Trame capturée : programme automatique (PROGRAM), étape de Malaxer (KNEAD) ou de Saisir (TOAST).
+        if (if (p == null) kind == JobKind.PROGRAM else kind != kindOf(p)) v += Violation("program", tr("Programme incohérent"))
+        val pc = setting.programCelsius
+        if (pc != null && (p == null || !p.allowsCelsius(pc)))
+            v += Violation("program", tr("Température impossible pour ce programme"))
+        if (p != null && (setting.speed != p.speed || setting.direction != p.direction ||
+                setting.temperatureLevel != p.toqueLevelFor(pc ?: p.targetCelsius) || sl != null))
+            v += Violation("program", tr("Réglage fixe pour ce programme"))
+        if (sl != null && kind != JobKind.MANUAL) v += Violation("program", tr("Programme incohérent"))
 
         val expectedOp = when (kind) {
             JobKind.MANUAL -> Programs.manualOperation(setting.speed, setting.temperatureLevel)
@@ -104,6 +179,7 @@ object SafetyPolicy {
             JobKind.STEAM -> Operation.STEAM
             JobKind.TOAST -> Operation.TOAST
             JobKind.TURBO -> Operation.TURBO
+            JobKind.PROGRAM -> Operation.STANDARD
         }
         if (setting.operation != expectedOp) v += Violation("operation", tr("Opération incohérente avec le programme"))
 
@@ -121,6 +197,9 @@ object SafetyPolicy {
                     v += Violation("reverse_speed", tr("En sens inverse, vitesse %d maximum", Limits.MAX_SPEED_REVERSE))
             }
             JobKind.KNEAD -> {
+                // Pas de limite « vitesse 3 en sens inverse » ici : le pétrin de Toque a toujours eu
+                // une phase à vitesse 4 en sens inverse, et le Malaxer pâte molle de l'appli d'origine
+                // du Smart envoie fonction 5, vitesse 4, sens inverse (capture 10). Vitesse 4 au plus.
                 if (setting.speed > Limits.MAX_SPEED_KNEAD) v += Violation("knead_speed", tr("Pétrissage : vitesse 4 maximum"))
                 if (setting.heated) v += Violation("knead_heat", tr("Pas de chauffe en pétrissage"))
             }
@@ -130,6 +209,18 @@ object SafetyPolicy {
             }
             JobKind.STEAM -> {
                 if (setting.speed > 1) v += Violation("steam_speed", tr("Vapeur : vitesse 1 maximum"))
+            }
+            JobKind.PROGRAM -> if (p != null && p.nettoyage) {
+                // Prélavage et nettoyage long de l'appli d'origine : vitesse 10 et sens inverse à
+                // vitesse 4 dans de l'eau de lavage à 37 ou 40 °C (trames capturées). Jamais plus chaud.
+                if (setting.temperatureC > Limits.MAX_C_CLEANING)
+                    v += Violation("clean_temp", tr("Nettoyage : %d °C maximum", Limits.MAX_C_CLEANING))
+            } else {
+                // Mêmes limites que la cuisson manuelle (déjà respectées par les trames capturées).
+                if (setting.heated && setting.speed > Limits.MAX_SPEED_HEATED)
+                    v += Violation("heated_speed", tr("En chauffe, vitesse %d maximum", Limits.MAX_SPEED_HEATED))
+                if (setting.direction == Direction.COUNTER_CLOCKWISE && setting.speed > Limits.MAX_SPEED_REVERSE)
+                    v += Violation("reverse_speed", tr("En sens inverse, vitesse %d maximum", Limits.MAX_SPEED_REVERSE))
             }
             JobKind.TURBO -> {
                 if (setting.speed != 10) v += Violation("turbo_speed", tr("Turbo = vitesse 10"))
@@ -149,14 +240,41 @@ object SafetyPolicy {
         return v
     }
 
+    /** Étape capturée : sorte de travail qui la porte. */
+    fun kindOf(p: SmartProgram): JobKind = when (p.operation) {
+        Operation.KNEAD -> JobKind.KNEAD
+        Operation.TOAST -> JobKind.TOAST
+        else -> JobKind.PROGRAM
+    }
+
     /** Durée maximale autorisée pour un travail, d'après son réglage le plus rapide. */
     fun maxDurationMs(spec: JobSpec): Long {
         val fastest = spec.phases.maxOfOrNull { it.setting.speed } ?: 0
-        val base = if (fastest > 6) Limits.MAX_MS_HIGH_SPEED else Limits.MAX_MS_DEFAULT
+        // Programme à étapes non cyclique (nettoyage long : 1 min 45 à vitesse 10 sur 17 min) : on
+        // compte le seul temps passé au-dessus de la vitesse 6.
+        val highMs = if (spec.capturedSteps && !spec.cyclic)
+            spec.phases.filter { it.setting.speed > 6 }.sumOf { minOf(it.durationMs, spec.totalMs) } else spec.totalMs
+        val base = if (fastest > 6 && highMs > Limits.MAX_MS_HIGH_SPEED) Limits.MAX_MS_HIGH_SPEED else Limits.MAX_MS_DEFAULT
         return when (spec.kind) {
             JobKind.KNEAD -> minOf(base, Limits.MAX_MS_KNEAD)
             JobKind.TOAST -> minOf(base, Limits.MAX_MS_TOAST)
             JobKind.TURBO -> Limits.MAX_MS_TURBO_PRESS
+            // Durée maximale de l'appli d'origine pour ce programme, sans dépasser la limite de
+            // Toque (99 min, 15 min au-dessus de la vitesse 6). Le sous-vide de l'appli d'origine va
+            // jusqu'à 12 h : pas avant d'avoir vérifié que la carte s'arrête seule quand Android se
+            // tait (PROTOCOLE-SERIE-SMART.md § 8, essai pas encore fait).
+            JobKind.PROGRAM -> {
+                val p = spec.phases.firstOrNull()?.setting?.program
+                when {
+                    p == null -> 0L
+                    // Cuissons longues à basse température et vitesse 1 au plus (sous-vide, mijoter,
+                    // fermenter) : la durée de l'appli d'origine (jusqu'à 12 h), comme sur le robot.
+                    // La base du Smart arrête le moteur seule ~4 s sans trame (Camybrith Cooking) ;
+                    // l'arrêt de la chauffe dans ce cas reste à vérifier par les testeurs (docs/SMART.md).
+                    p in LONG_PROGRAMS -> p.maxS * 1000L
+                    else -> minOf(base, p.maxS * 1000L)
+                }
+            }
             else -> base
         }
     }
@@ -165,6 +283,14 @@ object SafetyPolicy {
         val v = ArrayList<Violation>()
         if (spec.phases.isEmpty()) v += Violation("no_phase", tr("Programme vide"))
         if (spec.phases.all { it.setting.isRest }) v += Violation("only_rest", tr("Aucune phase active"))
+        // Trames capturées : toutes les phases ou aucune, d'un seul programme de l'appli d'origine.
+        val progs = spec.phases.map { it.setting.program }
+        if (progs.any { it != null } && (progs.any { it == null } || progs.map { it!!.function }.toSet().size != 1))
+            v += Violation("program", tr("Programme incohérent"))
+        if (spec.kind == JobKind.PROGRAM && spec.phases.size == 1 && spec.cyclic)
+            v += Violation("program", tr("Programme incohérent"))
+        if (spec.phases.any { it.untilTemperature && it.setting.program?.nettoyage != true })
+            v += Violation("program", tr("Programme incohérent"))
         if (spec.totalMs < Limits.MIN_MS) v += Violation("too_short", tr("Durée trop courte"))
         val max = maxDurationMs(spec)
         if (spec.totalMs > max) v += Violation("too_long", tr("Durée maximale : %s", formatDuration(max)))
@@ -177,6 +303,15 @@ object SafetyPolicy {
     }
 
     const val HOT_BLEND = "hot_blend"
+
+    /** Programmes du Smart autorisés au-delà de 99 min (voir [maxDurationMs]). */
+    private val LONG_PROGRAMS = setOf(
+        SmartProgram.SOUS_VIDE, SmartProgram.MIJOTER_BRASSE, SmartProgram.MIJOTER_REPOS,
+        SmartProgram.FERMENTER_BRASSE, SmartProgram.FERMENTER_REPOS,
+    )
+
+    /** Smart : Turbo demandé alors que la température du contenu n'est pas mesurée. */
+    const val COLD_CONFIRM = "cold_confirm"
 
     fun formatDuration(ms: Long): String {
         val s = ms / 1000
@@ -207,10 +342,13 @@ object Programs {
     fun manual(
         speed: Int, temperatureLevel: Int, direction: Direction, durationMs: Long,
         accessory: Accessory = Accessory.BLADE, hotBlendConfirmed: Boolean = false, label: String = JobKind.MANUAL.label,
+        /** Smart : niveau de sa table (40 °C) ; [temperatureLevel] = niveau de Toque juste en dessous. */
+        smartLevel: Int? = null,
     ) = JobSpec(
         kind = JobKind.MANUAL,
         label = label,
-        phases = listOf(Phase(Setting(manualOperation(speed, temperatureLevel), speed, temperatureLevel, manualDirection(speed, direction)), durationMs)),
+        phases = listOf(Phase(Setting(manualOperation(speed, temperatureLevel), speed, temperatureLevel, manualDirection(speed, direction),
+            smartLevel = smartLevel), durationMs)),
         totalMs = durationMs,
         cyclic = false,
         accessory = accessory,
@@ -281,4 +419,115 @@ object Programs {
 
     private val RINSE = listOf("rincage", "nettoyage", "limpieza", "aclarado", "reinigung", "spulen", "spuelen",
         "rinse", "rinsing", "cleaning", "pulizia", "risciacquo", "reiniging", "spoelen", "czyszczenie", "plukanie", "limpeza")
+
+    /** Smart : réglage d'un programme automatique capturé ([SmartProgram]). */
+    fun programSetting(p: SmartProgram, celsius: Int? = null) =
+        Setting(p.operation, p.speed, p.toqueLevelFor(celsius ?: p.targetCelsius), p.direction, program = p, programCelsius = celsius)
+
+    // ------------------------------------------------------------------ programmes à étapes (Smart)
+    // Rythme de l'appli d'origine relevé le 2026-11-21 (capture 16-etapes-mc30, code `y2.f0`).
+    // Chaque phase est une trame capturée ; un repos garde la fonction (et la chauffe), vitesse 0.
+
+    private fun etape(p: SmartProgram, ms: Long, timer: PhaseTimer = PhaseTimer.Remaining, untilTemperature: Boolean = false,
+                      celsius: Int? = null) =
+        Phase(programSetting(p, celsius), ms, timer, untilTemperature)
+
+    private fun etapes(kind: JobKind, label: String, totalMs: Long, cyclic: Boolean, vararg phases: Phase) =
+        JobSpec(kind = kind, label = label, phases = phases.toList(), totalMs = totalMs, cyclic = cyclic)
+
+    /** Mijoter : [30 s vitesse 1 inverse, 2 min repos] × 3, 30 s vitesse 1, puis repos jusqu'à la fin (90 °C). */
+    fun smartMijoter(totalMs: Long, label: String, celsius: Int? = null): JobSpec {
+        fun b() = etape(SmartProgram.MIJOTER_BRASSE, 30_000, celsius = celsius)
+        fun r(ms: Long) = etape(SmartProgram.MIJOTER_REPOS, ms, celsius = celsius)
+        return etapes(JobKind.PROGRAM, label, totalMs, false, b(), r(120_000), b(), r(120_000), b(), r(120_000), b(), r(totalMs))
+    }
+
+    /** Fermenter : 5 min vitesse 1 inverse, puis repos jusqu'à la fin (40 °C). */
+    fun smartFermenter(totalMs: Long, label: String, celsius: Int? = null) = etapes(JobKind.PROGRAM, label, totalMs, false,
+        etape(SmartProgram.FERMENTER_BRASSE, 5 * 60_000L, celsius = celsius), etape(SmartProgram.FERMENTER_REPOS, totalMs, celsius = celsius))
+
+    /** Saisir : 5 s vitesse 1 inverse / 30 s repos, en boucle (130 °C) ; minuterie = durée totale. */
+    fun smartSaisir(totalMs: Long, label: String = JobKind.TOAST.label) = etapes(JobKind.TOAST, label, totalMs, true,
+        etape(SmartProgram.SAISIR_BRASSE, 5_000, PhaseTimer.Total), etape(SmartProgram.SAISIR_REPOS, 30_000, PhaseTimer.Total))
+
+    /** Malaxer pâte ferme (2 min) : 45 s v4, 15 s repos, 20 s v4 inverse, 10 s repos, 20 s v4, 10 s repos. */
+    fun smartMalaxerFerme(totalMs: Long, label: String = JobKind.KNEAD.label) = etapes(JobKind.KNEAD, label, totalMs, false,
+        etape(SmartProgram.MALAXER_V4, 45_000), etape(SmartProgram.MALAXER_REPOS, 15_000),
+        etape(SmartProgram.MALAXER_V4_INVERSE, 20_000), etape(SmartProgram.MALAXER_REPOS, 10_000),
+        etape(SmartProgram.MALAXER_V4, 20_000), etape(SmartProgram.MALAXER_REPOS_INVERSE, 10_000))
+
+    /** Malaxer pâte molle (2 min) : 15 s v4 inverse, 35 s repos, 70 s v4. */
+    fun smartMalaxerMolle(totalMs: Long, label: String = JobKind.KNEAD.label) = etapes(JobKind.KNEAD, label, totalMs, false,
+        etape(SmartProgram.MALAXER_V4_INVERSE, 15_000), etape(SmartProgram.MALAXER_REPOS_INVERSE, 35_000),
+        etape(SmartProgram.MALAXER_V4, 70_000))
+
+    /** Prélavage rapide (1 min 30) : 30 s v10, 30 s v4 inverse, 30 s v10 (37 °C). */
+    fun smartPrelavage(label: String) = etapes(JobKind.PROGRAM, label, 90_000, false,
+        etape(SmartProgram.PRELAVAGE_V10, 30_000), etape(SmartProgram.PRELAVAGE_V4_INVERSE, 30_000),
+        etape(SmartProgram.PRELAVAGE_V10, 30_000))
+
+    /**
+     * Nettoyage long : 30 s v10 (37 °C) ; préchauffe à 40 °C, vitesse 1, jusqu'à « température
+     * atteinte » (15 min au plus) ; puis 2 × [25 s v10, 15 s v4 inverse] et 25 s v10 sans chauffe.
+     * Minuterie fixe comme l'appli d'origine : 15 min 30, puis 1 min 45.
+     */
+    fun smartNettoyageLong(label: String): JobSpec {
+        val avant = PhaseTimer.Fixed(30 + 15 * 60)
+        val apres = PhaseTimer.Fixed(2 * 40 + 25)
+        return etapes(JobKind.PROGRAM, label, app.toque.core.protocol.NETTOYAGE_MAX_S * 1000L, false,
+            etape(SmartProgram.NETTOYAGE_V10, 30_000, avant),
+            etape(SmartProgram.NETTOYAGE_CHAUFFE, 15 * 60_000L, avant, untilTemperature = true),
+            etape(SmartProgram.NETTOYAGE_V10, 25_000, apres), etape(SmartProgram.NETTOYAGE_V4_INVERSE, 15_000, apres),
+            etape(SmartProgram.NETTOYAGE_V10, 25_000, apres), etape(SmartProgram.NETTOYAGE_V4_INVERSE, 15_000, apres),
+            etape(SmartProgram.NETTOYAGE_FIN, 25_000, apres))
+    }
+
+    /** Smart : programme automatique de l'appli d'origine, une seule trame pendant [durationMs]. */
+    fun smartProgram(p: SmartProgram, durationMs: Long, label: String, hotBlendConfirmed: Boolean = false, celsius: Int? = null) = JobSpec(
+        kind = JobKind.PROGRAM,
+        label = label,
+        phases = listOf(Phase(programSetting(p, celsius), durationMs)),
+        totalMs = durationMs,
+        cyclic = false,
+        hotBlendConfirmed = hotBlendConfirmed,
+    )
+
+    /**
+     * Smart : Malaxer de l'appli d'origine, une seule trame (fonction 5, vitesse 4, sans chauffe) :
+     * sens normal pour les pâtes ferme et liquide, sens inverse pour la pâte molle (captures 08,
+     * 10 et 11). Gardé tel quel par [forSmart].
+     */
+    fun smartKnead(reverse: Boolean, durationMs: Long, label: String = JobKind.KNEAD.label) = JobSpec(
+        kind = JobKind.KNEAD,
+        label = label,
+        phases = listOf(Phase(Setting(Operation.KNEAD, 4, 0, if (reverse) CCW else CW), durationMs)),
+        totalMs = durationMs,
+        cyclic = false,
+    )
+
+    /**
+     * Monsieur Cuisine Smart : pétrin, vapeur et rissolage tels que l'appli d'origine les envoie
+     * (codes de fonction 5, 3 et 4, captures du 2026-11-20 et du 2026-11-21) :
+     *  - Malaxer : étapes du Malaxer pâte ferme ([smartMalaxerFerme]), sauf une trame unique déjà
+     *    au format du Smart (pâte liquide) ;
+     *  - Cuisson vapeur : une seule trame, 120 °C, vitesse 1, sens normal ;
+     *  - Saisir : étapes de [smartSaisir] (130 °C, 5 s vitesse 1 inverse / 30 s repos).
+     * Les autres programmes sont rendus tels quels. Durée et nom inchangés.
+     */
+    fun forSmart(spec: JobSpec): JobSpec {
+        // Programme à étapes de l'appli d'origine : déjà au format du Smart.
+        if (spec.phases.isNotEmpty() && spec.phases.all { it.setting.program != null }) return spec
+        val s = when (spec.kind) {
+            // Malaxer déjà au format du Smart ([smartKnead], pâte liquide) : gardé. Tout autre
+            // pétrissage (recettes) suit le Malaxer pâte ferme de l'appli d'origine.
+            JobKind.KNEAD -> spec.phases.singleOrNull()?.setting
+                ?.takeIf { it.operation == Operation.KNEAD && it.speed == 4 && it.temperatureLevel == 0 && !spec.cyclic }
+                ?: return smartMalaxerFerme(spec.totalMs, spec.label).copy(accessory = spec.accessory, hotBlendConfirmed = spec.hotBlendConfirmed)
+            JobKind.STEAM -> Setting(Operation.STEAM, 1, 17, CW)
+            // Rissoler / Saisir : rythme de l'appli d'origine (5 s vitesse 1 / 30 s repos, 130 °C).
+            JobKind.TOAST -> return smartSaisir(spec.totalMs, spec.label).copy(accessory = spec.accessory, hotBlendConfirmed = spec.hotBlendConfirmed)
+            else -> return spec
+        }
+        return spec.copy(phases = listOf(Phase(s, spec.totalMs)), cyclic = false)
+    }
 }

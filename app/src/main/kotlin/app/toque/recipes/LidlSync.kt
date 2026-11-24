@@ -10,6 +10,7 @@ import app.toque.Prefs
 import app.toque.core.i18n.I18n
 import app.toque.core.i18n.tr
 import app.toque.core.machine.RootShell
+import app.toque.core.recipes.McOnline
 import app.toque.core.recipes.OriginalDbMapper
 import java.io.File
 import java.text.SimpleDateFormat
@@ -45,7 +46,7 @@ class LidlSync(private val context: Context, private val prefs: Prefs, private v
         }
         val services = info.services?.map { it.name } ?: emptyList()
         return Components(
-            hardwareService = services.firstOrNull { it.endsWith("HardwareMachineService") },
+            hardwareService = services.firstOrNull { it.endsWith(prefs.robot.vendorHardwareService) },
             importService = services.firstOrNull { it.endsWith("RecipeImportService") },
             launch = pm.getLaunchIntentForPackage(pkg),
         )
@@ -129,8 +130,16 @@ class LidlSync(private val context: Context, private val prefs: Prefs, private v
         }
         writeDiagnostic(tables)
         progress(tr("Conversion…"))
-        val result = OriginalDbMapper.map(tables, "fr")
-        if (result.recipes.isEmpty()) return finish(Report(false, tr("Aucune recette lisible. Envoyez le fichier diagnostic-recettes.txt.")))
+        // La base stock tague LANGUAGE en code court (« es », « fr ») ; le réglage Toque
+        // est du type « es-ES ». On aligne sur la langue des recettes (pas l'UI : ca → es),
+        // avec repli sur la langue dominante de la base (robot FR + interface EN/DE).
+        val preferred = McOnline.recipeLanguage(I18n.code, prefs.recipeLanguage)
+            .substringBefore('-').lowercase()
+        val lang = OriginalDbMapper.stockLanguage(tables, preferred)
+        val result = OriginalDbMapper.map(tables, lang)
+        if (result.recipes.isEmpty()) {
+            return finish(Report(false, tr("Aucune recette lisible. Envoyez le fichier diagnostic-recettes.txt.")))
+        }
 
         progress(tr("Copie des photos…"))
         val img = repo.imagesDir.absolutePath

@@ -9,6 +9,8 @@
     <!-- Mes recettes : import et export dans le dossier Download. -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <!-- L'heure ne s'affiche qu'une fois le Wi-Fi connecté (TimeSync.showClock). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Installation des mises à jour sur un appareil non rooté (Android 8 et plus). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Bouton « Retour à Toque » par-dessus l'appli d'origine (le robot n'a pas de bouton Accueil). -->
@@ -21,6 +23,7 @@
         android:label="Toque"
         android:largeHeap="false"
         android:supportsRtl="false"
+        android:vmSafeMode="${vmSafeMode}"
         android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen">
 
         <activity

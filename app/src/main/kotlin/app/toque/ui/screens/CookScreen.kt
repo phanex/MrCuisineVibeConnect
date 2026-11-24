@@ -134,7 +134,20 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
         weighArmed = false
         a.prefs.guidedRecipe = recipe.id
         a.prefs.guidedStep = index
+        autoTare()
         render()
+    }
+
+    /**
+     * En arrivant sur une étape de pesée, la balance repart de zéro : on pèse ce qu'on ajoute, pas
+     * le contenu déjà dans le bol. Jamais pendant un programme, ni bol retiré quand le capteur est exigé
+     * (pas à l'ouverture de l'écran : une pesée reprise après coup garderait son poids).
+     */
+    private fun autoTare() {
+        val s = a.snapshot
+        if (recipe.steps.getOrNull(index)?.weigh == null || !a.prefs.autoTareSteps) return
+        if (!s.ready || s.busy || (a.prefs.requireBowl && !s.bowlDetected)) return
+        a.machine.tare(auto = true)
     }
 
     private fun render() {
@@ -197,7 +210,11 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
             StepProgram.STEAM -> Icon.Kind.STEAM
             StepProgram.TOAST -> Icon.Kind.FLAME
             StepProgram.TURBO -> Icon.Kind.BOLT
-            StepProgram.MANUAL -> Icon.Kind.POT
+            StepProgram.MANUAL, StepProgram.SLOW_COOK -> Icon.Kind.POT
+            StepProgram.MIXER -> Icon.Kind.SPEED
+            StepProgram.SMOOTHIE -> Icon.Kind.DROP
+            StepProgram.SOUS_VIDE -> Icon.Kind.THERMO
+            StepProgram.FERMENT -> Icon.Kind.TIMER
         }
         badge.addView(Icon(c, kindIcon, Ui.ACCENT), Ui.flp(Ui.u(28), Ui.u(28), Gravity.CENTER))
         head.addView(badge, LinearLayout.LayoutParams(Ui.u(48), Ui.u(48)).apply { rightMargin = Ui.u(12) })
@@ -207,6 +224,7 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
             StepProgram.STEAM -> JobKind.STEAM.label
             StepProgram.TOAST -> JobKind.TOAST.label
             StepProgram.TURBO -> JobKind.TURBO.label
+            StepProgram.MIXER, StepProgram.SMOOTHIE, StepProgram.SOUS_VIDE, StepProgram.SLOW_COOK, StepProgram.FERMENT -> m.program.label
         }, 22f, Ui.TEXT, Ui.MEDIUM))
         info.addView(head)
 
@@ -263,7 +281,7 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
         panelState?.text = panelInfo
         if (m.program == StepProgram.TURBO) {
             val t = HoldButton(c, tr("Maintenir pour Turbo"), onDown = {
-                a.machine.turboDown(m.accessory) { v -> if (!v.ok) a.refusal(v) }
+                a.turboDown(m.accessory)
             }, onUp = { a.machine.turboUp() })
             turboBtn = t
             startBtn = t

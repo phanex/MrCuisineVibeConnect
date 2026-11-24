@@ -4,15 +4,34 @@ import java.text.Normalizer
 
 object TextNorm {
     private val MARKS = Regex("\\p{Mn}+")
-    private val NON_ALNUM = Regex("[^a-z0-9]+")
+    private val NON_ALNUM = Regex("[^\\p{L}\\p{Nd}]+")
+    /**
+     * Apostrophe entre deux lettres cyrilliques (М'ясо → мясо). Plage explicite : Android 6 refuse
+     * `\p{IsCyrillic}` (U_ILLEGAL_ARGUMENT_ERROR). Compilée une fois, pas à chaque titre.
+     */
+    private val CYRILLIC_APOSTROPHE = Regex("(?<=[\u0400-\u04FF])['’ʼ`](?=[\u0400-\u04FF])")
     private val STOP = hashSetOf(
+        // Français (FR)
         "de", "du", "des", "la", "le", "les", "l", "d", "et", "a", "au", "aux", "en", "un", "une",
-        "pour", "sur", "par", "ou", "son", "sa", "ses", "mon", "ma", "mes", "the", "of", "with", "y",
-        "recette", "recettes",
+        "pour", "sur", "par", "ou", "son", "sa", "ses", "mon", "ma", "mes", "y", "recette", "recettes",
+        // Deutsch (DE)
+        "der", "die", "das", "den", "dem", "des", "ein", "eine", "einer", "eines", "einem", "einen",
+        "und", "oder", "mit", "fur", "von", "im", "am", "an", "auf", "aus", "zu", "zum", "zur", "rezept", "rezepte",
+        // English (EN)
+        "the", "of", "with", "for", "in", "on", "at", "and", "or", "to", "by", "from", "recipe", "recipes",
+        // Español (ES)
+        "el", "los", "las", "unos", "unas", "del", "con", "por", "para", "al", "receta", "recetas",
+        // Polski (PL)
+        "w", "z", "na", "do", "dla", "i", "oraz", "o", "po", "ze", "za", "od", "pod", "nad", "przepis", "przepisy",
+        // Українська (UK)
+        "і", "та", "в", "у", "на", "з", "із", "зі", "до", "для", "по", "за", "про", "від", "під", "над",
+        "як", "що", "або", "чи", "не", "це", "рецепт", "рецепти",
     )
 
     fun normalize(s: String): String {
         var t = s.lowercase().replace("œ", "oe").replace("æ", "ae").replace("ß", "ss")
+            .replace("ł", "l")
+            .replace(CYRILLIC_APOSTROPHE, "")
         t = Normalizer.normalize(t, Normalizer.Form.NFD)
         t = MARKS.replace(t, "")
         t = NON_ALNUM.replace(t, " ")
@@ -176,12 +195,13 @@ class SearchIndex(recipes: List<Recipe>) {
         return true
     }
 
-    fun search(query: String, filter: RecipeFilter = RecipeFilter(), limit: Int = 500): List<Hit> {
+    fun search(query: String, filter: RecipeFilter = RecipeFilter(), limit: Int = 0): List<Hit> {
         val tokens = TextNorm.tokens(query).distinct()
         if (tokens.isEmpty()) {
-            return entries.filter { accepts(it, filter) }
+            val list = entries.filter { accepts(it, filter) }
                 .sortedWith(compareByDescending<Entry> { it.favorite }.thenBy { it.normTitle })
-                .take(limit).map { Hit(it, 0.0, 0) }
+            val limited = if (limit > 0) list.take(limit) else list
+            return limited.map { Hit(it, 0.0, 0) }
         }
         val perToken = tokens.map { tok ->
             val scores = HashMap<Int, Double>()
@@ -214,7 +234,8 @@ class SearchIndex(recipes: List<Recipe>) {
         }
         val full = hits.filter { it.matched == tokens.size }
         val result = if (full.isNotEmpty()) full else hits
-        return result.sortedWith(compareByDescending<Hit> { it.score }.thenBy { it.entry.normTitle }).take(limit)
+        val sorted = result.sortedWith(compareByDescending<Hit> { it.score }.thenBy { it.entry.normTitle })
+        return if (limit > 0) sorted.take(limit) else sorted
     }
 
     /** « Qu'est-ce que je peux faire avec… » : classe par nombre d'ingrédients présents. */

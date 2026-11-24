@@ -1,5 +1,7 @@
 package app.toque.ui.screens
 
+import app.toque.core.protocol.SmartProgram
+import app.toque.core.robot.RobotProfiles
 import android.content.Context
 import android.text.Editable
 import android.text.InputType
@@ -384,10 +386,15 @@ class RecipeEditScreen(a: MainActivity, start: Recipe, private val isNew: Boolea
         // Retour sur la fiche de cette recette : elle est remplacée par la nouvelle version.
         val page = a.current as? RecipeScreen
         if (page != null && page.recipe.id == r.id) a.replace(RecipeScreen(a, saved)) else a.push(RecipeScreen(a, saved))
+        // Compte toqueapp.org relié : mise à jour en ligne, ou proposer de la publier.
+        SitePublish.afterSave(a, saved)
     }
 
     private fun delete() {
-        a.confirm(tr("Supprimer la recette"), tr("« %s » sera supprimée de ce robot, avec sa note et ses corrections.", draft.title.ifBlank { tr("Sans titre") }),
+        val name = draft.title.ifBlank { tr("Sans titre") }
+        a.confirm(tr("Supprimer la recette"), if (a.app.site.isOnline(draft.id))
+            tr("« %s » sera supprimée de ce robot, avec sa note et ses corrections. Elle reste sur toqueapp.org : supprimez-la depuis le site si besoin.", name)
+            else tr("« %s » sera supprimée de ce robot, avec sa note et ses corrections.", name),
             tr("Supprimer"), danger = true, icon = Icon.Kind.TRASH) {
             a.app.recipes.deleteUser(draft.id)
             dirty = false
@@ -476,6 +483,12 @@ class StepEditScreen(
             StepProgram.STEAM -> StepMachine(StepProgram.STEAM, seconds = 20 * 60)
             StepProgram.TOAST -> StepMachine(StepProgram.TOAST, seconds = 7 * 60)
             StepProgram.TURBO -> StepMachine(StepProgram.TURBO, pulses = 3)
+            // Programmes du Smart : durée et température par défaut de l'appli d'origine (raisonnables).
+            StepProgram.MIXER -> StepMachine(StepProgram.MIXER, seconds = 30)
+            StepProgram.SMOOTHIE -> StepMachine(StepProgram.SMOOTHIE, seconds = 60)
+            StepProgram.SOUS_VIDE -> StepMachine(StepProgram.SOUS_VIDE, seconds = 3600, tempC = 60)
+            StepProgram.SLOW_COOK -> StepMachine(StepProgram.SLOW_COOK, seconds = 2 * 3600, tempC = 90)
+            StepProgram.FERMENT -> StepMachine(StepProgram.FERMENT, seconds = 8 * 3600, tempC = 40)
         }
         renderSetting()
         if (p == StepProgram.MANUAL && m?.program != StepProgram.MANUAL) openManual()
@@ -489,10 +502,10 @@ class StepEditScreen(
         val box = settingBox
         box.removeAllViews()
         val m = machine
-        val choices = listOf<Pair<StepProgram?, String>>(
-            null to tr("Aucun"), StepProgram.MANUAL to JobKind.MANUAL.label, StepProgram.KNEAD to JobKind.KNEAD.label,
-            StepProgram.STEAM to JobKind.STEAM.label, StepProgram.TOAST to JobKind.TOAST.label, StepProgram.TURBO to JobKind.TURBO.label,
-        )
+        // Seulement ce que le robot choisi sait faire (le Smart a ses programmes en plus).
+        val caps = RobotProfiles.active.capabilities
+        val choices = listOf<Pair<StepProgram?, String>>(null to tr("Aucun")) +
+            StepProgram.values().filter { caps.has(it.feature) || it == m?.program }.map { it to it.label }
         for (row in choices.chunked(3)) {
             val line = Ui.horizontal(c)
             for ((p, label) in row) line.addView(Ui.toggleChip(c, label, m?.program == p) { program(p) }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 8))
@@ -530,6 +543,29 @@ class StepEditScreen(
                     else -> tr("Pâtes à pain, pizza, brioche. Alterne sens inverse et normal à vitesse 4.")
                 }
                 box.addView(Ui.text(c, hint, 15f, Ui.TEXT3).apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 10))
+            }
+            StepProgram.MIXER, StepProgram.SMOOTHIE, StepProgram.SOUS_VIDE, StepProgram.SLOW_COOK, StepProgram.FERMENT -> {
+                // Bornes de l'appli d'origine du Smart pour ce programme.
+                val sp = when (m.program) {
+                    StepProgram.MIXER -> SmartProgram.MIXER
+                    StepProgram.SMOOTHIE -> SmartProgram.SMOOTHIE
+                    StepProgram.SOUS_VIDE -> SmartProgram.SOUS_VIDE
+                    StepProgram.SLOW_COOK -> SmartProgram.MIJOTER_BRASSE
+                    else -> SmartProgram.FERMENTER_BRASSE
+                }
+                val step = if (sp.maxS <= 600) 10 else if (sp.maxS <= 3 * 3600) 5 * 60 else 15 * 60
+                box.addView(Edit.label(c, tr("Durée")), Ui.lp(t = 10))
+                box.addView(Edit.stepper(c, Ui.clock(m.seconds * 1000L), m.seconds - step >= sp.minS, m.seconds + step <= sp.maxS,
+                    { set(m.copy(seconds = (m.seconds - step).coerceAtLeast(sp.minS))) },
+                    { set(m.copy(seconds = (m.seconds + step).coerceAtMost(sp.maxS))) }), Ui.lp(Ui.WRAP, Ui.WRAP, t = 6))
+                if (m.program.heated) {
+                    box.addView(Edit.label(c, tr("Température")), Ui.lp(t = 10))
+                    box.addView(Edit.stepper(c, "${m.tempC} °C", m.tempC > sp.minCelsius, m.tempC < sp.maxCelsius,
+                        { set(m.copy(tempC = (m.tempC - 1).coerceAtLeast(sp.minCelsius))) },
+                        { set(m.copy(tempC = (m.tempC + 1).coerceAtMost(sp.maxCelsius))) }), Ui.lp(Ui.WRAP, Ui.WRAP, t = 6))
+                }
+                box.addView(Ui.text(c, tr("Programme du Monsieur Cuisine Smart, comme sur son appli d'origine."), 15f, Ui.TEXT3)
+                    .apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 10))
             }
         }
         m?.violations()?.firstOrNull()?.let { v -> box.addView(Ui.text(c, v.message, 16f, Ui.WARN), Ui.lp(t = 10)) }

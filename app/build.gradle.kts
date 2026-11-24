@@ -13,10 +13,15 @@ android {
         applicationId = "app.toque"
         minSdk = 23          // Android 6.0, celui du Monsieur Cuisine Connect
         targetSdk = 28
-        // Pour publier une mise à jour : augmenter les deux valeurs puis pousser sur GitHub
-        // (la version est publiée automatiquement, voir .github/workflows/release.yml).
-        versionCode = 11
-        versionName = "0.7.1"
+        // Pour publier une mise à jour : augmenter les deux valeurs. Chaque version a deux APK, de la même
+        // source : Toque-x.y.z.apk (Connect) et Toque-smart-x.y.z.apk (gradlew -PtoqueSmart=true, Smart).
+        // L'outil de mise à jour prend celui de son robot (Releases.parse).
+        versionCode = 16
+        versionName = "0.8.2"
+        // APK du Monsieur Cuisine Smart (gradlew -PtoqueSmart=true) : le JIT d'Android 8.1 de sa tablette
+        // compile mal certaines expressions Kotlin (portages Flav974 et Camybrith) ; le mode sûr le
+        // contourne mais ralentit toute l'appli. Jamais dans l'APK du Connect.
+        manifestPlaceholders["vmSafeMode"] = (project.findProperty("toqueSmart") == "true").toString()
     }
 
     signingConfigs {

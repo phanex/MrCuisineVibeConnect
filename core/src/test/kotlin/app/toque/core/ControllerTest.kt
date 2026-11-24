@@ -445,4 +445,20 @@ class ControllerTest {
         assertEquals(0, b.c.tick()[4].toInt())
         assertEquals(Mcc.TX_SIZE, frame.size)
     }
+
+    @Test fun scaleStabilityIsComputedFromJitter() {
+        val b = Bench().ready()
+        b.board.contentWeightG = 0
+        b.step(1_000)
+        assertTrue(b.snap.scaleStable)
+
+        b.board.contentWeightG = 500
+        b.step(100)
+        assertFalse(b.snap.scaleStable)
+
+        b.step(2_000)
+        assertTrue(b.snap.scaleStable)
+        // La balance simulée tend vers 500 g sans forcément l'atteindre (troncature) : à 2 g près.
+        assertTrue("poids ${b.snap.weightG}", kotlin.math.abs(b.snap.weightG - 500) <= 2)
+    }
 }

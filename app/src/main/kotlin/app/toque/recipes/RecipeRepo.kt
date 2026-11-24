@@ -6,10 +6,13 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import android.os.Handler
 import android.os.Looper
+import app.toque.core.recipes.CommunityRecipes
 import app.toque.core.recipes.Recipe
 import app.toque.core.recipes.RecipeAdjustments
 import app.toque.core.recipes.RecipeCodec
 import app.toque.core.recipes.RecipeSource
+import app.toque.core.robot.RecipeCompat
+import app.toque.core.robot.RobotProfiles
 import app.toque.core.recipes.SearchIndex
 import app.toque.core.recipes.UserRecipes
 import app.toque.core.recipes.adjusted
@@ -49,6 +52,9 @@ class RecipeRepo(private val context: Context) {
         private set
     @Volatile var loaded = false
         private set
+    /** Recettes enregistrées mais pas faisables sur le robot choisi : pas montrées (voir [RecipeCompat]). */
+    @Volatile var hiddenCount = 0
+        private set
     private val favorites = HashSet<String>()
     /** Une recette cuisinée [count] fois, la dernière à [lastMs]. */
     class Usage(val count: Int, val lastMs: Long)
@@ -74,6 +80,8 @@ class RecipeRepo(private val context: Context) {
         val favs = HashSet<String>()
         db.rawQuery("SELECT id FROM favorites", null).use { c -> while (c.moveToNext()) favs += c.getString(0) }
         val list = ArrayList<Recipe>()
+        val robot = RobotProfiles.active
+        var hidden = 0
         db.rawQuery("SELECT json FROM recipes", null).use { c ->
             while (c.moveToNext()) {
                 val r = try {
@@ -81,9 +89,20 @@ class RecipeRepo(private val context: Context) {
                 } catch (_: Exception) {
                     null
                 } ?: continue
+                // Seulement les recettes que ce robot sait faire (programmes, températures, robots du site).
+                val ok = try {
+                    RecipeCompat.supports(r, robot)
+                } catch (_: Exception) {
+                    false
+                }
+                if (!ok) {
+                    hidden++
+                    continue
+                }
                 list += r.copy(favorite = r.id in favs)
             }
         }
+        hiddenCount = hidden
         synchronized(favorites) {
             favorites.clear()
             favorites += favs
@@ -162,10 +181,33 @@ class RecipeRepo(private val context: Context) {
         }
     }
 
+    /** Plusieurs favoris d'un coup (favoris du compte toqueapp.org), un seul rechargement. */
+    fun setFavorites(changes: Map<String, Boolean>) {
+        if (changes.isEmpty()) return
+        synchronized(favorites) { for ((id, on) in changes) if (on) favorites += id else favorites -= id }
+        exec.submit {
+            val db = helper.writableDatabase
+            db.beginTransaction()
+            try {
+                for ((id, on) in changes) {
+                    if (on) db.execSQL("INSERT OR IGNORE INTO favorites (id) VALUES (?)", arrayOf(id))
+                    else db.execSQL("DELETE FROM favorites WHERE id = ?", arrayOf(id))
+                }
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
+            }
+            rebuild()
+        }.get()
+    }
+
+    /** Favoris parmi les recettes de la communauté. */
+    fun communityFavorites(): Set<String> = synchronized(favorites) { favorites.filterTo(HashSet()) { CommunityRecipes.isCommunity(it) } }
+
     /**
      * Remplace tout le catalogue Lidl par l'import du jour (miroir de l'appli d'origine).
      * Les favoris sont conservés ; ceux marqués dans l'appli d'origine sont ajoutés.
-     * Les recettes perso restent.
+     * Les recettes perso et celles de la communauté (toqueapp.org) restent.
      */
     fun replaceAll(recipes: List<Recipe>) {
         exec.submit { replaceAllNow(recipes) }.get()
@@ -176,7 +218,7 @@ class RecipeRepo(private val context: Context) {
         val before = titles(db)
         db.beginTransaction()
         try {
-            db.delete("recipes", "id NOT LIKE ?", arrayOf(UserRecipes.ID_PREFIX + "%"))
+            db.delete("recipes", "id NOT LIKE ? AND id NOT LIKE ?", arrayOf(UserRecipes.ID_PREFIX + "%", CommunityRecipes.ID_PREFIX + "%"))
             val now = System.currentTimeMillis()
             for (r in recipes) {
                 val v = ContentValues()
@@ -188,7 +230,7 @@ class RecipeRepo(private val context: Context) {
                 if (r.favorite) db.execSQL("INSERT OR IGNORE INTO favorites (id) VALUES (?)", arrayOf(r.id))
             }
             val kept = recipes.map { it.id }.toHashSet()
-            carryOver(db, before.filterKeys { it !in kept && !UserRecipes.isUser(it) })
+            carryOver(db, before.filterKeys { it !in kept && isLidl(it) })
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -226,11 +268,14 @@ class RecipeRepo(private val context: Context) {
         out
     }.get()
 
-    /** Supprime les recettes Lidl absentes de [keep] (catalogue miroir de la source) ; jamais les recettes perso. */
+    /**
+     * Supprime les recettes Lidl absentes de [keep] (catalogue miroir de la source) ; jamais les
+     * recettes perso ni celles de la communauté.
+     */
     fun removeAllExcept(keep: Set<String>, rebuild: Boolean = true) {
         exec.submit {
             val db = helper.writableDatabase
-            val gone = titles(db).filterKeys { it !in keep && !UserRecipes.isUser(it) }
+            val gone = titles(db).filterKeys { it !in keep && isLidl(it) }
             db.beginTransaction()
             try {
                 for (id in gone.keys) db.delete("recipes", "id = ?", arrayOf(id))
@@ -242,6 +287,32 @@ class RecipeRepo(private val context: Context) {
             if (rebuild) rebuild()
         }.get()
     }
+
+    /** Identifiants des recettes de la communauté enregistrées. */
+    fun communityIds(): Set<String> = ids().filterTo(HashSet()) { CommunityRecipes.isCommunity(it) }
+
+    /**
+     * Retire les recettes de la communauté absentes de [keep] (retirées du site ou dépubliées), sauf
+     * les favorites : une recette mise en favori reste jusqu'à ce qu'on l'enlève des favoris.
+     * Leurs notes, corrections et cuissons restent, pour le jour où elles reviennent.
+     */
+    fun removeCommunityExcept(keep: Set<String>) {
+        exec.submit {
+            val db = helper.writableDatabase
+            val gone = titles(db).keys.filter { CommunityRecipes.isCommunity(it) && it !in keep && !isFavorite(it) }
+            if (gone.isEmpty()) return@submit
+            db.beginTransaction()
+            try {
+                for (id in gone) db.delete("recipes", "id = ?", arrayOf(id))
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
+            }
+            rebuild()
+        }.get()
+    }
+
+    private fun isLidl(id: String) = !UserRecipes.isUser(id) && !CommunityRecipes.isCommunity(id)
 
     /**
      * Enregistre une recette perso (nouvelle ou modifiée). La ligne est écrite tout de suite (la
@@ -371,6 +442,9 @@ class RecipeRepo(private val context: Context) {
     fun refresh() {
         exec.submit { rebuild() }.get()
     }
+
+    /** Des photos sont arrivées : les écrans ouverts se redessinent. */
+    fun photosChanged() = notifyChanged()
 
     fun imageFile(name: String): File? {
         if (name.isBlank()) return null

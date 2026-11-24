@@ -18,24 +18,111 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 
-/** Thème sombre et utilitaires de mise en page, à l'échelle d'un écran de référence 1024×600. */
+/**
+ * Thème et utilitaires de mise en page, à l'échelle d'un écran de référence 1024×600.
+ * Couleurs de base (fond, texte…) selon [light] ; accent choisi via [setAccent].
+ */
 object Ui {
-    // Fond bleu nuit (dégradé, voir background()) et surfaces bleutées assorties.
-    const val BG = 0xFF0A1322.toInt()
-    const val SURFACE = 0xFF131D2E.toInt()
-    const val SURFACE2 = 0xFF1A2639.toInt()
-    const val SURFACE3 = 0xFF223048.toInt()
-    const val STROKE = 0xFF2A3A55.toInt()
-    const val TEXT = 0xFFF3F5F9.toInt()
-    const val TEXT2 = 0xFF9CA8BC.toInt()
-    const val TEXT3 = 0xFF66738A.toInt()
-    const val ACCENT = 0xFFFF8A3D.toInt()
-    const val ACCENT_DIM = 0x33FF8A3D
+    /** Couleurs d'accent (Réglages › Couleur). La première est celle d'origine. */
+    val ACCENTS = intArrayOf(
+        0xFFFF8A3D.toInt(), // orange
+        0xFFFFB547.toInt(), // safran
+        0xFFE8D44D.toInt(), // citron
+        0xFF8BD85F.toInt(), // pistache
+        0xFF3DDCB0.toInt(), // menthe
+        0xFF4FC3F7.toInt(), // ciel
+        0xFF6E9BFF.toInt(), // bleuet
+        0xFFB48CFF.toInt(), // lavande
+        0xFFF2639A.toInt(), // framboise
+        0xFFFF6F61.toInt(), // corail
+    )
+
+    var light = false
+        private set
+
+    var BG = 0xFF0A1322.toInt()
+        private set
+    var SURFACE = 0xFF131D2E.toInt()
+        private set
+    var SURFACE2 = 0xFF1A2639.toInt()
+        private set
+    var SURFACE3 = 0xFF223048.toInt()
+        private set
+    var STROKE = 0xFF2A3A55.toInt()
+        private set
+    var TEXT = 0xFFF3F5F9.toInt()
+        private set
+    var TEXT2 = 0xFF9CA8BC.toInt()
+        private set
+    var TEXT3 = 0xFF66738A.toInt()
+        private set
+    var SCRIM = 0xCC000000.toInt()
+        private set
+    private var bgGradient = intArrayOf(0xFF16294A.toInt(), 0xFF0D1A31.toInt(), 0xFF070E1B.toInt())
+    private var rippleColor = 0x33FFFFFF
+    private var placeholders = intArrayOf(
+        0xFF3A2416.toInt(), 0xFF16302A.toInt(), 0xFF2B2140.toInt(), 0xFF3B1E26.toInt(),
+        0xFF1C2B3E.toInt(), 0xFF35301A.toInt(), 0xFF1E3320.toInt(), 0xFF3A2A1C.toInt(),
+    )
+
     const val COOL = 0xFF5CC8FF.toInt()
     const val OK = 0xFF3DDC97.toInt()
     const val WARN = 0xFFFFC14D.toInt()
     const val DANGER = 0xFFFF5A5F.toInt()
-    const val SCRIM = 0xCC000000.toInt()
+
+    var ACCENT = ACCENTS[0]
+        private set
+    var ACCENT_DIM = 0x33FF8A3D
+        private set
+    /** Texte posé sur l'accent (boutons primaires, puces sélectionnées). */
+    var ON_ACCENT = 0xFF1A0E05.toInt()
+        private set
+
+    fun setAccent(color: Int) {
+        val c = if (color in ACCENTS) color else ACCENTS[0]
+        ACCENT = c
+        ACCENT_DIM = (c and 0x00FFFFFF) or 0x33000000
+        fun dark(ch: Int) = (((c shr ch) and 0xFF) * 0.12f).toInt() shl ch
+        ON_ACCENT = (0xFF shl 24) or dark(16) or dark(8) or dark(0)
+    }
+
+    /** Applique le thème clair ou sombre (fond, surfaces, texte). L'accent est inchangé. */
+    fun setTheme(lightTheme: Boolean) {
+        light = lightTheme
+        if (lightTheme) {
+            BG = 0xFFF3F5F8.toInt()
+            SURFACE = 0xFFFFFFFF.toInt()
+            SURFACE2 = 0xFFEBEEF3.toInt()
+            SURFACE3 = 0xFFDEE3EB.toInt()
+            STROKE = 0xFFC5CDD9.toInt()
+            TEXT = 0xFF1A2332.toInt()
+            TEXT2 = 0xFF5A6578.toInt()
+            TEXT3 = 0xFF8B95A8.toInt()
+            SCRIM = 0x99000000.toInt()
+            bgGradient = intArrayOf(0xFFF7F8FB.toInt(), 0xFFEEF1F6.toInt(), 0xFFE4E9F1.toInt())
+            rippleColor = 0x22000000
+            placeholders = intArrayOf(
+                0xFFE8D5C4.toInt(), 0xFFC5DDD4.toInt(), 0xFFD4CDE4.toInt(), 0xFFE4CCD2.toInt(),
+                0xFFC8D5E4.toInt(), 0xFFE0DBC4.toInt(), 0xFFC9DEC9.toInt(), 0xFFE4D4C4.toInt(),
+            )
+        } else {
+            BG = 0xFF0A1322.toInt()
+            SURFACE = 0xFF131D2E.toInt()
+            SURFACE2 = 0xFF1A2639.toInt()
+            SURFACE3 = 0xFF223048.toInt()
+            STROKE = 0xFF2A3A55.toInt()
+            TEXT = 0xFFF3F5F9.toInt()
+            TEXT2 = 0xFF9CA8BC.toInt()
+            TEXT3 = 0xFF66738A.toInt()
+            SCRIM = 0xCC000000.toInt()
+            bgGradient = intArrayOf(0xFF16294A.toInt(), 0xFF0D1A31.toInt(), 0xFF070E1B.toInt())
+            rippleColor = 0x33FFFFFF
+            placeholders = intArrayOf(
+                0xFF3A2416.toInt(), 0xFF16302A.toInt(), 0xFF2B2140.toInt(), 0xFF3B1E26.toInt(),
+                0xFF1C2B3E.toInt(), 0xFF35301A.toInt(), 0xFF1E3320.toInt(), 0xFF3A2A1C.toInt(),
+            )
+        }
+    }
 
     val LIGHT: Typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
     val THIN: Typeface = Typeface.create("sans-serif-thin", Typeface.NORMAL)
@@ -66,7 +153,7 @@ object Ui {
             if (strokeWidth > 0) setStroke(u(strokeWidth), strokeColor)
         }
 
-    fun pressable(base: Drawable, radius: Float, ripple: Int = 0x33FFFFFF): Drawable =
+    fun pressable(base: Drawable, radius: Float, ripple: Int = rippleColor): Drawable =
         RippleDrawable(ColorStateList.valueOf(ripple), base, round(Color.WHITE, radius))
 
     fun text(c: Context, s: CharSequence = "", size: Float = 18f, color: Int = TEXT, face: Typeface = REGULAR): TextView =
@@ -164,7 +251,7 @@ object Ui {
     fun button(c: Context, label: String, style: Style = Style.SECONDARY, icon: Icon.Kind? = null,
                height: Int = 64, textSize: Float = 20f, onClick: (View) -> Unit): LinearLayout {
         val (bg, fg) = when (style) {
-            Style.PRIMARY -> ACCENT to 0xFF1A0E05.toInt()
+            Style.PRIMARY -> ACCENT to ON_ACCENT
             Style.SECONDARY -> SURFACE3 to TEXT
             Style.DANGER -> DANGER to Color.WHITE
             Style.GHOST -> Color.TRANSPARENT to TEXT2
@@ -206,7 +293,7 @@ object Ui {
 
     /** Puce sélectionnable (filtres, choix). */
     fun toggleChip(c: Context, label: String, selected: Boolean, onClick: () -> Unit): TextView {
-        val t = text(c, label, 17f, if (selected) 0xFF1A0E05.toInt() else TEXT, MEDIUM)
+        val t = text(c, label, 17f, if (selected) ON_ACCENT else TEXT, MEDIUM)
         t.setPadding(u(18), u(10), u(18), u(10))
         t.background = pressable(if (selected) round(ACCENT, 40f) else round(SURFACE2, 40f, STROKE, 1f), 40f)
         t.isClickable = true
@@ -241,13 +328,9 @@ object Ui {
 
     /** Couleur de repli stable pour une vignette de recette sans photo. */
     fun placeholderColors(seed: String): IntArray {
-        val palette = intArrayOf(
-            0xFF3A2416.toInt(), 0xFF16302A.toInt(), 0xFF2B2140.toInt(), 0xFF3B1E26.toInt(),
-            0xFF1C2B3E.toInt(), 0xFF35301A.toInt(), 0xFF1E3320.toInt(), 0xFF3A2A1C.toInt(),
-        )
-        val i = Math.abs(seed.hashCode()) % palette.size
-        val a = palette[i]
-        val b = palette[(i + 3) % palette.size]
+        val i = Math.abs(seed.hashCode()) % placeholders.size
+        val a = placeholders[i]
+        val b = placeholders[(i + 3) % placeholders.size]
         return intArrayOf(a, b)
     }
 
@@ -256,9 +339,9 @@ object Ui {
         return words.take(2).joinToString("") { it.first().uppercaseChar().toString() }.ifEmpty { title.take(1).uppercase() }
     }
 
-    /** Fond de l'appli : dégradé bleu nuit en diagonale, plus clair en haut à gauche. */
+    /** Fond de l'appli : dégradé selon le thème. */
     fun background(): GradientDrawable =
-        GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF16294A.toInt(), 0xFF0D1A31.toInt(), 0xFF070E1B.toInt()))
+        GradientDrawable(GradientDrawable.Orientation.TL_BR, bgGradient.copyOf())
 
     fun gradient(colors: IntArray, radius: Float): GradientDrawable =
         GradientDrawable(GradientDrawable.Orientation.TL_BR, colors).apply { setCornerRadius(uf(radius)) }
