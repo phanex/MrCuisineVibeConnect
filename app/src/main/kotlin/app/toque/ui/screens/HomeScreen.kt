@@ -16,6 +16,8 @@ import app.toque.ui.MachineBar
 import app.toque.ui.KnobFocus
 import app.toque.ui.MainActivity
 import app.toque.ui.Screen
+import app.toque.ui.TimerPanel
+import app.toque.ui.Timers
 import app.toque.ui.TouchWatch
 import app.toque.ui.Ui
 import app.toque.ui.WallClock
@@ -41,6 +43,9 @@ class HomeScreen(a: MainActivity) : Screen(a) {
     private lateinit var lidIcon: Icon
     private lateinit var faultIcon: Icon
     private lateinit var modeIcon: Icon
+    private lateinit var timerChip: LinearLayout
+    private lateinit var timerText: TextView
+    private lateinit var timerCount: TextView
     private lateinit var searchHint: TextView
     /** Titre de la recette guidée cherché dans la base (catalogue pas encore chargé) : une fois par recette. */
     private var titleLookup = ""
@@ -49,6 +54,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
     private lateinit var recipesTile: View
     private val knob by lazy { KnobFocus(view, HomeKnob()) }
     private var unsub: (() -> Unit)? = null
+    private var unsubTimers: (() -> Unit)? = null
     /** Ce qui s'adapte dans une tuile quand la barre du bas lui prend de la hauteur. */
     private class TileParts(val top: View, val text: View, val sub: TextView)
     private val tiles = ArrayList<TileParts>()
@@ -75,10 +81,28 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         greeting = Ui.text(c, "", 24f, Ui.TEXT2, Ui.LIGHT)
         headerRow.addView(greeting, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
 
-        // Cluster de statut compact réservé (température, couvercle, etc.)
+        // Cluster de statut compact réservé (minuteur, température, couvercle, etc.)
         val statusCluster = Ui.horizontal(c, Gravity.CENTER_VERTICAL).apply {
             minimumHeight = Ui.u(38)
         }
+        timerChip = Ui.horizontal(c, Gravity.CENTER_VERTICAL).apply {
+            setPadding(Ui.u(10), Ui.u(4), Ui.u(10), Ui.u(4))
+            background = Ui.pressable(Ui.round(Ui.ACCENT_DIM, 14f, Ui.ACCENT, 1.5f), 14f)
+            addView(Icon(c, Icon.Kind.TIMER, Ui.ACCENT), LinearLayout.LayoutParams(Ui.u(18), Ui.u(18)).apply { rightMargin = Ui.u(6) })
+            timerText = Ui.text(c, "", 15f, Ui.ACCENT, Ui.MEDIUM)
+            addView(timerText)
+            timerCount = Ui.text(c, "", 13f, Ui.ON_ACCENT, Ui.BOLD).apply {
+                gravity = Gravity.CENTER
+                background = Ui.round(Ui.ACCENT, 10f)
+                minWidth = Ui.u(20)
+                setPadding(Ui.u(4), 0, Ui.u(4), 0)
+            }
+            addView(timerCount, LinearLayout.LayoutParams(Ui.WRAP, Ui.u(20)).apply { leftMargin = Ui.u(6) })
+            visibility = View.GONE
+            isClickable = true
+            setOnClickListener { TimerPanel.open(a) }
+        }
+        statusCluster.addView(timerChip, LinearLayout.LayoutParams(Ui.WRAP, Ui.WRAP).apply { rightMargin = Ui.u(8) })
         val tempChip = Ui.horizontal(c, Gravity.CENTER_VERTICAL).apply {
             setPadding(Ui.u(10), Ui.u(4), Ui.u(10), Ui.u(4))
             background = Ui.round(Ui.SURFACE2, 14f, Ui.STROKE, 1f)
@@ -253,10 +277,17 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         // Espacement flexible inférieur
         left.addView(Ui.spacer(c, weight = 1f))
 
+        val bottomActions = Ui.horizontal(c, Gravity.CENTER_VERTICAL)
         val turbo = HoldButton(c, tr("Turbo"), onDown = {
             a.machine.turboDown(Accessory.BLADE) { v -> if (!v.ok) a.refusal(v) }
         }, onUp = { a.machine.turboUp() })
-        left.addView(turbo, LinearLayout.LayoutParams(Ui.WRAP, Ui.u(54)).apply {
+        bottomActions.addView(turbo, LinearLayout.LayoutParams(Ui.WRAP, Ui.u(54)))
+        val timerBtn = Ui.button(c, tr("Minuteur"), Ui.Style.SECONDARY, Icon.Kind.TIMER, height = 54, textSize = 18f) {
+            TimerPanel.open(a)
+        }
+        bottomActions.addView(timerBtn, LinearLayout.LayoutParams(Ui.WRAP, Ui.u(54)).apply { leftMargin = Ui.u(12) })
+        knobTargets += timerBtn to 27f
+        left.addView(bottomActions, LinearLayout.LayoutParams(Ui.WRAP, Ui.WRAP).apply {
             gravity = Gravity.CENTER_HORIZONTAL
         })
         root.addView(left, LinearLayout.LayoutParams(0, Ui.MATCH, 0.42f).apply { rightMargin = Ui.u(28) })
@@ -460,7 +491,9 @@ class HomeScreen(a: MainActivity) : Screen(a) {
     override fun onShow() {
         refreshClock()
         refresh()
+        refreshTimers()
         unsub = a.app.recipes.onChange { refresh() }
+        unsubTimers = Timers.of(a).listen { refreshTimers() }
         a.updates.onChange = { refresh() }
         view.removeCallbacks(tick)
         view.postDelayed(tick, WallClock.nextMs(a, 10_000))
@@ -470,8 +503,23 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         // De retour sur l'accueil, le premier cran repart de la recette en cours (ou de « Recettes »).
         knob.reset()
         unsub?.invoke()
+        unsubTimers?.invoke()
+        unsubTimers = null
         a.updates.onChange = null
         view.removeCallbacks(tick)
+    }
+
+    private fun refreshTimers() {
+        if (!::timerChip.isInitialized) return
+        val t = Timers.of(a)
+        val running = t.running
+        val first = running.firstOrNull()
+        timerChip.visibility = if (first == null) View.GONE else View.VISIBLE
+        if (first == null) return
+        val text = Ui.clock(first.remaining(t.now()))
+        if (timerText.text.toString() != text) timerText.text = text
+        timerCount.text = running.size.toString()
+        timerCount.visibility = if (running.size > 1) View.VISIBLE else View.GONE
     }
 
     /** Retire la recette en cours de l'accueil (sans toucher à un programme qui tourne). */
