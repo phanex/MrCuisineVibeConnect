@@ -68,6 +68,7 @@ class RecipesScreen(
     private lateinit var input: EditText
     private lateinit var chips: LinearLayout
     private lateinit var grid: GridView
+    private lateinit var count: TextView
     private lateinit var empty: LinearLayout
     private lateinit var emptyText: TextView
     private var refreshBtn: View? = null
