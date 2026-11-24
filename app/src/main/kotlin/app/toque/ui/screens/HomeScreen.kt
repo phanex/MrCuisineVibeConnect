@@ -38,6 +38,8 @@ class HomeScreen(a: MainActivity) : Screen(a) {
     private lateinit var lidIcon: Icon
     private lateinit var faultIcon: Icon
     private lateinit var modeIcon: Icon
+    private val tiles = mutableListOf<LinearLayout>()
+    private var selectedTile = 1
     private var unsub: (() -> Unit)? = null
     private val tick = object : Runnable {
         override fun run() {
@@ -241,21 +243,27 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         })
         root.addView(left, LinearLayout.LayoutParams(0, Ui.MATCH, 0.42f).apply { rightMargin = Ui.u(28) })
 
+        tiles.clear()
         val grid = Ui.vertical(c)
         val row1 = Ui.horizontal(c)
         val row2 = Ui.horizontal(c)
-        val (t1, s1) = tile(Icon.Kind.BOOK, tr("Recettes")) { a.push(RecipesScreen(a)) }
+        val (t1, s1) = tile(0, Icon.Kind.BOOK, tr("Recettes")) { a.push(RecipesScreen(a)) }
         recipesSub = s1
         row1.addView(t1, tileLp(true))
-        row1.addView(tile(Icon.Kind.POT, tr("Cuisson\nmanuelle"), tr("Ajuster à la main")) { a.push(ManualScreen(a)) }.first, tileLp(true))
-        row1.addView(tile(Icon.Kind.KNEAD, tr("Programmes"), tr("Pétrir, vapeur, rissoler, nettoyage")) { a.push(ProgramsScreen(a)) }.first, tileLp(false))
-        row2.addView(tile(Icon.Kind.SCALE, tr("Balance"), tr("Peser au gramme")) { a.push(ScaleScreen(a)) }.first, tileLp(true))
-        val (t5, s5) = tile(Icon.Kind.STAR, tr("Favoris"), tr("Aucun favori")) { a.push(RecipesScreen(a, favorites = true)) }
+        val (t2, _) = tile(1, Icon.Kind.POT, tr("Cuisson\nmanuelle"), tr("Ajuster à la main")) { a.push(ManualScreen(a)) }
+        row1.addView(t2, tileLp(true))
+        val (t3, _) = tile(2, Icon.Kind.KNEAD, tr("Programmes"), tr("Pétrir, vapeur, rissoler, nettoyage")) { a.push(ProgramsScreen(a)) }
+        row1.addView(t3, tileLp(false))
+        val (t4, _) = tile(3, Icon.Kind.SCALE, tr("Balance"), tr("Peser au gramme")) { a.push(ScaleScreen(a)) }
+        row2.addView(t4, tileLp(true))
+        val (t5, s5) = tile(4, Icon.Kind.STAR, tr("Favoris"), tr("Aucun favori")) { a.push(RecipesScreen(a, favorites = true)) }
         favSub = s5
         row2.addView(t5, tileLp(true))
-        val (t6, s6) = tile(Icon.Kind.SETTINGS, tr("Réglages"), tr("Système et appareil")) { a.push(SettingsScreen(a)) }
+        val (t6, s6) = tile(5, Icon.Kind.SETTINGS, tr("Réglages"), tr("Système et appareil")) { a.push(SettingsScreen(a)) }
         settingsSub = s6
         row2.addView(t6, tileLp(false))
+        tiles.addAll(listOf(t1, t2, t3, t4, t5, t6))
+        refreshTiles()
         grid.addView(row1, LinearLayout.LayoutParams(Ui.MATCH, 0, 1f).apply { bottomMargin = Ui.u(16) })
         grid.addView(row2, LinearLayout.LayoutParams(Ui.MATCH, 0, 1f))
         root.addView(grid, LinearLayout.LayoutParams(0, Ui.MATCH, 0.58f))
@@ -264,11 +272,12 @@ class HomeScreen(a: MainActivity) : Screen(a) {
 
     private fun tileLp(gap: Boolean) = LinearLayout.LayoutParams(0, Ui.MATCH, 1f).apply { if (gap) rightMargin = Ui.u(16) }
 
-    private fun tile(icon: Icon.Kind, title: String, sub: String = "", hasSub: Boolean = true, onClick: () -> Unit): Pair<LinearLayout, TextView> {
+    private fun tile(index: Int, icon: Icon.Kind, title: String, sub: String = "", hasSub: Boolean = true, onClick: () -> Unit): Pair<LinearLayout, TextView> {
         // Tuile géométriquement alignée : pastille centrée exactement entre le haut et le titre, zone de texte calée en bas.
         val t = Ui.vertical(c, Gravity.CENTER_HORIZONTAL)
         t.setPadding(Ui.u(14), Ui.u(14), Ui.u(14), Ui.u(14))
-        t.background = Ui.pressable(Ui.round(Ui.SURFACE, 26f, Ui.STROKE, 1f), 26f)
+        val focused = (index == selectedTile)
+        t.background = Ui.pressable(Ui.round(Ui.SURFACE, 26f, if (focused) Ui.TEXT3 else Ui.STROKE, if (focused) 2.5f else 1f), 26f)
 
         // Secteur supérieur : pastille 84x84 strictement centrée entre le bord haut et le titre
         // Le padding bas de 14dp compense le padding haut de la tuile (14dp), garantissant une équidistance optique parfaite.
@@ -289,7 +298,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         t.addView(text, LinearLayout.LayoutParams(Ui.MATCH, Ui.u(76)))
 
         t.isClickable = true
-        t.setOnClickListener { onClick() }
+        t.setOnClickListener { selectedTile = index; refreshTiles(); onClick() }
         return t to s
     }
 
@@ -417,5 +426,40 @@ class HomeScreen(a: MainActivity) : Screen(a) {
                 }
             }
         }
+    }
+
+    private fun refreshTiles() {
+        for ((i, t) in tiles.withIndex()) {
+            val focused = (i == selectedTile)
+            val strokeColor = if (focused) Ui.TEXT3 else Ui.STROKE
+            val strokeWidth = if (focused) 2.5f else 1f
+            t.background = Ui.pressable(Ui.round(Ui.SURFACE, 26f, strokeColor, strokeWidth), 26f)
+        }
+    }
+
+    override fun onShow() {
+        refreshTiles()
+    }
+
+    override fun onKnob(delta: Int): Boolean {
+        if (tiles.isEmpty()) return false
+        val next = (selectedTile + delta).coerceIn(0, tiles.size - 1)
+        if (next != selectedTile) {
+            selectedTile = next
+            refreshTiles()
+        }
+        return true
+    }
+
+    override fun onKnobPress(): Boolean {
+        when (selectedTile) {
+            0 -> a.push(RecipesScreen(a))
+            1 -> a.push(ManualScreen(a))
+            2 -> a.push(ProgramsScreen(a))
+            3 -> a.push(ScaleScreen(a))
+            4 -> a.push(RecipesScreen(a, favorites = true))
+            5 -> a.push(SettingsScreen(a))
+        }
+        return true
     }
 }

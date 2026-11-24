@@ -66,14 +66,13 @@ class MainActivity : Activity() {
     private var swallowTouch = false
     var knobListener: ((KeyEvent) -> Unit)? = null
     private var knobLongHandled = false
+    private var lastKnobPressTime = 0L
     private val knobLongPressRunnable = Runnable {
         knobLongHandled = true
         val s = current
-        if (s?.onKnobLongPress() != true) {
-            if (stack.size > 1) {
-                chime(1)
-                back()
-            }
+        val handled = s?.onKnobLongPress() ?: false
+        if (handled) {
+            chime(1)
         }
     }
 
@@ -442,7 +441,13 @@ class MainActivity : Activity() {
                     main.removeCallbacks(knobLongPressRunnable)
                     if (!knobLongHandled) {
                         if (s != null && currentFocus !is android.widget.EditText) {
-                            s.onKnobPress()
+                            val now = android.os.SystemClock.uptimeMillis()
+                            if (now - lastKnobPressTime < 350L && s.onKnobDoubleClick()) {
+                                lastKnobPressTime = 0L
+                            } else {
+                                lastKnobPressTime = now
+                                s.onKnobPress()
+                            }
                         }
                     }
                     return true

@@ -64,6 +64,7 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
     private lateinit var accountButtons: LinearLayout
     private lateinit var siteText: TextView
     private lateinit var siteBtn: View
+    private lateinit var scroll: ScrollView
 
     override fun build(): View {
         val col = Ui.vertical(c)
@@ -315,7 +316,21 @@ class SettingsScreen(a: MainActivity) : Screen(a) {
                 .apply { setLineSpacing(0f, 1.1f) }, Ui.lp(t = 4))
         } }
 
-        return Ui.scroll(c, col)
+        scroll = Ui.scroll(c, col)
+        return scroll
+    }
+
+    override fun onKnob(delta: Int): Boolean {
+        if (::scroll.isInitialized) {
+            scroll.smoothScrollBy(0, delta * Ui.u(72))
+            return true
+        }
+        return false
+    }
+
+    override fun onKnobLongPress(): Boolean {
+        a.back()
+        return true
     }
 
     private fun section(parent: LinearLayout, title: String, icon: Icon.Kind): LinearLayout {

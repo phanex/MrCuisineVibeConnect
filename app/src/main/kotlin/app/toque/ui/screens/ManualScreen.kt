@@ -308,15 +308,25 @@ class ManualScreen(
         val pad = if (dirFocused) Ui.u(3) else 0
         dirRow.setPadding(pad, pad, pad, pad)
         accRow.removeAllViews()
-        accRow.addView(Ui.toggleChip(c, Accessory.BLADE.label, accessory == Accessory.BLADE, minWidth = 100, height = 64) { setAccessory(Accessory.BLADE) }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 8))
-        accRow.addView(Ui.toggleChip(c, Accessory.WHISK.label, accessory == Accessory.WHISK, minWidth = 100, height = 64) { setAccessory(Accessory.WHISK) })
+        accRow.addView(Ui.toggleChip(c, Accessory.BLADE.label, accessory == Accessory.BLADE, minWidth = 100, height = 64) {
+            selected = 4
+            setAccessory(Accessory.BLADE)
+        }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 8))
+        accRow.addView(Ui.toggleChip(c, Accessory.WHISK.label, accessory == Accessory.WHISK, minWidth = 100, height = 64) {
+            selected = 4
+            setAccessory(Accessory.WHISK)
+        })
+        val accFocused = (selected == 4)
+        accRow.background = if (accFocused) Ui.round(Ui.SURFACE, 34f, Ui.TEXT3, 2.5f) else null
+        val accPad = if (accFocused) Ui.u(3) else 0
+        accRow.setPadding(accPad, accPad, accPad, accPad)
 
         // Pour une étape de recette, le bol d'aujourd'hui ne compte pas.
         val bowl = if (onPick == null && a.snapshot.hasSample) a.snapshot.actualTempC else null
         val v = SafetyPolicy.checkJob(spec(), bowl).filter { it.code != SafetyPolicy.HOT_BLEND }
         hint.text = v.firstOrNull()?.message ?: if (onPick == null && a.snapshot.hot && speed >= 4) tr("Contenu chaud : confirmation demandée") else idleHint()
         Ui.setButtonEnabled(startBtn, v.isEmpty())
-        val startFocused = (selected == 4)
+        val startFocused = (selected == 5)
         val startBase = if (startFocused) Ui.round(Ui.ACCENT, 40f, Ui.TEXT3, 3f) else Ui.round(Ui.ACCENT, 40f)
         startBtn.background = Ui.pressable(startBase, 40f)
         showRing(a.snapshot)
@@ -366,7 +376,7 @@ class ManualScreen(
         wasLive = live
         val busy = s.busy
         startBtn.visibility = if (busy && s.state != JobState.PAUSED) View.GONE else View.VISIBLE
-        if (startBtn.visibility == View.GONE && selected == 4) {
+        if (startBtn.visibility == View.GONE && selected == 5) {
             selected = 0
             refresh()
         }
@@ -395,7 +405,7 @@ class ManualScreen(
         if (editing) {
             if (selected in 0..2) change(selected, delta)
         } else {
-            val maxTarget = if (startBtn.visibility == View.VISIBLE) 4 else 3
+            val maxTarget = if (startBtn.visibility == View.VISIBLE) 5 else 4
             val next = (selected + delta).coerceIn(0, maxTarget)
             if (next != selected) {
                 selected = next
@@ -423,10 +433,36 @@ class ManualScreen(
                 refresh()
             }
             4 -> {
+                setAccessory(if (accessory == Accessory.BLADE) Accessory.WHISK else Accessory.BLADE)
+                refresh()
+            }
+            5 -> {
                 if (startBtn.isEnabled && startBtn.visibility == View.VISIBLE) {
                     start()
                 }
             }
+        }
+        return true
+    }
+
+    override fun onKnobDoubleClick(): Boolean {
+        val s = a.snapshot
+        if (s.state == JobState.RUNNING || s.state == JobState.STARTING) {
+            return false
+        }
+        if (startBtn.isEnabled && startBtn.visibility == View.VISIBLE) {
+            editing = false
+            start()
+            refresh()
+            return true
+        }
+        return false
+    }
+
+    override fun onKnobLongPress(): Boolean {
+        if (editing) {
+            editing = false
+            refresh()
         }
         return true
     }

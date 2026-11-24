@@ -74,6 +74,8 @@ class ProgramsScreen(a: MainActivity) : Screen(a) {
     private val progs = all.filter { RobotProfiles.active.capabilities.has(it.feature) }
     private val cleaning = progs.indexOfFirst { it.feature == Feature.CLEANING }
     private var selected = 0
+    private var focusedIndex = 0
+    private var editing = false
     private lateinit var turbo: HoldButton
     private lateinit var startBtn: LinearLayout
 
@@ -132,7 +134,7 @@ class ProgramsScreen(a: MainActivity) : Screen(a) {
                 card.addView(t, Ui.lp(t = 8))
             }
             card.isClickable = true
-            card.setOnClickListener { selected = i; refresh() }
+            card.setOnClickListener { selected = i; focusedIndex = i; editing = true; refresh() }
             row.addView(card, LinearLayout.LayoutParams(0, Ui.MATCH, 1f).apply { if (i % 4 != 3 && (many || i < progs.size - 1)) rightMargin = Ui.u(16) })
         }
         // Dernière ligne incomplète : des places vides gardent la largeur des cartes.
@@ -190,8 +192,19 @@ class ProgramsScreen(a: MainActivity) : Screen(a) {
             }
             p.unit.text = if (s < 60) "s" else if (s >= 3600) "h" else "min"
             p.temp?.text = "${p.celsius} °C"
-            p.card.background = Ui.round(Ui.SURFACE, 26f, if (i == selected) Ui.ACCENT else Ui.STROKE, if (i == selected) 2.5f else 1f)
+            val isFocused = (i == focusedIndex)
+            val isSelected = (i == selected)
+            val (strokeColor, strokeWidth) = when {
+                isSelected && editing -> Ui.ACCENT to 2.5f
+                isFocused -> Ui.TEXT3 to 2.5f
+                isSelected -> Ui.ACCENT to 1.5f
+                else -> Ui.STROKE to 1f
+            }
+            p.card.background = Ui.round(Ui.SURFACE, 26f, strokeColor, strokeWidth)
         }
+        val startFocused = (focusedIndex == progs.size)
+        val startBase = if (startFocused) Ui.round(Ui.ACCENT, 32f, Ui.TEXT3, 3f) else Ui.round(Ui.ACCENT, 32f)
+        startBtn.background = Ui.pressable(startBase, 32f)
     }
 
     override fun onSnapshot(s: Snapshot) {
@@ -201,12 +214,62 @@ class ProgramsScreen(a: MainActivity) : Screen(a) {
     }
 
     override fun onKnob(delta: Int): Boolean {
-        bump(progs[selected], delta)
+        if (editing) {
+            bump(progs[selected], delta)
+        } else {
+            val maxTarget = if (startBtn.visibility == View.VISIBLE) progs.size else progs.size - 1
+            val next = (focusedIndex + delta).coerceIn(0, maxTarget)
+            if (next != focusedIndex) {
+                focusedIndex = next
+                refresh()
+            }
+        }
         return true
     }
 
     override fun onKnobPress(): Boolean {
-        if (!a.snapshot.busy) progs[selected].let { a.startJob(it.make(it.seconds * 1000L, it.celsius)) }
+        val s = a.snapshot
+        if (s.busy) {
+            a.machine.pause { a.refusal(it) }
+            editing = false
+            refresh()
+            return true
+        }
+        if (focusedIndex < progs.size) {
+            if (focusedIndex != selected) {
+                selected = focusedIndex
+                editing = true
+            } else {
+                editing = !editing
+            }
+            refresh()
+        } else if (focusedIndex == progs.size) {
+            if (startBtn.isEnabled && startBtn.visibility == View.VISIBLE) {
+                editing = false
+                val p = progs[selected]
+                a.startJob(p.make(p.seconds * 1000L, p.celsius))
+            }
+        }
+        return true
+    }
+
+    override fun onKnobDoubleClick(): Boolean {
+        val s = a.snapshot
+        if (!s.busy && startBtn.isEnabled && startBtn.visibility == View.VISIBLE) {
+            editing = false
+            val p = progs[selected]
+            a.startJob(p.make(p.seconds * 1000L, p.celsius))
+            refresh()
+            return true
+        }
+        return false
+    }
+
+    override fun onKnobLongPress(): Boolean {
+        if (editing) {
+            editing = false
+            refresh()
+        }
         return true
     }
 }
