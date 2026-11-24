@@ -493,7 +493,7 @@ class MainActivity : Activity() {
             return true
         }
         if (swallowKnobPress && knobKind(event.keyCode) == PRESS) {
-            if (event.action == KeyEvent.ACTION_UP || event.action == KeyEvent.ACTION_CANCEL) swallowKnobPress = false
+            if (event.action == KeyEvent.ACTION_UP) swallowKnobPress = false
             return true
         }
         // Écran de démarrage : ni la molette ni Retour n'agissent sur les écrans qu'il couvre.
@@ -635,10 +635,6 @@ class MainActivity : Activity() {
     /** Fin de recette : mélodie forte, comme l'appli d'origine. */
     fun recipeDoneSound() {
         if (prefs.sound) Sounds.recipeDone()
-    }
-
-    fun weighRecordedSound() {
-        if (prefs.sound) Sounds.weighRecorded()
     }
 
     fun chime(times: Int = 1) {

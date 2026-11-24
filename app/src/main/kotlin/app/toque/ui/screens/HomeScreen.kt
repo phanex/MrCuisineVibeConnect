@@ -373,8 +373,6 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         }
     }
 
-    override fun onSnapshot(s: Snapshot) = setCompact(MachineBar.shownFor(s))
-
     private fun refreshClock() {
         // Après une coupure de courant, la tablette se croit en 2010 : rien de faux tant que l'heure n'est pas réglée.
         if (!WallClock.known(a)) {
@@ -491,6 +489,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
     }
 
     override fun onSnapshot(s: Snapshot) {
+        setCompact(MachineBar.shownFor(s))
         if (!::weightValue.isInitialized) return
         weightValue.text = if (!s.hasSample) "—" else "${s.weightG}"
         if (::tempValue.isInitialized) {
