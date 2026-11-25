@@ -67,11 +67,13 @@ data class ChipSelection(
     val usage: RecipeChip.Kind? = null,
     /** Recettes de la communauté (toqueapp.org) ; jamais avec [user] : une recette n'a qu'une origine. */
     val community: Boolean = false,
+    /** Recettes d'un serveur Mealie ; jamais avec [user] ni [community]. */
+    val mealie: Boolean = false,
 ) {
     /** Aucun filtre ni vue : « Toutes ». */
     val isAll: Boolean get() = usage == null && !hasFilters
 
-    val hasFilters: Boolean get() = category.isNotEmpty() || quick || favorites || user || community
+    val hasFilters: Boolean get() = category.isNotEmpty() || quick || favorites || user || community || mealie
 
     val byUsage: Boolean get() = usage != null
 
@@ -82,6 +84,7 @@ data class ChipSelection(
         RecipeChip.Kind.FAVORITES -> favorites
         RecipeChip.Kind.USER -> user
         RecipeChip.Kind.COMMUNITY -> community
+        RecipeChip.Kind.MEALIE -> mealie
         RecipeChip.Kind.QUICK -> quick
         RecipeChip.Kind.CATEGORY -> category.isNotEmpty() && category == chip.category
     }
@@ -89,8 +92,8 @@ data class ChipSelection(
     /**
      * Ce que fait un appui sur [chip] : « Toutes » efface tout ; Récentes et Fréquentes remplacent tout
      * (un second appui revient à « Toutes ») ; un filtre s'allume ou s'éteint, en quittant une vue par les
-     * cuissons ; une seule catégorie à la fois (une recette n'en a qu'une), et « Mes recettes » ou
-     * « Communauté », pas les deux (une recette n'a qu'une origine).
+     * cuissons ; une seule catégorie à la fois (une recette n'en a qu'une), et une seule origine parmi
+     * « Mes recettes », « Communauté » et « Mealie » (une recette n'a qu'une origine).
      */
     fun tap(chip: RecipeChip): ChipSelection {
         val filters = if (usage != null) ChipSelection() else this
@@ -98,8 +101,9 @@ data class ChipSelection(
             RecipeChip.Kind.ALL -> ChipSelection()
             RecipeChip.Kind.RECENT, RecipeChip.Kind.FREQUENT -> if (usage == chip.kind) ChipSelection() else ChipSelection(usage = chip.kind)
             RecipeChip.Kind.FAVORITES -> filters.copy(favorites = !filters.favorites)
-            RecipeChip.Kind.USER -> filters.copy(user = !filters.user, community = false)
-            RecipeChip.Kind.COMMUNITY -> filters.copy(community = !filters.community, user = false)
+            RecipeChip.Kind.USER -> filters.copy(user = !filters.user, community = false, mealie = false)
+            RecipeChip.Kind.COMMUNITY -> filters.copy(community = !filters.community, user = false, mealie = false)
+            RecipeChip.Kind.MEALIE -> filters.copy(mealie = !filters.mealie, user = false, community = false)
             RecipeChip.Kind.QUICK -> filters.copy(quick = !filters.quick)
             RecipeChip.Kind.CATEGORY -> filters.copy(category = if (filters.category == chip.category) "" else chip.category)
         }
@@ -109,13 +113,14 @@ data class ChipSelection(
     val filter: RecipeFilter get() = RecipeFilter(
         category = category,
         favoritesOnly = favorites,
-        source = if (user) RecipeSource.USER else if (community) RecipeSource.COMMUNITY else null,
+        source = if (user) RecipeSource.USER else if (community) RecipeSource.COMMUNITY else if (mealie) RecipeSource.MEALIE else null,
         maxMinutes = if (quick) RecipeChip.QUICK_MINUTES else 0,
     )
 
-    /** Les pastilles à montrer (celles de [RecipeChip.list]), « Mes recettes » ou « Communauté » gardée si elle est allumée. */
+    /** Les pastilles à montrer (celles de [RecipeChip.list]), la pastille d'origine allumée gardée. */
     fun chips(index: SearchIndex): List<RecipeChip> {
-        val out = ArrayList(RecipeChip.list(index, if (user) RecipeChip.USER else if (community) RecipeChip.COMMUNITY else null))
+        val origin = if (user) RecipeChip.USER else if (community) RecipeChip.COMMUNITY else if (mealie) RecipeChip.MEALIE else null
+        val out = ArrayList(RecipeChip.list(index, origin))
         // Catégorie choisie disparue du catalogue (ou au-delà des premières) : reste visible pour l'éteindre.
         if (category.isNotEmpty() && out.none { it.kind == RecipeChip.Kind.CATEGORY && it.category == category }) out += RecipeChip.category(category)
         return out

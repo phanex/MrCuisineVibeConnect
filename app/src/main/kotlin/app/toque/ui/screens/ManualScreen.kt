@@ -11,6 +11,7 @@ import app.toque.core.i18n.tr
 import app.toque.core.machine.Accessory
 import app.toque.core.machine.JobKind
 import app.toque.core.machine.JobState
+import app.toque.core.machine.Limits
 import app.toque.core.machine.ManualLimits
 import app.toque.core.machine.ManualSettings
 import app.toque.core.machine.SafetyPolicy
@@ -46,8 +47,10 @@ class ManualScreen(
     private val caps = RobotProfiles.active.capabilities
     // Le même départ que l'éditeur d'étape du téléphone (StepSettings.manualStart) : température de la
     // table juste en dessous, vitesse 0 seulement avec une température et si le robot le permet.
-    private var set = app.toque.core.recipes.StepSettings.manualStart(preset,
-        ManualLimits(temperaturesC = caps.temperaturesC, heatNoStir = caps.has(Feature.HEAT_NO_STIR)))
+    private val manualLimits = ManualLimits(temperaturesC = caps.temperaturesC, heatNoStir = caps.has(Feature.HEAT_NO_STIR))
+    /** Pendant un yaourt suivi ici : sa durée maximale (12 h), sinon toucher un réglage le ramènerait à 99 min. */
+    private val fermentLimits = manualLimits.copy(maxSeconds = (Limits.MAX_MS_FERMENT / 1000).toInt())
+    private var set = app.toque.core.recipes.StepSettings.manualStart(preset, manualLimits)
     private val seconds get() = set.seconds
     private val tempLevel get() = set.tempLevel
     /** °C réglés (40 °C sur le Smart compris) ; 0 = sans chauffe. */
@@ -306,7 +309,8 @@ class ManualScreen(
             // affiche le temps restant.
             val remaining = ((s.remainingMs + 999) / 1000).toInt().coerceAtLeast(1)
             val acc = runCatching { Accessory.valueOf(s.accessory) }.getOrElse { accessory }
-            val job = set.copy(seconds = remaining, speed = s.jobSpeed, reverse = s.jobReverse, accessory = acc)
+            val job = set.copy(seconds = remaining, speed = s.jobSpeed, reverse = s.jobReverse, accessory = acc,
+                limits = if (s.jobFerment) fermentLimits else manualLimits)
                 .withCelsius(if (s.jobTempLevel > 0) s.jobTempC else 0)
             if (!startedHere) configuredSeconds = (s.totalMs / 1000).toInt().coerceIn(ManualLimits.MIN_SECONDS, job.maxSeconds)
             if (job != set || !wasFollowing) {
@@ -316,7 +320,7 @@ class ManualScreen(
             }
         }
         if (wasLive && !live && !manualJob) {
-            set = set.copy(seconds = configuredSeconds)
+            set = set.copy(seconds = configuredSeconds.coerceAtMost(manualLimits.maxSeconds), limits = manualLimits)
             refresh()
         }
         if (wasFollowing && !following) startedHere = false

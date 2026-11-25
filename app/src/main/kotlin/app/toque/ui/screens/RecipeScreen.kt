@@ -90,6 +90,7 @@ class RecipeScreen(a: MainActivity, val recipe: Recipe) : Screen(a) {
         val byline = ArrayList<String>()
         val community = recipe.source == RecipeSource.COMMUNITY
         if (recipe.source == RecipeSource.USER) byline += tr("Ma recette")
+        else if (recipe.source == RecipeSource.MEALIE) byline += tr("Depuis Mealie")
         else if (community) byline += if (recipe.author.isNotBlank()) tr("Communauté toqueapp.org · par %s", recipe.author) else tr("Communauté toqueapp.org")
         else if (recipe.author.isNotBlank()) byline += tr("Par %s", authorName(recipe.author))
         // Recette de la communauté : sa langue seulement si ce n'est pas celle de l'interface.
@@ -614,6 +615,8 @@ class RecipeScreen(a: MainActivity, val recipe: Recipe) : Screen(a) {
     private fun makeMyVersion() {
         a.confirm(tr("Ma version"), if (recipe.source == RecipeSource.COMMUNITY)
             tr("Toque crée une copie de cette recette dans Mes recettes, telle qu'elle est affichée, pour que vous la modifiiez. La recette de la communauté reste telle quelle.")
+            else if (recipe.source == RecipeSource.MEALIE)
+            tr("Toque crée une copie de cette recette dans Mes recettes, telle qu'elle est affichée, pour que vous la modifiiez. La recette reste telle quelle dans Mealie.")
             else tr("Toque crée une copie de cette recette dans Mes recettes, telle qu'elle est affichée, pour que vous la modifiiez. La recette Lidl reste telle quelle."),
             tr("Créer ma version"), icon = Icon.Kind.EDIT) {
             a.push(RecipeEditScreen(a, UserRecipes.copyOf(shown), isNew = true))

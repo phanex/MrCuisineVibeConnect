@@ -29,6 +29,8 @@ enum class Feature(private val fr: String) {
     SOUS_VIDE(trKey("Sous-vide")),
     SLOW_COOK(trKey("Mijoter")),
     FERMENT(trKey("Fermenter")),
+    /** Connect : yaourt, chauffe douce sans mélange pendant des heures (Programs.yogurt). */
+    YOGURT(trKey("Yaourt")),
     RICE(trKey("Cuire du riz")),
     KETTLE(trKey("Chauffer l'eau")),
     PREWASH(trKey("Prélaver")),
@@ -109,7 +111,7 @@ object RobotProfiles {
         vendorHardwareService = "HardwareMachineService",
         capabilities = Capabilities(
             features = setOf(Feature.MANUAL, Feature.HEAT_NO_STIR, Feature.KNEAD, Feature.STEAM, Feature.TOAST,
-                Feature.TURBO, Feature.CLEANING),
+                Feature.TURBO, Feature.CLEANING, Feature.YOGURT),
             temperaturesC = Mcc.TEMPERATURE_LEVELS.filter { it > 0 },
         ),
         lidlDevice = "MC2.0",

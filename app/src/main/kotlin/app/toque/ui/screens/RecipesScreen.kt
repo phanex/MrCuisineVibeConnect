@@ -53,12 +53,17 @@ class RecipesScreen(
     /** Listes tirées des cuissons : dernières recettes cuisinées, ou les plus cuisinées. */
     enum class Usage { NONE, RECENT, MOST }
 
+    private var recipeCount = -1
     override val title = when {
         favorites -> tr("Favoris")
         initialUsage == Usage.RECENT -> tr("Récentes")
         initialUsage == Usage.MOST -> tr("Fréquentes")
         else -> tr("Recettes")
     }
+    override val titleCounter: String?
+        get() = if (recipeCount > 0) {
+            java.text.NumberFormat.getIntegerInstance(app.toque.core.i18n.I18n.locale).format(recipeCount)
+        } else null
 
     /**
      * Liste ouverte depuis « Recettes » ou la recherche : elle reprend les pastilles et le tri de la
@@ -84,7 +89,6 @@ class RecipesScreen(
     private lateinit var chipScroller: HorizontalScrollView
     private lateinit var chips: LinearLayout
     private lateinit var grid: GridView
-    private lateinit var count: TextView
     private lateinit var sortButton: LinearLayout
     private lateinit var sortLabel: TextView
     private lateinit var empty: LinearLayout
@@ -137,8 +141,6 @@ class RecipesScreen(
         clear.setOnClickListener { input.setText("") }
         field.addView(clear, LinearLayout.LayoutParams(Ui.u(48), Ui.u(48)))
         bar.addView(field, LinearLayout.LayoutParams(0, Ui.u(64), 1f))
-        count = Ui.text(c, "", 17f, Ui.TEXT2)
-        bar.addView(count, Ui.lp(Ui.WRAP, Ui.WRAP, l = 18))
         if (favorites) {
             // Favoris : reprendre tout de suite ceux du compte toqueapp.org (et les recettes du site).
             refreshBtn = Ui.button(c, tr("Actualiser"), Ui.Style.SECONDARY, Icon.Kind.SYNC, height = 64, textSize = 18f) { refreshFavorites() }
@@ -150,8 +152,7 @@ class RecipesScreen(
         }, Ui.lp(Ui.WRAP, Ui.WRAP, l = 16))
         root.addView(bar)
 
-        // Pastilles (elles défilent), puis le tri, toujours visible à droite ; le nombre de recettes
-        // est dans la barre de recherche, pour laisser la place aux pastilles.
+        // Pastilles (elles défilent), puis le tri, toujours visible à droite.
         val filters = Ui.horizontal(c, Gravity.CENTER_VERTICAL)
         chipScroller = HorizontalScrollView(c).apply {
             isHorizontalScrollBarEnabled = false
@@ -343,7 +344,8 @@ class RecipesScreen(
     private fun refreshEmpty() {
         val repo = a.app.recipes
         val none = resultsLoaded && repo.count == 0
-        count.text = if (results.isEmpty()) "" else if (results.size == 1) tr("1 recette") else tr("%d recettes", results.size)
+        recipeCount = results.size
+        a.refreshTitle()
         empty.visibility = if (results.isEmpty()) View.VISIBLE else View.GONE
         // Ingrédients et étapes pas encore dans l'index (les deux secondes après le démarrage) : on attend sa réponse.
         val waitingFull = query.isNotBlank() && !repo.index.full
@@ -356,7 +358,7 @@ class RecipesScreen(
             selection.byUsage && query.isBlank() -> tr("Aucune recette cuisinée pour l'instant.\nLes recettes apparaissent ici dès leur première cuisson.")
             selection == ChipSelection.of(RecipeChip.FAVORITES) && query.isBlank() -> tr("Aucun favori pour l'instant.\nTouchez l'étoile d'une recette pour l'ajouter.")
             selection == ChipSelection.of(RecipeChip.COMMUNITY) && query.isBlank() ->
-                tr("Aucune recette de la communauté pour l'instant.\nRéglages › Recettes › Communauté › Synchroniser.")
+                tr("Aucune recette de la communauté pour l'instant.\nRéglages › Recettes › toqueapp.org › Synchroniser.")
             selection == ChipSelection.of(RecipeChip.USER) && query.isBlank() ->
                 tr("Aucune recette perso pour l'instant.\nTouchez « Nouvelle recette », ou le crayon d'une recette Lidl pour en faire votre version.")
             selection.hasFilters -> Ui.guillemets(tr("Aucune recette avec ces filtres.\nTouchez « Toutes » pour les retirer."))
@@ -368,7 +370,7 @@ class RecipesScreen(
     private fun refreshFavorites() {
         val site = a.app.site
         if (!a.prefs.siteLinked && !a.prefs.siteCommunity) {
-            a.toast(tr("Reliez un compte Toque (Réglages › Recettes › Communauté) pour retrouver ici vos favoris du site."), Ui.WARN)
+            a.toast(tr("Reliez un compte Toque (Réglages › Recettes › toqueapp.org) pour retrouver ici vos favoris du site."), Ui.WARN)
             return
         }
         if (site.busy) {
@@ -597,6 +599,7 @@ class RecipesScreen(
             // Recette de la communauté : sa langue seulement si ce n'est pas celle de l'interface.
             val lang = e.language.substringBefore('-')
             val tag = if (e.source == RecipeSource.USER) tr("Perso")
+                else if (e.source == RecipeSource.MEALIE) "Mealie"
                 else if (e.source == RecipeSource.COMMUNITY && lang == I18n.code.substringBefore('-')) ""
                 else lang.uppercase()
             badge.text = tag

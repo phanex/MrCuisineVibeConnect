@@ -287,6 +287,26 @@ class ControllerTest {
         assertTrue(toast.all { it[3] == 19 && it[4] == Direction.COUNTER_CLOCKWISE.wire })
     }
 
+    @Test fun steppedReadingJustBelowSixtyAlreadyAsksForConfirmation() {
+        // #100 : une base qui mesure en paliers affiche 55 °C jusqu'à 59 °C ; mixer vite demande confirmation.
+        val b = Bench().ready()
+        b.c.startJob(Programs.manual(1, 5, Direction.CLOCKWISE, 300_000))
+        while (b.snap.actualTempC < 56) b.step(1_000)
+        b.c.stop()
+        b.step(3_000)
+        b.c.clearFinished()
+        assertTrue(b.snap.actualTempC in Limits.HOT_BLEND_C until Limits.HOT_C)
+        val v = b.c.startJob(Programs.manual(7, 0, Direction.CLOCKWISE, 30_000))
+        assertFalse(v.ok)
+        assertTrue(v.has(SafetyPolicy.HOT_BLEND))
+        assertTrue(b.c.startJob(Programs.manual(7, 0, Direction.CLOCKWISE, 30_000, hotBlendConfirmed = true)).ok)
+        // Le palier d'en dessous (50 °C) : pas de question ; vitesse 3 : jamais.
+        val fast = Programs.manual(7, 0, Direction.CLOCKWISE, 30_000)
+        assertTrue(SafetyPolicy.checkJob(fast, 55).any { it.code == SafetyPolicy.HOT_BLEND })
+        assertFalse(SafetyPolicy.checkJob(fast, 54).any { it.code == SafetyPolicy.HOT_BLEND })
+        assertFalse(SafetyPolicy.checkJob(Programs.manual(3, 0, Direction.CLOCKWISE, 30_000), 59).any { it.code == SafetyPolicy.HOT_BLEND })
+    }
+
     @Test fun hotContentNeedsConfirmationAndRampsSlowly() {
         val b = Bench().ready()
         b.c.startJob(Programs.manual(1, 13, Direction.CLOCKWISE, 300_000))
@@ -422,6 +442,51 @@ class ControllerTest {
         assertTrue(steam.isNotEmpty())
         assertTrue(steam.all { it[2] == 0 && it[3] == 17 })
         assertEquals(0, b.snap.rpm)
+    }
+
+    @Test fun yogurtHeatsGentlyWithoutStirringForHours() {
+        // Yaourt : chauffe sans mélange (opération vapeur, vitesse 0) à 37 °C, 6 à 12 h.
+        val h = 3600_000L
+        val y = Programs.yogurt(8 * h)
+        assertTrue(y.ferment)
+        assertTrue(SafetyPolicy.checkJob(y, null).toString(), SafetyPolicy.checkJob(y, null).isEmpty())
+        val s = y.phases.single().setting
+        assertEquals(Operation.STEAM, s.operation)
+        assertEquals(0, s.speed)
+        assertEquals(37, s.temperatureC)
+        assertTrue(SafetyPolicy.checkJob(Programs.yogurt(12 * h), null).isEmpty())
+        assertTrue(SafetyPolicy.checkJob(Programs.yogurt(12 * h + 15 * 60_000), null).any { it.code == "too_long" })
+        // Sans le drapeau, une chauffe sans mélange reste limitée à 99 min.
+        assertTrue(SafetyPolicy.checkJob(Programs.manual(0, 1, Direction.CLOCKWISE, 8 * h), null).any { it.code == "too_long" })
+        // Le drapeau ne rallonge que la chauffe douce lame à l'arrêt : 45 °C au plus, jamais de mélange.
+        fun ferment(speed: Int, level: Int) = Programs.manual(speed, level, Direction.CLOCKWISE, 8 * h).copy(ferment = true)
+        assertTrue(SafetyPolicy.checkJob(ferment(0, Mcc.levelForCelsius(45)), null).isEmpty())
+        assertTrue(SafetyPolicy.checkJob(ferment(0, Mcc.levelForCelsius(50)), null).any { it.code == "ferment" })
+        assertTrue(SafetyPolicy.checkJob(ferment(1, 1), null).any { it.code == "ferment" })
+        assertTrue(SafetyPolicy.checkJob(ferment(1, 0), null).any { it.code == "ferment" })
+        assertTrue(SafetyPolicy.checkJob(Programs.knead(45_000).copy(ferment = true), null).any { it.code == "ferment" })
+
+        // Sur la base simulée : la lame ne tourne jamais, et les réglages en cours restent gardés.
+        val b = Bench().ready()
+        assertTrue(b.c.startJob(Programs.yogurt(6 * h)).ok)
+        b.step(10_000)
+        assertEquals(JobState.RUNNING.name, b.snap.jobState)
+        // L'interface le sait (écran manuel : limite de 12 h pendant un yaourt, pas 99 min).
+        assertTrue(b.snap.jobFerment)
+        assertEquals(b.snap, app.toque.core.machine.Snapshot.fromMap(b.snap.toMap()))
+        assertFalse(b.c.adjust(speed = 1).ok)
+        assertFalse(b.c.adjust(temperatureLevel = Mcc.levelForCelsius(50)).ok)
+        assertFalse(b.c.adjust(totalMs = 12 * h + 15 * 60_000).ok)
+        assertTrue(b.c.adjust(totalMs = 6 * h + 15 * 60_000).ok)
+        b.step(6 * h)
+        assertEquals(JobState.RUNNING.name, b.snap.jobState)
+        assertFalse(b.snap.motorOn)
+        b.step(20 * 60_000)
+        assertEquals(JobState.FINISHED.name, b.snap.jobState)
+        assertEquals(Operation.STOP.wire, b.lastOp())
+        val active = b.tx.filter { it[1] != Operation.STOP.wire }
+        assertTrue(active.isNotEmpty())
+        assertTrue(active.all { it[1] == Operation.STEAM.wire && it[2] == 0 && it[3] == Mcc.levelForCelsius(37) })
     }
 
     @Test fun manualHeatsWithoutStirring() {

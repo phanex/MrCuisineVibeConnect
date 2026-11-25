@@ -1075,6 +1075,7 @@ class MachineController(
             jobReverse = s?.direction == Direction.COUNTER_CLOCKWISE,
             accessory = j?.spec?.accessory?.name ?: Accessory.BLADE.name,
             hotBlendConfirmed = j?.spec?.hotBlendConfirmed ?: false,
+            jobFerment = j?.spec?.ferment ?: false,
             turboActive = turboStartedAt != null,
             wireOperation = lastWire.operation.name,
             wireSpeed = lastWire.speed,

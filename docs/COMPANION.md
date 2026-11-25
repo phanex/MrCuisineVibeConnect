@@ -202,6 +202,16 @@ timeouts, first valid proof wins) and returns that host. **The token is sent to 
 the last known address first. `StateFollower(..., finder = { RobotFinder.locate(...) })` does this by
 itself after 3 failures in a row, then every 4 failures.
 
+### 2.5 bis Discovery on the Wi-Fi (mDNS, Toque 0.11.0 or later)
+
+While the server is open (a phone paired, or a pairing in progress), the robot announces it with
+DNS-SD: service type `_toque._tcp`, name `Toque <robot name>`, the server port, and TXT records
+`id` (the robot id, as in the QR code), `v` (`COMPANION_PROTOCOL`) and `model` (robot profile id,
+`mc-connect`, `mc-smart`). Nothing secret: the same as the QR code minus the pairing secret. The
+announce is withdrawn when the server closes. Pairing still needs the code or the QR code; a client
+may use the announce to fill in the address, or to find the robot again after its address changed
+(then confirm with the proof exchange, 2.6).
+
 ### 2.6 Proof exchange (`POST /api/prove`, no token)
 
 Before sending its token to an address, the phone checks that the address is its robot:
@@ -329,7 +339,7 @@ section 5.
 | param | default | values |
 |---|---|---|
 | `q` | "" | free text, ≤ 100 characters (tolerant search: accents, plurals, typos) |
-| `filter` | `all` | `all`, `recent`, `frequent`, `favorites`, `user`, `community`, `quick`, `category` |
+| `filter` | `all` | `all`, `recent`, `frequent`, `favorites`, `user`, `community`, `mealie`, `quick`, `category` |
 | `category` | — | with `filter=category` only (required then): a category name, 1–100 characters, no control character |
 | `offset` | 0 | 0–100000 |
 | `limit` | 20 | clamped to 1–50 (the phone asks 48) |
@@ -340,7 +350,9 @@ the same chip and text give the same recipes on the phone as on the robot, in th
 robot's screen stops at 500 recipes; the API pages through all of them.
 
 - `all`, `favorites`, `user` (the robot owner's own recipes, "Mes recettes"), `community` (recipes
-  received from toqueapp.org, "Communauté"; a robot based on Toque 0.8.1 or later), `quick` (total time
+  received from toqueapp.org, "Communauté"; a robot based on Toque 0.8.1 or later), `mealie` (recipes
+  from the owner's Mealie server, read-only; Toque 0.11.0 or later: an older phone skips the chip,
+  `CatalogChipWire.toChip` returns null), `quick` (total time
   known and ≤ 30 min, "30 min max"), `category`: with no text, favourites first, then by title;
   with text, by relevance (tolerant search; text with commas: by ingredients, most matched first).
 - `recent` / `frequent`: the robot's order (last cooked / most cooked, 60 at most), filtered by the

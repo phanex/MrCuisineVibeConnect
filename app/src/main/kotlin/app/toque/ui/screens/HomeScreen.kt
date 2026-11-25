@@ -22,6 +22,8 @@ import app.toque.ui.Ui
 import app.toque.ui.WallClock
 import java.text.SimpleDateFormat
 import java.util.Date
+import app.toque.core.robot.Feature
+import app.toque.core.robot.RobotProfiles
 
 class HomeScreen(a: MainActivity) : Screen(a) {
     // Pas de titre sur l'accueil : la barre du haut ne garde que l'état de la machine et l'heure.
@@ -139,7 +141,8 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         recipesTile = t1
         row1.addView(t1, tileLp(true))
         row1.addView(tile(Icon.Kind.POT, tr("Cuisson\nmanuelle"), hasSub = false) { a.push(ManualScreen(a)) }.first, tileLp(true))
-        row1.addView(tile(Icon.Kind.KNEAD, tr("Programmes"), tr("Pétrir, vapeur, rissoler, nettoyage")) { a.push(ProgramsScreen(a)) }.first, tileLp(false))
+        row1.addView(tile(Icon.Kind.KNEAD, tr("Programmes"), if (RobotProfiles.active.capabilities.has(Feature.YOGURT))
+            tr("Pétrir, vapeur, yaourt, nettoyage") else tr("Pétrir, vapeur, rissoler, nettoyage")) { a.push(ProgramsScreen(a)) }.first, tileLp(false))
         row2.addView(tile(Icon.Kind.SCALE, tr("Balance"), tr("Peser au gramme")) { a.push(ScaleScreen(a)) }.first, tileLp(true))
         val (t5, s5) = tile(Icon.Kind.STAR, tr("Favoris")) { a.push(RecipesScreen(a, favorites = true)) }
         favSub = s5

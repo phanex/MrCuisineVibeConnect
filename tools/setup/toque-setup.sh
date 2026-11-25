@@ -690,9 +690,42 @@ PYEOF
   ok "own-twrp done. Next: flash-twrp"
 }
 
+# The project a boot image's kernel was built for (the board's source folder, kept in a driver's
+# messages: .../camera_project/<project>/...), as toque-setup.ps1 reads it. Empty when not found.
+robot_project() { # robot_project <boot image>
+  local py
+  py=$(find_python) || py=$(command -v python3) || return 0
+  "$py" -I - "$1" << 'PYEOF' 2> /dev/null
+import re, struct, sys, zlib
+b = open(sys.argv[1], "rb").read()
+ks, = struct.unpack("<I", b[8:12]); ps, = struct.unpack("<I", b[36:40])
+k = b[ps:ps + ks]
+for m in re.finditer(rb"\x1f\x8b\x08", k[:131072]):
+    try:
+        t = zlib.decompressobj(31).decompress(k[m.start():])
+    except Exception:
+        continue
+    if b"Linux version " not in t:
+        continue
+    p = re.search(rb"/camera_project/([A-Za-z0-9_.-]{2,64})/", t)
+    print(p.group(1).decode() if p else "")
+    break
+PYEOF
+}
+
 step_flash_twrp() {
-  local twrp
+  local twrp project
   state_has done-backup || fail "Run 'backup' first: never flash without the backups."
+  # The guide's TWRP carries a kernel built for project l706_dfbh_v_695: on another board (spm188a:
+  # SKMC 1100 A1, and SKMC 1200 D4 too) it starts without touch. Unlike the label, the backup knows.
+  if ! state_has twrp-own-kernel-sha256; then
+    project=$(robot_project "$BACKUP/boot-original.img")
+    case "$project" in
+      (l706_dfbh_v_695) say "Robot kernel built for project l706_dfbh_v_695 (SKMC 1200): the guide's TWRP suits it." ;;
+      (spm188a) fail "This robot's kernel was built for project spm188a (SKMC 1100 A1, SKMC 1200 D4): the guide's TWRP would start without touch. Nothing was written. Run 'own-twrp', then 'flash-twrp' again." ;;
+      (*) fail "This robot's kernel was built for project '${project:-not found}', a board this guide does not know. Nothing was written. Check the label (a Smart is different hardware: stop). For another Monsieur Cuisine Connect, run 'own-twrp' (TWRP around the robot's own kernel), then 'flash-twrp' again, and report the model and the project in an issue." ;;
+    esac
+  fi
   twrp=$(get_twrp_image)
   mtk_ready || fail "mtkclient missing or without its macOS serial fixes: run 'prepare'."
   check_layout
@@ -797,7 +830,7 @@ step_install() {
     # never a Toque-smart-* APK on a Connect.
     apk=$(for f in "$DOWNLOADS"/Toque-*.apk; do
       [ -f "$f" ] || continue
-      case "$(basename "$f")" in Toque-smart-*) continue ;; esac
+      case "$(basename "$f")" in (Toque-smart-*) continue ;; esac
       v=$(basename "$f" .apk); v=${v#Toque-}
       printf '%s\t%s\n' "$v" "$f"
     done | awk -F'\t' '{ split($1, n, /[.-]/); printf "%06d%06d%06d\t%s\n", n[1], n[2], n[3], $2 }' | sort | tail -n 1 | cut -f 2-)

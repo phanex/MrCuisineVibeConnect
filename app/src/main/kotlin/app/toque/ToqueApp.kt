@@ -25,6 +25,8 @@ open class ToqueApp : Application() {
     val recipes: RecipeRepo by lazy { RecipeRepo(this, log) }
     /** toqueapp.org : compte relié, recettes de la communauté. */
     val site: app.toque.site.SiteAccount by lazy { app.toque.site.SiteAccount(this) }
+    /** Serveur Mealie relié (recettes auto-hébergées, en lecture seule). */
+    val mealie: app.toque.mealie.MealieAccount by lazy { app.toque.mealie.MealieAccount(this) }
     /** Toque Compagnon (téléphones sur le Wi-Fi) ; processus de l'interface seulement, null s'il n'a pas pu démarrer. */
     var companion: RobotCompanion? = null
         private set

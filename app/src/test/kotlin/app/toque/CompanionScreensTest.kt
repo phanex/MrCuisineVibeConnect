@@ -12,6 +12,9 @@ import app.toque.companion.RobotCompanion
 import app.toque.core.companion.AdjustRequest
 import app.toque.core.companion.StartRequest
 import app.toque.core.companion.client.CompanionClient
+import app.toque.core.json.Json
+import app.toque.core.json.obj
+import app.toque.core.mealie.MealieRecipes
 import app.toque.core.machine.JobState
 import app.toque.core.machine.LinkState
 import app.toque.core.machine.Snapshot
@@ -32,6 +35,7 @@ import app.toque.ui.MainActivity
 import app.toque.ui.Splash
 import app.toque.ui.TopBar
 import app.toque.ui.screens.ManualScreen
+import app.toque.ui.screens.MealieLinkScreen
 import app.toque.ui.screens.HomeScreen
 import app.toque.ui.screens.PairingScreen
 import app.toque.ui.screens.RecipeScreen
@@ -399,7 +403,7 @@ class CompanionScreensTest {
         val app = androidx_free_app()
         val hot = Snapshot(link = LinkState.READY, hasSample = true, actualTempC = 72)
         val bar = TopBar(activity)
-        bar.setTitle("Cuisson manuelle", true)
+        bar.setTitle("Cuisson manuelle", canGoBack = true)
         bar.update(hot)
         assertEquals(View.VISIBLE, bar.hotWarning.visibility)
         assertNotNull(findText(bar, "72 °C"))
@@ -424,6 +428,55 @@ class CompanionScreensTest {
         assertNotNull(findText(settings.view, "Couleurs sur la molette"))
         openFamily(settings, "Molette et sons")
         shot("12-reglages-couleurs-molette")
+    }
+
+    /**
+     * Mealie : la page des réglages (non relié, puis relié), l'écran pour relier, la liste avec la
+     * pastille et la fiche d'une recette reçue (réglage proposé à vérifier). Aucun réseau : le serveur
+     * relié est fictif et la recette est convertie par le cœur comme à la synchro.
+     */
+    @Test fun mealieScreens() {
+        start()
+        val app = androidx_free_app()
+        val settings = SettingsScreen(activity, SettingsScreen.Family.RECIPES)
+        activity.push(settings)
+        idle(3)
+        // Pastilles de Recettes : Lidl, toqueapp.org, Mes recettes, Appli d'origine ; Mealie est dans la famille « Autres ».
+        for (chip in listOf("Lidl", "toqueapp.org", "Mes recettes", "Appli d'origine")) assertNotNull(chip, findText(settings.view, chip))
+        assertNull(findText(settings.view, "Communauté"))
+        shot("39b-reglages-recettes-pastilles")
+        openFamily(settings, "Autres")
+        assertNotNull(findText(settings.view, "Relier mon serveur"))
+        shot("40-reglages-mealie-non-relie")
+        activity.push(MealieLinkScreen(activity))
+        shot("41-relier-mealie")
+
+        val json = """{"id":"6f1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d","slug":"veloute","name":"Velouté de potiron (Mealie)",
+            "recipeServings":4,"totalTimeSeconds":2700,"recipeCategory":[{"name":"Soupes"}],
+            "recipeIngredient":[{"quantity":800,"unit":{"name":"g"},"food":{"name":"potiron"}},{"quantity":0,"note":"500 g d'eau"}],
+            "recipeInstructions":[{"text":"Mixer l'oignon 5 sec/vitesse 5."},{"text":"Ajouter le potiron et l'eau, cuire 25 min/100°C/vitesse 1."},
+            {"text":"Servir chaud."}]}"""
+        val r = MealieRecipes.toRecipe(Json.parse(json).obj(), RobotProfiles.MC_CONNECT)!!
+        assertTrue(r.steps[1].needsReview)
+        app.prefs.mealieUrl = "http://192.168.0.20:9000"
+        app.prefs.mealieToken = "essai"
+        app.prefs.mealieLastMs = System.currentTimeMillis()
+        app.prefs.mealieLastResult = "25/11 à 03:31 : 1 ajoutée(s)"
+        app.recipes.upsertAll(listOf(r))
+        waitFor("recette Mealie enregistrée") { app.recipes.index.entries.any { it.id == r.id } }
+        val linked = SettingsScreen(activity, SettingsScreen.Family.OTHERS)
+        activity.push(linked)
+        idle(3)
+        assertNotNull(findText(linked.view, "Délier"))
+        shot("42-reglages-mealie-relie")
+        activity.push(RecipesScreen(activity))
+        idle(3)
+        assertNotNull(findText(activity.window.decorView, "Mealie"))
+        shot("43-liste-avec-mealie")
+        activity.push(RecipeScreen(activity, app.recipes.get(r.id)!!))
+        assertNotNull(findText(activity.window.decorView, "Depuis Mealie"))
+        shot("44-recette-mealie")
+        app.prefs.forgetMealie()
     }
 
     @Test fun companionScreens() {

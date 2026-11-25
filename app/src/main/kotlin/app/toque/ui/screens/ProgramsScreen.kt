@@ -8,6 +8,7 @@ import android.widget.TextView
 import app.toque.core.i18n.tr
 import app.toque.core.machine.JobKind
 import app.toque.core.machine.JobSpec
+import app.toque.core.machine.Limits
 import app.toque.core.machine.Programs
 import app.toque.core.machine.Snapshot
 import app.toque.core.protocol.SmartProgram
@@ -53,6 +54,9 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
             1200, 300, 3600, 60) { ms, _ -> Programs.steam(ms) },
         Prog(Feature.TOAST, Icon.Kind.FLAME, JobKind.TOAST.label, tr("Dorer oignons, lardons, viandes à 130 °C, avec un brassage doux en sens inverse."),
             420, 180, 840, 30) { ms, _ -> Programs.toast(ms) },
+        Prog(Feature.YOGURT, Icon.Kind.TIMER, Feature.YOGURT.label,
+            tr("Lait tiède ensemencé, couvercle fermé. Garde %d °C sans remuer : la lame reste immobile.", Programs.YOGURT_C),
+            8 * 3600, 6 * 3600, Limits.MAX_MS_FERMENT.toInt() / 1000, 15 * 60) { ms, _ -> Programs.yogurt(ms) },
         Prog(Feature.CLEANING, Icon.Kind.DROP, tr("Nettoyage"), tr("1 L d'eau chaude et une goutte de liquide vaisselle. La vitesse monte de 4 à 10."),
             90, 60, 180, 15) { ms, _ -> Programs.clean(ms) },
         // Programmes du Monsieur Cuisine Smart, avec les trames de son appli d'origine.

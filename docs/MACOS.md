@@ -48,8 +48,9 @@ voir [docs/INSTALLATION.fr.md](INSTALLATION.fr.md#4-premier-essai--bol-vide).
    `~/Toque/backup/` sur une clé USB ou dans le cloud, c'est votre seule voie de retour.** Après
    chaque session mtkclient, le robot reste en mode téléchargement (écran noir) : l'éteindre avant
    l'étape suivante.
-   - **SKMC 1100 A1 uniquement** : lancer `bash tools/setup/toque-setup.sh own-twrp` avant
-     `flash-twrp` pour reconstruire `~/Toque/twrp-own-kernel.img` avec le noyau 2022 du robot.
+   - **SKMC 1100 A1 et SKMC 1200 D4** (carte `spm188a`) : lancer `bash tools/setup/toque-setup.sh own-twrp`
+     avant `flash-twrp` pour reconstruire `~/Toque/twrp-own-kernel.img` avec le noyau du robot.
+     `flash-twrp` lit la carte dans la sauvegarde et s'arrête, sans rien écrire, s'il manque.
 4. `bash tools/setup/toque-setup.sh flash-twrp` : écrit TWRP dans `boot` uniquement et le relit.
 5. Éteindre le robot, débrancher le câble, rallumer → **TWRP** démarre. Rebrancher le câble.
 

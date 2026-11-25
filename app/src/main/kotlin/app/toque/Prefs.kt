@@ -492,4 +492,49 @@ class Prefs(context: Context) {
     fun forgetSite() {
         p.edit().remove("siteToken").remove("siteUser").remove("sitePendingFavorites").commit()
     }
+
+    // ------------------------------------------------------------------ Mealie (serveur de recettes auto-hébergé)
+
+    /** Adresse du serveur Mealie relié (« http://mealie.lan:9000 ») ; vide : aucun. */
+    var mealieUrl: String
+        get() = p.getString("mealieUrl", "") ?: ""
+        set(v) {
+            p.edit().putString("mealieUrl", v).commit()
+        }
+
+    /** Jeton d'API du robot sur ce serveur (jamais affiché ni écrit dans le journal). */
+    var mealieToken: String
+        get() = p.getString("mealieToken", "") ?: ""
+        set(v) {
+            p.edit().putString("mealieToken", v).commit()
+        }
+
+    /** Numéro du jeton créé par le robot (retiré du serveur en déliant) ; 0 : jeton collé à la main. */
+    var mealieTokenId: Long
+        get() = p.getLong("mealieTokenId", 0)
+        set(v) {
+            p.edit().putLong("mealieTokenId", v).commit()
+        }
+
+    val mealieLinked: Boolean get() = mealieUrl.isNotBlank() && mealieToken.isNotBlank()
+
+    var mealieLastMs: Long
+        get() = p.getLong("mealieLastMs", 0)
+        set(v) {
+            p.edit().putLong("mealieLastMs", v).commit()
+        }
+
+    /** Résultat de la dernière synchro avec Mealie, écrit dans la langue d'alors (mealieLastLang). */
+    var mealieLastResult: String
+        get() = p.getString("mealieLastResult", "") ?: ""
+        set(v) {
+            p.edit().putString("mealieLastResult", v).putString("mealieLastLang", I18n.code).commit()
+        }
+
+    val mealieLastLang: String get() = p.getString("mealieLastLang", "") ?: ""
+
+    /** Oublie le serveur Mealie relié. */
+    fun forgetMealie() {
+        p.edit().remove("mealieUrl").remove("mealieToken").remove("mealieTokenId").remove("mealieLastResult").remove("mealieLastMs").commit()
+    }
 }

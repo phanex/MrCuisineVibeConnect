@@ -46,8 +46,10 @@ recipes), see [docs/INSTALLATION.md](INSTALLATION.md#4-first-run--empty-bowl).
    `~/Toque/backup/boot-original.img` and `recovery-original.img` (16 MB each): **copy `~/Toque/backup/`
    to a USB stick or cloud — it is your only way back.** After each mtkclient session the robot
    stays in download mode (black screen): switch it off before the next step.
-   - **SKMC 1100 A1 only**: run `bash tools/setup/toque-setup.sh own-twrp` before `flash-twrp` to
-     build `~/Toque/twrp-own-kernel.img` around your robot's 2022 kernel.
+   - **SKMC 1100 A1 and SKMC 1200 D4** (board `spm188a`): run `bash tools/setup/toque-setup.sh own-twrp`
+     before `flash-twrp` to build `~/Toque/twrp-own-kernel.img` around your robot's own kernel.
+     `flash-twrp` reads the board from the backup and stops, without writing anything, if it is
+     needed and missing.
 4. `bash tools/setup/toque-setup.sh flash-twrp`: writes TWRP into `boot` only and reads it back.
 5. Switch the robot off, unplug the cable, switch it on → **TWRP** starts. Plug the cable back in.
 

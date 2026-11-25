@@ -53,6 +53,8 @@ data class Snapshot(
     val jobReverse: Boolean = false,
     val accessory: String = Accessory.BLADE.name,
     val hotBlendConfirmed: Boolean = false,
+    /** Fermentation en cours (yaourt) : sa durée maximale est [Limits.MAX_MS_FERMENT], pas 99 min. */
+    val jobFerment: Boolean = false,
     val turboActive: Boolean = false,
     val wireOperation: String = "STOP",
     val wireSpeed: Int = 0,
@@ -84,7 +86,7 @@ data class Snapshot(
         "elapsedMs" to elapsedMs, "totalMs" to totalMs, "remainingMs" to remainingMs,
         "waitingStop" to waitingStop, "jobSpeed" to jobSpeed, "jobTempLevel" to jobTempLevel,
         "jobTempC" to jobTempC, "jobProgram" to jobProgram,
-        "jobReverse" to jobReverse, "accessory" to accessory, "hotBlendConfirmed" to hotBlendConfirmed,
+        "jobReverse" to jobReverse, "accessory" to accessory, "hotBlendConfirmed" to hotBlendConfirmed, "jobFerment" to jobFerment,
         "turboActive" to turboActive, "wireOperation" to wireOperation, "wireSpeed" to wireSpeed,
         "wireTempLevel" to wireTempLevel, "txHex" to txHex, "txFrames" to txFrames,
         "rxFrames" to rxFrames, "invalidFrames" to invalidFrames,
@@ -112,7 +114,7 @@ data class Snapshot(
                 waitingStop = b("waitingStop"), jobSpeed = i("jobSpeed"), jobTempLevel = i("jobTempLevel"),
                 jobTempC = i("jobTempC"), jobProgram = s("jobProgram"),
                 jobReverse = b("jobReverse"), accessory = s("accessory").ifEmpty { Accessory.BLADE.name },
-                hotBlendConfirmed = b("hotBlendConfirmed"), turboActive = b("turboActive"),
+                hotBlendConfirmed = b("hotBlendConfirmed"), jobFerment = b("jobFerment"), turboActive = b("turboActive"),
                 wireOperation = s("wireOperation"), wireSpeed = i("wireSpeed"), wireTempLevel = i("wireTempLevel"),
                 txHex = s("txHex"), txFrames = l("txFrames"), rxFrames = l("rxFrames"), invalidFrames = l("invalidFrames"),
             )

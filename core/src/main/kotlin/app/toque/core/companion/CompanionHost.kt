@@ -45,7 +45,9 @@ data class RobotInfo(
 enum class CatalogFilter(val key: String) {
     ALL("all"), RECENT("recent"), FREQUENT("frequent"), FAVORITES("favorites"),
     /** Les pastilles du robot (RecipeChip) : « Mes recettes », « Communauté » (toqueapp.org), « 30 min max », une catégorie. */
-    USER("user"), COMMUNITY("community"), QUICK("quick"), CATEGORY("category");
+    USER("user"), COMMUNITY("community"), QUICK("quick"), CATEGORY("category"),
+    /** Recettes d'un serveur Mealie (un téléphone plus ancien ignore cette pastille). */
+    MEALIE("mealie");
 
     companion object {
         fun of(key: String?): CatalogFilter? = if (key.isNullOrEmpty()) ALL else values().firstOrNull { it.key == key }
