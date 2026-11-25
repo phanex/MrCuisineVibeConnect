@@ -18,7 +18,7 @@ procedures. **Before anything else, ask the person to read the model on the labe
 | Label under the robot | Robot | Tablet | Follow | Toque APK |
 |---|---|---|---|---|
 | **SKMC 1200** (A1, B2, C3) | Monsieur Cuisine **Connect** | Android 6.0 | This guide, from *What you are doing* | `Toque-X.Y.Z.apk` |
-| **SKMC 1100 A1** | Monsieur Cuisine **Connect** | Android 6.0 | This guide, with the extra step `own-twrp` | `Toque-X.Y.Z.apk` |
+| **SKMC 1100 A1**, **SKMC 1200 D4** | Monsieur Cuisine **Connect** | Android 6.0 | This guide, with the extra step `own-twrp` (board `spm188a`) | `Toque-X.Y.Z.apk` |
 | **SKMS 1200** | Monsieur Cuisine **Smart** (in test) | Android 8.1 | *Monsieur Cuisine Smart (SKMS 1200)* below | `Toque-smart-X.Y.Z.apk` |
 | anything else | unknown | | Stop. Ask the person to open an issue with a photo of the label | |
 
@@ -258,10 +258,11 @@ Same rules, safety checks and robot steps as Windows above, with these differenc
   - `flash-root` and `unroot` run **from TWRP** via [`tools/robot/twrp-flash.sh`](tools/robot/twrp-flash.sh)
     (checks both partitions first, reads each back; never switch off during writes; `unroot --download-mode`
     uses mtkclient if nothing boots).
-- **Which TWRP**: unlike `toque-setup.ps1`, the macOS script does **not** recognise the robot from
-  its backup. Read the label first: on an **SKMC 1100 A1**, run `own-twrp` after `backup` and before
-  `flash-twrp` (the guide's TWRP has no touch on that robot); on an SKMC 1200, go straight to
-  `flash-twrp`. If the label is unreadable, stop and ask.
+- **Which TWRP**: the macOS script reads the board from the backup in `flash-twrp` and stops, before
+  anything is written, unless the guide's TWRP suits it (project `l706_dfbh_v_695`) or `own-twrp`
+  was run. Project `spm188a` (**SKMC 1100 A1**, and the **SKMC 1200 D4** too: the label is not
+  enough) needs `own-twrp` after `backup` and before `flash-twrp` (the guide's TWRP has no touch
+  there). For a project the guide does not know, relay the message and let the person decide.
 - **Install**: `install` picks the highest `Toque-X.Y.Z.apk` version in `~/Toque/downloads` (never
   `Toque-smart-*`), and [`tools/install-robot.sh`](tools/install-robot.sh) stops when `adb install`
   does not answer `Success`, pushes `setup-root.sh` **and** `toque-su.sh` (the boot script that keeps

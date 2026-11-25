@@ -152,8 +152,7 @@ class RecipesScreen(
         }, Ui.lp(Ui.WRAP, Ui.WRAP, l = 16))
         root.addView(bar)
 
-        // Pastilles (elles défilent), puis le tri, toujours visible à droite ; le nombre de recettes
-        // est dans la barre de recherche, pour laisser la place aux pastilles.
+        // Pastilles (elles défilent), puis le tri, toujours visible à droite.
         val filters = Ui.horizontal(c, Gravity.CENTER_VERTICAL)
         chipScroller = HorizontalScrollView(c).apply {
             isHorizontalScrollBarEnabled = false
@@ -365,7 +364,7 @@ class RecipesScreen(
             selection.byUsage && query.isBlank() -> tr("Aucune recette cuisinée pour l'instant.\nLes recettes apparaissent ici dès leur première cuisson.")
             selection == ChipSelection.of(RecipeChip.FAVORITES) && query.isBlank() -> tr("Aucun favori pour l'instant.\nTouchez l'étoile d'une recette pour l'ajouter.")
             selection == ChipSelection.of(RecipeChip.COMMUNITY) && query.isBlank() ->
-                tr("Aucune recette de la communauté pour l'instant.\nRéglages › Recettes › Communauté › Synchroniser.")
+                tr("Aucune recette de la communauté pour l'instant.\nRéglages › Recettes › toqueapp.org › Synchroniser.")
             selection == ChipSelection.of(RecipeChip.USER) && query.isBlank() ->
                 tr("Aucune recette perso pour l'instant.\nTouchez « Nouvelle recette », ou le crayon d'une recette Lidl pour en faire votre version.")
             selection.hasFilters -> Ui.guillemets(tr("Aucune recette avec ces filtres.\nTouchez « Toutes » pour les retirer."))
@@ -377,7 +376,7 @@ class RecipesScreen(
     private fun refreshFavorites() {
         val site = a.app.site
         if (!a.prefs.siteLinked && !a.prefs.siteCommunity) {
-            a.toast(tr("Reliez un compte Toque (Réglages › Recettes › Communauté) pour retrouver ici vos favoris du site."), Ui.WARN)
+            a.toast(tr("Reliez un compte Toque (Réglages › Recettes › toqueapp.org) pour retrouver ici vos favoris du site."), Ui.WARN)
             return
         }
         if (site.busy) {
@@ -606,6 +605,7 @@ class RecipesScreen(
             // Recette de la communauté : sa langue seulement si ce n'est pas celle de l'interface.
             val lang = e.language.substringBefore('-')
             val tag = if (e.source == RecipeSource.USER) tr("Perso")
+                else if (e.source == RecipeSource.MEALIE) "Mealie"
                 else if (e.source == RecipeSource.COMMUNITY && lang == I18n.code.substringBefore('-')) ""
                 else lang.uppercase()
             badge.text = tag

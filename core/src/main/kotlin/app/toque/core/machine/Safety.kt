@@ -108,6 +108,11 @@ data class JobSpec(
      * 30 min ([Limits.KNEAD_COOLDOWN_MS]). Pas posé pour les étapes « Pétrir » des recettes.
      */
     val cooldown: Boolean = false,
+    /**
+     * Fermentation (yaourt) : une cuisson manuelle sans mélange, à [Limits.MAX_C_FERMENT] au plus,
+     * qui peut durer [Limits.MAX_MS_FERMENT]. Gardé par [SafetyPolicy.checkJob], réglages en cours compris.
+     */
+    val ferment: Boolean = false,
 ) {
     /** Programme à étapes de l'appli d'origine du Smart : chaque phase est une trame capturée. */
     val capturedSteps: Boolean get() = phases.size > 1 && phases.all { it.setting.program != null }
@@ -123,6 +128,13 @@ object Limits {
     /** Sans mélange (vitesse 0) : 120 °C au plus, le niveau du programme Vapeur ; au-delà, l'opération vapeur n'a pas été essayée. */
     const val MAX_TEMP_LEVEL_NO_STIR = 17
     const val HOT_C = 60
+    /**
+     * Seuil de la confirmation « contenu chaud » avant de mixer à vitesse 4 ou plus. Certaines bases ne
+     * mesurent qu'en paliers (37, 45, 50, 55, 60… : la table de la machine, voir #100) : 55 °C affiché
+     * peut cacher 59 °C. Le palier juste sous [HOT_C] compte donc déjà comme chaud. Le Turbo et la
+     * montée progressive gardent [HOT_C].
+     */
+    const val HOT_BLEND_C = 55
     const val MAX_MS_HIGH_SPEED = 15 * 60_000L    // vitesse > 6
     const val MAX_MS_DEFAULT = 99 * 60_000L
     const val MAX_MS_KNEAD = 120_000L
@@ -135,6 +147,13 @@ object Limits {
     const val MAX_C_CLEANING = 40
     /** Malaxer : l'appli d'origine fait attendre 30 min entre deux pétrissages (refroidissement). */
     const val KNEAD_COOLDOWN_MS = 30 * 60_000L
+    /**
+     * Fermentation (yaourt) : chauffe douce, lame à l'arrêt, au-delà des 99 min d'une cuisson
+     * manuelle. 12 h au plus, comme le Fermenter de l'appli d'origine du Smart et du Thermomix TM6.
+     */
+    const val MAX_MS_FERMENT = 12 * 3600_000L
+    /** Fermentation : 45 °C au plus. Même si la base gardait la chauffe sans Toque, elle reste tiède. */
+    const val MAX_C_FERMENT = 45
 }
 
 /**
@@ -234,7 +253,7 @@ object SafetyPolicy {
             v += Violation("accessory_speed", tr("%s : vitesse %d maximum", accessory.label, accessory.maxSpeed))
         if (accessory == Accessory.WHISK && kind == JobKind.TURBO)
             v += Violation("accessory_turbo", tr("Pas de Turbo avec le fouet"))
-        if (kind != JobKind.TURBO && actualTemperatureC != null && actualTemperatureC >= Limits.HOT_C &&
+        if (kind != JobKind.TURBO && actualTemperatureC != null && actualTemperatureC >= Limits.HOT_BLEND_C &&
             setting.speed >= 4 && !hotBlendConfirmed
         ) v += Violation(HOT_BLEND, tr("Contenu chaud (%d °C) : confirmez le mixage à vitesse %d", actualTemperatureC, setting.speed))
         return v
@@ -249,6 +268,7 @@ object SafetyPolicy {
 
     /** Durée maximale autorisée pour un travail, d'après son réglage le plus rapide. */
     fun maxDurationMs(spec: JobSpec): Long {
+        if (spec.ferment) return Limits.MAX_MS_FERMENT
         val fastest = spec.phases.maxOfOrNull { it.setting.speed } ?: 0
         // Programme à étapes non cyclique (nettoyage long : 1 min 45 à vitesse 10 sur 17 min) : on
         // compte le seul temps passé au-dessus de la vitesse 6.
@@ -292,6 +312,10 @@ object SafetyPolicy {
         if (spec.phases.any { it.untilTemperature && it.setting.program?.nettoyage != true })
             v += Violation("program", tr("Programme incohérent"))
         if (spec.totalMs < Limits.MIN_MS) v += Violation("too_short", tr("Durée trop courte"))
+        // Fermentation : longue, donc seulement lame à l'arrêt et chauffe douce, d'un bout à l'autre.
+        if (spec.ferment && (spec.kind != JobKind.MANUAL || spec.phases.size != 1 || spec.phases.any {
+                it.setting.speed != 0 || !it.setting.heated || it.setting.temperatureC > Limits.MAX_C_FERMENT }))
+            v += Violation("ferment", tr("Fermentation : lame à l'arrêt, %d °C maximum", Limits.MAX_C_FERMENT))
         val max = maxDurationMs(spec)
         if (spec.totalMs > max) v += Violation("too_long", tr("Durée maximale : %s", formatDuration(max)))
         for (p in spec.phases) {
@@ -354,6 +378,16 @@ object Programs {
         accessory = accessory,
         hotBlendConfirmed = hotBlendConfirmed,
     )
+
+    /** Yaourt (Connect) : température de fermentation, la plus douce que la base sait tenir. */
+    const val YOGURT_C = 37
+
+    /**
+     * Yaourt (Connect) : chauffe sans mélange à [YOGURT_C] pendant [durationMs] (6 à 12 h), la
+     * lame immobile pour ne pas casser le caillé. Le lait est déjà tiède et ensemencé.
+     */
+    fun yogurt(durationMs: Long, label: String = tr("Yaourt")) =
+        manual(0, Mcc.levelForCelsius(YOGURT_C), CW, durationMs, label = label).copy(ferment = true)
 
     /** Pétrir : 15 s inverse, repos, puis sens normal, vitesse 4. 45 s par défaut, 2 min max. */
     fun knead(durationMs: Long = 45_000L) = JobSpec(

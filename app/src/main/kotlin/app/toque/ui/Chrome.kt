@@ -49,6 +49,7 @@ abstract class Screen(val a: MainActivity) {
 /** Barre supérieure : retour, titre, minuteurs, état de la base, heure. */
 class TopBar(private val a: MainActivity) : LinearLayout(a) {
     private val back = Icon(a, Icon.Kind.BACK, Ui.TEXT)
+    /** Titre et, à côté, un compteur plus léger (« Recettes 1 118 »), alignés sur la même ligne de base. */
     private val titleBox = LinearLayout(a).apply {
         orientation = HORIZONTAL
         isBaselineAligned = true

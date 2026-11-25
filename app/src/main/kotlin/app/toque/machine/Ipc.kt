@@ -70,6 +70,7 @@ object Ipc {
         b.putString("accessory", j.accessory.name)
         b.putBoolean("hot", j.hotBlendConfirmed)
         b.putBoolean("cooldown", j.cooldown)
+        b.putBoolean("ferment", j.ferment)
         b.putIntArray("ops", j.phases.map { it.setting.operation.wire }.toIntArray())
         b.putIntArray("speeds", j.phases.map { it.setting.speed }.toIntArray())
         b.putIntArray("temps", j.phases.map { it.setting.temperatureLevel }.toIntArray())
@@ -126,6 +127,7 @@ object Ipc {
             accessory = try { Accessory.valueOf(b.getString("accessory") ?: "") } catch (_: Exception) { Accessory.BLADE },
             hotBlendConfirmed = b.getBoolean("hot"),
             cooldown = b.getBoolean("cooldown"),
+            ferment = b.getBoolean("ferment"),
         )
     }
 

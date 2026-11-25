@@ -176,7 +176,7 @@ class MainActivity : Activity() {
 
     /**
      * Une seule fois : relier un compte toqueapp.org (facultatif). « Non merci » : plus jamais
-     * demandé (Réglages › Recettes › Communauté reste là). Sans compte, la communauté arrive quand même.
+     * demandé (Réglages › Recettes › toqueapp.org reste là). Sans compte, la communauté arrive quand même.
      */
     fun offerSite() {
         if (prefs.siteOffered || prefs.siteLinked || overlayShown) return
@@ -187,7 +187,7 @@ class MainActivity : Activity() {
         head.addView(Ui.text(this, tr("Compte Toque"), 26f, Ui.TEXT, Ui.MEDIUM))
         card.addView(head)
         card.addView(Ui.text(this, tr("Vous avez un compte sur toqueapp.org ? Reliez-le pour retrouver ici vos favoris du site et publier vos recettes depuis le robot.") +
-            "\n\n" + tr("Sans compte, les recettes de la communauté arrivent quand même. Vous pourrez relier un compte plus tard dans Réglages › Recettes › Communauté."),
+            "\n\n" + tr("Sans compte, les recettes de la communauté arrivent quand même. Vous pourrez relier un compte plus tard dans Réglages › Recettes › toqueapp.org."),
             19f, Ui.TEXT2).apply { setLineSpacing(0f, 1.2f) }, Ui.lp(t = 16, b = 26))
         val row = Ui.horizontal(this, Gravity.END or Gravity.CENTER_VERTICAL)
         row.addView(Ui.button(this, tr("Non merci"), Ui.Style.GHOST, height = 60) {

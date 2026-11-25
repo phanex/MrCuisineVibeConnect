@@ -47,6 +47,9 @@ class RobotCompanion(private val app: ToqueApp) {
     /** Adresse IPv4 du robot sur le Wi-Fi, pour le QR code ; null sans Wi-Fi. */
     var addressProvider: () -> String? = { LanAddress.ipv4() }
 
+    /** Annonce mDNS du serveur ouvert (« _toque._tcp »). */
+    private val discovery = CompanionDiscovery(app)
+
     /** Dernier échec d'ouverture du port (vide si tout va bien). */
     @Volatile var serverError: String = ""
         private set
@@ -194,10 +197,13 @@ class RobotCompanion(private val app: ToqueApp) {
                         hub.start(port, bind)
                         app.log.write("compagnon", "serveur ouvert sur le port ${hub.port}")
                     }
+                    // Annoncé sur le Wi-Fi tant qu'il est ouvert (sans effet si c'est déjà fait).
+                    discovery.announce(hub.port, hub.pairing.robotId)
                     serverError = ""
                     lastLoggedError = ""
                 } else if (hub.running) {
                     if (stopNow) {
+                        discovery.withdraw()
                         hub.stop()
                         app.log.write("compagnon", "serveur fermé")
                     } else main.post {
