@@ -24,7 +24,7 @@ object TextNorm {
         // Polski (PL)
         "w", "z", "na", "do", "dla", "i", "oraz", "o", "po", "ze", "za", "od", "pod", "nad", "przepis", "przepisy",
         // Українська (UK)
-        "і", "й", "та", "в", "у", "на", "з", "із", "зі", "до", "для", "по", "за", "про", "від", "під", "над",
+        "і", "та", "в", "у", "на", "з", "із", "зі", "до", "для", "по", "за", "про", "від", "під", "над",
         "як", "що", "або", "чи", "не", "це", "рецепт", "рецепти",
     )
 
@@ -394,7 +394,7 @@ class SearchIndex private constructor(parts: Parts) {
         val c = HashMap<String, Double>()
         if (postings.containsKey(token)) c[token] = 1.0
         if (token.length >= 2) for (t in prefixMatches(token)) if (t != token) c[t] = maxOf(c[t] ?: 0.0, 0.75)
-        if (token.length >= 3) {
+        if (token.length >= 4) {
             val max = if (token.length >= 8) 2 else 1
             for (t in vocabulary) {
                 if (c.containsKey(t)) continue
