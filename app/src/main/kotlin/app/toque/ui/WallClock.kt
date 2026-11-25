@@ -1,6 +1,5 @@
 package app.toque.ui
 
-import android.content.Context
 import app.toque.TimeSync
 
 /**
@@ -13,10 +12,16 @@ object WallClock {
     const val UNKNOWN = "--:--"
     const val UNKNOWN_TICK_MS = 2_000L
 
-    fun known(c: Context): Boolean = TimeSync.showClock(c)
+    /** L'horloge est plausible (remplaçable dans les essais). */
+    @Volatile var plausible: () -> Boolean = { TimeSync.plausible() }
 
-    fun text(c: Context): String = if (known(c)) MainActivity.now() else UNKNOWN
+    /** Le robot est connecté au Wi-Fi ; posé par l'activité (remplaçable dans les essais). */
+    @Volatile var online: () -> Boolean = { true }
+
+    val known: Boolean get() = plausible() && online()
+
+    fun text(): String = if (known) MainActivity.now() else UNKNOWN
 
     /** Délai avant le prochain rafraîchissement : [normalMs], ou bien plus court tant que l'heure n'est pas réglée. */
-    fun nextMs(c: Context, normalMs: Long): Long = if (known(c)) normalMs else minOf(normalMs, UNKNOWN_TICK_MS)
+    fun nextMs(normalMs: Long): Long = if (known) normalMs else minOf(normalMs, UNKNOWN_TICK_MS)
 }

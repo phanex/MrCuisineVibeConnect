@@ -209,9 +209,18 @@ class SiteAccount(private val app: ToqueApp) {
             }
             val tmp = File(dir, "$name.part")
             tmp.writeBytes(bytes)
-            if (tmp.renameTo(File(dir, name))) got++ else tmp.delete()
+            // Le catalogue garde en mémoire le contenu du dossier des photos : il apprend celle-ci.
+            if (tmp.renameTo(File(dir, name))) {
+                got++
+                repo.photoSaved(name)
+            } else tmp.delete()
         }
-        dir.listFiles()?.forEach { f -> if (ToqueSite.PHOTO_NAME.matches(f.name) && f.name !in wanted) f.delete() }
+        dir.listFiles()?.forEach { f ->
+            if (ToqueSite.PHOTO_NAME.matches(f.name) && f.name !in wanted) {
+                f.delete()
+                repo.photoRemoved(f.name)
+            }
+        }
         if (got > 0) app.log.write("site", "$got photo(s) de recettes reçue(s)")
         return got
     }

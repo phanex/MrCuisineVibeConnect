@@ -8,6 +8,7 @@ import android.net.ConnectivityManager
 import app.toque.core.i18n.tr
 import app.toque.core.machine.RootShell
 import app.toque.core.time.ZoneLookup
+import app.toque.recipes.SyncService
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -186,6 +187,7 @@ class TimeSync(private val context: Context, private val prefs: Prefs, private v
                 val retries = longArrayOf(3_000, 5_000, 5_000, 5_000, 10_000, 10_000, 10_000, 15_000, 30_000,
                     60_000, 120_000, 300_000, 600_000, 1_800_000)
                 var i = 0
+                var alarmSet = false
                 while (true) {
                     val r = try {
                         TimeSync(context, prefs, log).run()
@@ -194,6 +196,15 @@ class TimeSync(private val context: Context, private val prefs: Prefs, private v
                         Result(false, current(), "")
                     }
                     lastOk = r.ok
+                    // L'alarme de la synchro de nuit attend une heure plausible (voir SyncService.schedule).
+                    if (!alarmSet && plausible()) {
+                        alarmSet = true
+                        try {
+                            SyncService.schedule(context)
+                        } catch (e: Exception) {
+                            log.write("heure", "alarme de synchro non posée : $e")
+                        }
+                    }
                     val wait = if (r.ok) 12 * 3600_000L else retries[minOf(i++, retries.size - 1)]
                     if (r.ok) i = 0
                     try {

@@ -28,8 +28,73 @@ object TextNorm {
         "як", "що", "або", "чи", "не", "це", "рецепт", "рецепти",
     )
 
+    /** Caractères (après minuscules) dont la forme simplifiée est calculée une fois : latin, grec, cyrillique… */
+    private const val FOLDED = 0x2500
+    private val folds = arrayOfNulls<String>(FOLDED)
+
+    /**
+     * Minuscules, sans accents, tout ce qui n'est ni lettre (tout alphabet) ni chiffre remplacé par une espace.
+     * Chaque caractère passe une seule fois par Normalizer (puis sa forme est gardée) : l'index normalise
+     * des dizaines de milliers de textes. Même résultat que la version à expressions régulières ([slow]),
+     * qui sert encore pour les textes aux caractères rares (emoji…).
+     */
     fun normalize(s: String): String {
-        var t = s.lowercase().replace("œ", "oe").replace("æ", "ae").replace("ß", "ss")
+        val low = s.lowercase()
+        val out = StringBuilder(low.length)
+        var gap = false
+        for (i in low.indices) {
+            val c = low[i]
+            if (c in 'a'..'z' || c in '0'..'9') {
+                if (gap && out.isNotEmpty()) out.append(' ')
+                gap = false
+                out.append(c)
+            } else if (c in APOSTROPHES && cyrillic(low, i - 1) && cyrillic(low, i + 1)) {
+                // М'ясо → мясо : l'apostrophe entre deux lettres cyrilliques ne coupe pas le mot.
+                continue
+            } else if (c < '\u0080') {
+                gap = true
+            } else if (c.code < FOLDED) {
+                for (f in fold(c)) {
+                    if (f == ' ') gap = true
+                    else {
+                        if (gap && out.isNotEmpty()) out.append(' ')
+                        gap = false
+                        out.append(f)
+                    }
+                }
+            } else {
+                return slow(low)
+            }
+        }
+        return out.toString()
+    }
+
+    private const val APOSTROPHES = "'’ʼ`"
+
+    private fun cyrillic(s: String, i: Int): Boolean = i in s.indices && s[i] in '\u0400'..'\u04FF'
+
+    /** Forme simplifiée d'un caractère : lettres (tout alphabet) et chiffres, espace pour le reste, rien pour un accent seul. */
+    private fun fold(c: Char): String {
+        folds[c.code]?.let { return it }
+        val d = when (c) {
+            'œ' -> "oe"
+            'æ' -> "ae"
+            'ß' -> "ss"
+            'ł' -> "l"
+            else -> Normalizer.normalize(c.toString(), Normalizer.Form.NFD)
+        }
+        val b = StringBuilder(d.length)
+        for (x in d) {
+            if (Character.getType(x) == Character.NON_SPACING_MARK.toInt()) continue
+            b.append(if (Character.isLetter(x) || Character.getType(x) == Character.DECIMAL_DIGIT_NUMBER.toInt()) x else ' ')
+        }
+        val f = b.toString()
+        folds[c.code] = f
+        return f
+    }
+
+    private fun slow(low: String): String {
+        var t = low.replace("œ", "oe").replace("æ", "ae").replace("ß", "ss")
             .replace("ł", "l")
             .replace(CYRILLIC_APOSTROPHE, "")
         t = Normalizer.normalize(t, Normalizer.Form.NFD)
@@ -94,18 +159,98 @@ data class RecipeFilter(
 )
 
 /**
+ * Une recette telle que l'index la garde : sa fiche courte et ses mots pondérés, calculés une fois
+ * ([SearchWords.of]) et enregistrés avec elle sur le robot. [head] : mots du titre, de la catégorie
+ * et des étiquettes ; [body] : ceux des ingrédients et des étapes qui ne sont pas déjà dans [head].
+ * Format : une ligne par poids, « 10 pizza pate », « 4 farine eau ».
+ */
+class IndexedRecipe(val entry: SearchIndex.Entry, val head: String, val body: String)
+
+object SearchWords {
+    /**
+     * Change quand le découpage des mots change : les mots enregistrés sont alors recalculés.
+     * 2 : lettres de tout alphabet, mots vides allemands, anglais, espagnols, polonais et ukrainiens.
+     */
+    const val VERSION = 2
+
+    fun entry(r: Recipe): SearchIndex.Entry =
+        SearchIndex.Entry(r.id, r.title, r.category, r.tags, r.favorite, r.source, r.totalMinutes, r.image,
+            r.machineSteps, TextNorm.normalize(r.title), r.rating, r.ratingCount, r.language)
+
+    fun of(r: Recipe): IndexedRecipe {
+        // terme -> poids le plus fort (titre > catégorie/étiquettes > ingrédients > étapes)
+        val w = LinkedHashMap<String, Int>()
+        fun add(text: String, weight: Int) {
+            for (t in TextNorm.tokens(text)) {
+                val old = w[t]
+                if (old == null || weight > old) w[t] = weight
+            }
+        }
+        add(r.title, SearchIndex.W_TITLE)
+        add(r.category, SearchIndex.W_TAG)
+        for (t in r.tags) add(t, SearchIndex.W_TAG)
+        for (g in r.ingredients) for (i in g.items) add(i.name, SearchIndex.W_INGREDIENT)
+        for (s in r.steps) add(s.text, SearchIndex.W_STEP)
+        return IndexedRecipe(entry(r), encode(w, SearchIndex.W_TAG, Int.MAX_VALUE), encode(w, 0, SearchIndex.W_TAG - 1))
+    }
+
+    private fun encode(w: Map<String, Int>, min: Int, max: Int): String {
+        val b = StringBuilder()
+        for (weight in SearchIndex.WEIGHTS) {
+            if (weight < min || weight > max) continue
+            var first = true
+            for ((t, v) in w) {
+                if (v != weight) continue
+                if (first) {
+                    if (b.isNotEmpty()) b.append('\n')
+                    b.append(weight)
+                    first = false
+                }
+                b.append(' ').append(t)
+            }
+        }
+        return b.toString()
+    }
+
+    /** Parcourt les mots enregistrés ([IndexedRecipe.head] ou [IndexedRecipe.body]) avec leur poids. */
+    fun forEach(words: String, action: (String, Int) -> Unit) {
+        val n = words.length
+        var i = 0
+        while (i < n) {
+            var end = words.indexOf('\n', i)
+            if (end < 0) end = n
+            // Le poids en tête de ligne, puis les termes séparés par une espace.
+            var weight = 0
+            var j = i
+            while (j < end && words[j] in '0'..'9') weight = weight * 10 + (words[j++] - '0')
+            while (j < end) {
+                while (j < end && words[j] == ' ') j++
+                var k = j
+                while (k < end && words[k] != ' ') k++
+                if (k > j && weight > 0) action(words.substring(j, k), weight)
+                j = k
+            }
+            i = end + 1
+        }
+    }
+}
+
+/**
  * Index de recherche en mémoire : tolérant aux accents, aux pluriels et aux fautes de frappe,
  * pondéré (titre > catégorie/tags > ingrédients > étapes). Quelques millisecondes pour
  * des milliers de recettes, même sur la tablette d'origine.
+ *
+ * Sur le robot il est construit en deux temps ([of]) : d'abord titres, catégories et étiquettes
+ * ([full] faux), assez pour la liste et la recherche par titre, puis le texte complet.
  */
-class SearchIndex(recipes: List<Recipe>) {
+class SearchIndex private constructor(parts: Parts) {
 
     class Entry(
         val id: String,
         val title: String,
         val category: String,
         val tags: List<String>,
-        val favorite: Boolean,
+        favorite: Boolean,
         val source: RecipeSource,
         val totalMinutes: Int,
         val image: String,
@@ -115,42 +260,117 @@ class SearchIndex(recipes: List<Recipe>) {
         val ratingCount: Int = 0,
         /** Recette dans une autre langue que celle de l'interface (« de-DE ») ; vide sinon. */
         val language: String = "",
-    )
+    ) {
+        /** Modifiable sur place : une étoile touchée ne reconstruit pas l'index. */
+        @Volatile var favorite: Boolean = favorite
+    }
 
     data class Hit(val entry: Entry, val score: Double, val matched: Int)
 
-    val entries: List<Entry>
-    private val vocabulary: Array<String>
-    /** terme -> (index d'entrée -> poids) */
-    private val postings: HashMap<String, HashMap<Int, Int>> = HashMap()
+    /** Recettes de l'index ; une place vide pour une recette retirée par [withChanges]. */
+    private val docs: Array<Entry?> = parts.docs
+    /** terme -> (n° de recette × 16 + poids), n° croissants */
+    private val postings: HashMap<String, IntArray> = parts.postings
+    private val vocabulary: Array<String> = parts.vocabulary
+    private val byId: HashMap<String, Int> = parts.byId
+    /** Ingrédients et étapes compris ; sinon titres, catégories et étiquettes seulement. */
+    val full: Boolean = parts.full
 
-    private companion object {
+    val entries: List<Entry> = docs.filterNotNull()
+
+    constructor(recipes: List<Recipe>) : this(build(recipes.map { SearchWords.of(it) }, true))
+
+    private class Parts(
+        val docs: Array<Entry?>,
+        val postings: HashMap<String, IntArray>,
+        val vocabulary: Array<String>,
+        val byId: HashMap<String, Int>,
+        val full: Boolean,
+    )
+
+    /** Liste d'entiers qui grandit, pour construire les listes de chaque terme sans objets Integer. */
+    private class Ints {
+        var a = IntArray(4)
+        var n = 0
+        fun add(v: Int) {
+            if (n == a.size) a = a.copyOf(n * 2)
+            a[n++] = v
+        }
+    }
+
+    companion object {
         const val W_TITLE = 10
         const val W_TAG = 5
         const val W_INGREDIENT = 4
         const val W_STEP = 1
+        /** Poids possibles, du plus fort au plus faible (moins de 16 : ils tiennent dans 4 bits). */
+        val WEIGHTS = intArrayOf(W_TITLE, W_TAG, W_INGREDIENT, W_STEP)
+
+        /** Index des recettes déjà découpées ; [full] faux : mots des titres, catégories et étiquettes seulement. */
+        fun of(recipes: List<IndexedRecipe>, full: Boolean): SearchIndex = SearchIndex(build(recipes, full))
+
+        private fun build(recipes: List<IndexedRecipe>, full: Boolean): Parts {
+            val docs = arrayOfNulls<Entry>(recipes.size)
+            val byId = HashMap<String, Int>(recipes.size * 2)
+            val lists = HashMap<String, Ints>()
+            for ((doc, r) in recipes.withIndex()) {
+                docs[doc] = r.entry
+                byId[r.entry.id] = doc
+                val add = { t: String, w: Int ->
+                    var l = lists[t]
+                    if (l == null) {
+                        l = Ints()
+                        lists[t] = l
+                    }
+                    l.add((doc shl 4) or w)
+                }
+                SearchWords.forEach(r.head, add)
+                if (full) SearchWords.forEach(r.body, add)
+            }
+            val postings = HashMap<String, IntArray>(lists.size * 2)
+            for ((t, l) in lists) postings[t] = l.a.copyOf(l.n)
+            val vocabulary = postings.keys.toTypedArray().also { java.util.Arrays.sort(it) }
+            return Parts(docs, postings, vocabulary, byId, full)
+        }
     }
 
-    init {
-        val list = ArrayList<Entry>(recipes.size)
-        for ((index, r) in recipes.withIndex()) {
-            list += Entry(r.id, r.title, r.category, r.tags, r.favorite, r.source, r.totalMinutes, r.image,
-                r.machineSteps, TextNorm.normalize(r.title), r.rating, r.ratingCount, r.language)
-            fun add(text: String, w: Int) {
-                for (t in TextNorm.tokens(text)) {
-                    val p = postings.getOrPut(t) { HashMap(4) }
-                    val old = p[index] ?: 0
-                    if (w > old) p[index] = w
-                }
+    /** L'entrée de la recette [id], ou null. */
+    fun entry(id: String): Entry? = byId[id]?.let { docs[it] }
+
+    /**
+     * Un nouvel index avec ces recettes ajoutées ou remplacées et celles-là retirées, sans tout
+     * reconstruire : les listes des termes non concernés sont partagées avec celui-ci.
+     */
+    fun withChanges(upserts: List<IndexedRecipe>, removed: Collection<String> = emptyList()): SearchIndex {
+        if (upserts.isEmpty() && removed.isEmpty()) return this
+        val list = ArrayList<Entry?>(docs.size + upserts.size)
+        list.addAll(docs)
+        val ids = HashMap(byId)
+        for (id in removed) ids.remove(id)?.let { list[it] = null }
+        for (u in upserts) ids.remove(u.entry.id)?.let { list[it] = null }
+        val post = HashMap(postings)
+        var newTerms = false
+        for (u in upserts) {
+            val doc = list.size
+            list += u.entry
+            ids[u.entry.id] = doc
+            val add = { t: String, w: Int ->
+                val old = post[t]
+                if (old == null) newTerms = true
+                val a = if (old == null) IntArray(1) else old.copyOf(old.size + 1)
+                a[a.size - 1] = (doc shl 4) or w
+                post[t] = a
             }
-            add(r.title, W_TITLE)
-            add(r.category, W_TAG)
-            for (t in r.tags) add(t, W_TAG)
-            for (i in r.allIngredients) add(i.name, W_INGREDIENT)
-            for (s in r.steps) add(s.text, W_STEP)
+            SearchWords.forEach(u.head, add)
+            if (full) SearchWords.forEach(u.body, add)
         }
-        entries = list
-        vocabulary = postings.keys.toTypedArray().also { java.util.Arrays.sort(it) }
+        val vocab = if (newTerms) post.keys.toTypedArray().also { java.util.Arrays.sort(it) } else vocabulary
+        return SearchIndex(Parts(list.toTypedArray(), post, vocab, ids, full))
+    }
+
+    /** Applique les favoris [ids] à toutes les entrées. */
+    fun applyFavorites(ids: Set<String>) {
+        for (e in docs) if (e != null) e.favorite = e.id in ids
     }
 
     val categories: List<String> by lazy {
@@ -203,30 +423,33 @@ class SearchIndex(recipes: List<Recipe>) {
             val limited = if (limit > 0) list.take(limit) else list
             return limited.map { Hit(it, 0.0, 0) }
         }
-        val perToken = tokens.map { tok ->
-            val scores = HashMap<Int, Double>()
+        val n = docs.size
+        val totals = DoubleArray(n)
+        val counts = IntArray(n)
+        val scores = DoubleArray(n)
+        for (tok in tokens) {
+            java.util.Arrays.fill(scores, 0.0)
             for ((term, quality) in candidates(tok)) {
                 val p = postings[term] ?: continue
-                for ((doc, weight) in p) {
-                    val s = quality * weight
-                    if (s > (scores[doc] ?: 0.0)) scores[doc] = s
+                for (v in p) {
+                    val doc = v ushr 4
+                    val s = quality * (v and 15)
+                    if (s > scores[doc]) scores[doc] = s
                 }
             }
-            scores
+            for (doc in 0 until n) if (scores[doc] > 0.0) {
+                totals[doc] += scores[doc]
+                counts[doc]++
+            }
         }
         val normQuery = TextNorm.normalize(query)
-        val totals = HashMap<Int, Double>()
-        val counts = HashMap<Int, Int>()
-        for (scores in perToken) for ((doc, s) in scores) {
-            totals[doc] = (totals[doc] ?: 0.0) + s
-            counts[doc] = (counts[doc] ?: 0) + 1
-        }
         val hits = ArrayList<Hit>()
-        for ((doc, total) in totals) {
-            val e = entries[doc]
+        for (doc in 0 until n) {
+            if (counts[doc] == 0) continue
+            val e = docs[doc] ?: continue
             if (!accepts(e, filter)) continue
-            val matched = counts[doc] ?: 0
-            var score = total
+            val matched = counts[doc]
+            var score = totals[doc]
             if (matched == tokens.size) score += 100.0
             if (e.normTitle.startsWith(normQuery)) score += 20.0 else if (e.normTitle.contains(normQuery)) score += 10.0
             if (e.favorite) score += 1.0
@@ -242,18 +465,23 @@ class SearchIndex(recipes: List<Recipe>) {
     fun withIngredients(list: List<String>, filter: RecipeFilter = RecipeFilter()): List<Hit> {
         val wanted = list.map { it.trim() }.filter { it.isNotEmpty() }
         if (wanted.isEmpty()) return emptyList()
-        val counts = HashMap<Int, Int>()
+        val counts = IntArray(docs.size)
+        val seen = BooleanArray(docs.size)
         for (w in wanted) {
-            val docs = HashSet<Int>()
+            java.util.Arrays.fill(seen, false)
             for (tok in TextNorm.tokens(w)) for ((term, q) in candidates(tok)) {
                 if (q < 0.5) continue
                 val p = postings[term] ?: continue
-                for ((doc, weight) in p) if (weight >= W_INGREDIENT) docs += doc
+                for (v in p) if ((v and 15) >= W_INGREDIENT) seen[v ushr 4] = true
             }
-            for (d in docs) counts[d] = (counts[d] ?: 0) + 1
+            for (d in seen.indices) if (seen[d]) counts[d]++
         }
-        return counts.filter { accepts(entries[it.key], filter) }
-            .map { Hit(entries[it.key], it.value.toDouble(), it.value) }
-            .sortedWith(compareByDescending<Hit> { it.matched }.thenBy { it.entry.normTitle })
+        val hits = ArrayList<Hit>()
+        for (d in counts.indices) {
+            if (counts[d] == 0) continue
+            val e = docs[d] ?: continue
+            if (accepts(e, filter)) hits += Hit(e, counts[d].toDouble(), counts[d])
+        }
+        return hits.sortedWith(compareByDescending<Hit> { it.matched }.thenBy { it.entry.normTitle })
     }
 }

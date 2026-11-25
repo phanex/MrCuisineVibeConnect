@@ -174,6 +174,12 @@ data class Step(
     val weigh: Weigh? = null,
     /** Réglage importé non vérifié : l'utilisateur doit le confirmer avant d'exécuter. */
     val needsReview: Boolean = false,
+    /**
+     * Réglage écrit ailleurs que sur le robot (tapé sur un téléphone) : tant qu'il reste à vérifier
+     * ([needsReview]), il ne s'enchaîne jamais à l'étape précédente et montre sa propre carte « Réglage à
+     * vérifier ». Un réglage importé, lui, se vérifie avec la première étape de sa série, qui le liste.
+     */
+    val reviewAlone: Boolean = false,
 )
 
 data class Recipe(
@@ -247,6 +253,7 @@ object RecipeCodec {
             }
             s.weigh?.let { w -> m["weigh"] = linkedMapOf("label" to w.label, "grams" to w.grams) }
             if (s.needsReview) m["needsReview"] = true
+            if (s.reviewAlone) m["reviewAlone"] = true
             m
         },
     )
@@ -279,7 +286,7 @@ object RecipeCodec {
                 val g = wm.int("grams") ?: 0
                 if (g > 0) Weigh(wm.str("label").orEmpty(), g) else null
             }
-            if (text.isEmpty() && mc == null) null else Step(text, mc, w, s.bool("needsReview") ?: false)
+            if (text.isEmpty() && mc == null) null else Step(text, mc, w, s.bool("needsReview") ?: false, s.bool("reviewAlone") ?: false)
         }
         return Recipe(
             id = id,
@@ -404,22 +411,76 @@ object UserRecipes {
         favorite = false,
     )
 
-    /** Ce qui empêche d'enregistrer la recette, ou null. */
-    fun problem(r: Recipe): String? {
-        if (r.title.isBlank()) return tr("Donnez un titre à la recette")
-        if (r.steps.isEmpty() && r.allIngredients.isEmpty()) return tr("Ajoutez au moins un ingrédient ou une étape")
-        for ((i, s) in r.steps.withIndex()) {
-            val v = s.machine?.violations()?.firstOrNull() ?: continue
-            return tr("Étape %d : %s", i + 1, v.message)
-        }
-        return null
-    }
+    /** Ce qui empêche d'enregistrer la recette, ou null (voir [RecipeRules.check]). */
+    fun problem(r: Recipe): String? = RecipeRules.check(r, r)?.message
 
     /** Ingrédient écrit d'une traite (« 500 g de farine ») : quantité et unité à part. */
     fun ingredient(text: String): Ingredient? {
         val t = text.trim().replace(Regex("\\s+"), " ")
         if (t.isEmpty()) return null
         return QuantityLinks.split(Ingredient(name = t))
+    }
+}
+
+/**
+ * Ce qui est refusé dans une recette perso : [code] stable, [field] (title, servings, totalMinutes,
+ * difficulty, content, steps), [step] (rang de l'étape, -1 hors étape), [message] tel que l'éditeur
+ * du robot l'affiche (« Étape 2 : … » pour une étape), [detail] le message de l'étape seule.
+ */
+data class RecipeProblem(val code: String, val field: String, val step: Int, val message: String, val detail: String = message)
+
+/**
+ * Les limites de l'éditeur de recettes du robot, en un seul endroit : l'écran d'édition du robot et
+ * l'API du compagnon les appliquent toutes deux. Une valeur déjà enregistrée et laissée telle quelle
+ * n'est pas rejugée (comme sur le robot : seul ce qui est saisi passe par les limites).
+ */
+object RecipeRules {
+    const val MIN_SERVINGS = 1
+    const val MAX_SERVINGS = 20
+    const val MAX_TOTAL_MINUTES = 600
+
+    const val TITLE_MISSING = "title_missing"
+    const val SERVINGS_RANGE = "servings_range"
+    const val TOTAL_TIME_RANGE = "total_time_range"
+    const val DIFFICULTY_RANGE = "difficulty_range"
+    const val CONTENT_EMPTY = "content_empty"
+    const val STEP_EMPTY = "step_empty"
+    const val WEIGH_RANGE = "weigh_range"
+    const val STEP_MACHINE = "step_machine"
+
+    /**
+     * Le premier refus pour [r], ou null. [before] : la recette telle qu'elle était (nombre de personnes,
+     * durée et étapes inchangés ne sont pas rejugés). [machines] faux : les réglages machine ne sont pas
+     * jugés ici (le téléphone n'en porte pas ; un réglage refusé reste bloqué à la cuisson).
+     */
+    fun check(r: Recipe, before: Recipe? = null, machines: Boolean = true): RecipeProblem? {
+        if (r.title.isBlank()) return RecipeProblem(TITLE_MISSING, "title", -1, tr("Donnez un titre à la recette"))
+        if (r.servings !in MIN_SERVINGS..MAX_SERVINGS && r.servings != before?.servings)
+            return RecipeProblem(SERVINGS_RANGE, "servings", -1, tr("De %d à %d personnes", MIN_SERVINGS, MAX_SERVINGS))
+        if (r.totalMinutes !in 0..MAX_TOTAL_MINUTES && r.totalMinutes != before?.totalMinutes)
+            return RecipeProblem(TOTAL_TIME_RANGE, "totalMinutes", -1, tr("Durée totale de 0 à %d min", MAX_TOTAL_MINUTES))
+        if (r.difficulty !in 1..3) return RecipeProblem(DIFFICULTY_RANGE, "difficulty", -1, tr("Difficulté : Facile, Moyen ou Difficile"))
+        if (r.steps.isEmpty() && r.allIngredients.isEmpty())
+            return RecipeProblem(CONTENT_EMPTY, "content", -1, tr("Ajoutez au moins un ingrédient ou une étape"))
+        val kept = before?.steps.orEmpty()
+        for ((i, s) in r.steps.withIndex()) {
+            // Étape inchangée : gardée telle quelle ; une étape écrite ou modifiée passe par l'éditeur d'étape.
+            val p = (if (s in kept) null else step(s, machines = false))
+                ?: if (machines) s.machine?.violations()?.firstOrNull()?.let { RecipeProblem(STEP_MACHINE, "steps", i, it.message) } else null
+            if (p != null) return p.copy(step = i, field = "steps", message = tr("Étape %d : %s", i + 1, p.detail))
+        }
+        return null
+    }
+
+    /** Une étape, comme l'éditeur d'étape du robot : du texte (ou un réglage, ou une pesée), une pesée de 1 à MAX_GRAMS. */
+    fun step(s: Step, machines: Boolean = true): RecipeProblem? {
+        if (s.text.isBlank() && s.machine == null && s.weigh == null)
+            return RecipeProblem(STEP_EMPTY, "steps", -1, tr("Écrivez ce qu'il faut faire"))
+        val w = s.weigh
+        if (w != null && w.grams !in 1..RecipeAdjustments.MAX_GRAMS)
+            return RecipeProblem(WEIGH_RANGE, "steps", -1, tr("Entrez un poids entre 1 et %d g", RecipeAdjustments.MAX_GRAMS))
+        if (machines) s.machine?.violations()?.firstOrNull()?.let { return RecipeProblem(STEP_MACHINE, "steps", -1, it.message) }
+        return null
     }
 }
 

@@ -26,6 +26,12 @@ object Portions {
     /** « 4 pers. », ou « 6 pots » quand la recette ne compte pas des personnes ([unit]). */
     fun label(n: Int, unit: String): String = if (unit.isBlank()) tr("%d pers.", n) else "$n $unit"
 
+    /**
+     * Bol peut-être trop rempli : la recette (pour [people] personnes, prévue pour [base]) est agrandie
+     * et ses ingrédients pèsent plus que [BOWL_MAX_G]. [totalGrams] : voir [totalGrams].
+     */
+    fun bowlTooFull(people: Int, base: Int, totalGrams: Int): Boolean = people > base && totalGrams > BOWL_MAX_G
+
     /** Nombres de personnes proposés pour une recette prévue pour [base] personnes. */
     fun range(base: Int): IntRange = if (base <= 0) IntRange.EMPTY else maxOf(1, ceil(base / 2.0).toInt())..base * 2
 
@@ -183,7 +189,11 @@ object Portions {
             val q = QuantityLinks.parse(i.qty) ?: return@sumOf 0.0
             METRIC[i.unit.trim().lowercase()]?.let { q * it } ?: 0.0
         }
-        val unlisted = r.unlistedWeighings().sumOf { (si, _) -> r.steps.getOrNull(si)?.weigh?.grams ?: 0 }
+        // Pesées reliées d'après les quantités affichées, pas celles d'avant correction : une pesée corrigée
+        // au-delà de la quantité d'origine compterait deux fois (et la fiche du téléphone, sans elles, différerait).
+        val current = if (r.allIngredients.none { it.originalQty.isNotBlank() }) r
+        else r.copy(ingredients = r.ingredients.map { g -> g.copy(items = g.items.map { it.copy(originalQty = "") }) })
+        val unlisted = current.unlistedWeighings().sumOf { (si, _) -> r.steps.getOrNull(si)?.weigh?.grams ?: 0 }
         return (listed + unlisted).roundToLong().toInt()
     }
 }

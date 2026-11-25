@@ -7,26 +7,42 @@ import android.os.Looper
 import android.util.LruCache
 import android.widget.ImageView
 import java.io.File
-import java.util.concurrent.Executors
+import java.util.concurrent.LinkedBlockingDeque
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 
-/** Chargement d'images économe en mémoire (sous-échantillonnage + cache) pour 1 Go de RAM. */
+/**
+ * Chargement d'images économe en mémoire (sous-échantillonnage + cache) pour 1 Go de RAM.
+ * Après un défilement rapide de la grille, les cases visibles passent d'abord : la dernière
+ * demandée est décodée la première, et une case qui montre déjà autre chose est sautée sans décoder.
+ */
 object ImageLoader {
     private val cache = object : LruCache<String, Bitmap>((Runtime.getRuntime().maxMemory() / 8 / 1024).toInt()) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount / 1024
     }
-    private val exec = Executors.newFixedThreadPool(2) { r -> Thread(r, "toque-images").apply { priority = Thread.MIN_PRIORITY } }
+
+    /** File « dernier arrivé, premier servi ». */
+    private class Lifo : LinkedBlockingDeque<Runnable>() {
+        override fun offer(e: Runnable): Boolean = offerFirst(e)
+    }
+
+    private val exec = ThreadPoolExecutor(2, 2, 30, TimeUnit.SECONDS, Lifo()) { r ->
+        Thread(r, "toque-images").apply { priority = Thread.MIN_PRIORITY }
+    }
     private val main = Handler(Looper.getMainLooper())
 
     fun load(view: ImageView, file: File?, targetWidth: Int) {
-        view.tag = file?.absolutePath
+        val path = file?.absolutePath
+        view.tag = path
         view.setImageDrawable(null)
-        if (file == null) return
-        val key = file.absolutePath + "@" + targetWidth
+        if (file == null || path == null) return
+        val key = "$path@$targetWidth"
         cache.get(key)?.let { view.setImageBitmap(it); return }
         exec.execute {
-            val bmp = decode(file, targetWidth) ?: return@execute
-            cache.put(key, bmp)
-            main.post { if (view.tag == file.absolutePath) view.setImageBitmap(bmp) }
+            // La case a été réutilisée pour une autre recette entre-temps : rien à décoder.
+            if (view.tag != path) return@execute
+            val bmp = cache.get(key) ?: decode(file, targetWidth)?.also { cache.put(key, it) } ?: return@execute
+            main.post { if (view.tag == path) view.setImageBitmap(bmp) }
         }
     }
 

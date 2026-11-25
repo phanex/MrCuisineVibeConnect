@@ -9,6 +9,7 @@ import app.toque.core.recipes.Step
 import app.toque.core.recipes.StepMachine
 import app.toque.core.recipes.Weigh
 import app.toque.core.recipes.adjusted
+import app.toque.core.recipes.corrected
 import app.toque.core.recipes.forServings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -95,6 +96,17 @@ class PortionsTest {
         // 500 + 500 + 7 g de la liste (le reste ne se pèse pas) + 1 000 g d'eau hors liste.
         assertEquals(2007, Portions.totalGrams(recipe))
     }
+    /** Pesée suivie d'une correction au-delà de la quantité d'origine : comptée une fois (liste), pas deux. */
+    @Test fun correctedWeighingsAreNotCountedTwice() {
+        val r = Recipe(id = "p", title = "Pesto", servings = 4,
+            ingredients = listOf(IngredientGroup("", listOf(Ingredient("50", "g", "basilic"), Ingredient("100", "g", "huile")))),
+            steps = listOf(Step("Ajouter le basilic.", weigh = Weigh("basilic", 50))))
+        val c = r.corrected(RecipeAdjustments().withQty(r.allIngredients[0], "130"))
+        assertEquals(130, c.steps[0].weigh!!.grams)
+        assertEquals(230, Portions.totalGrams(c))
+        assertEquals(460, Portions.totalGrams(c.forServings(8)))
+    }
+
     @Test fun countedNamesAgreeInNumber() {
         assertEquals("oignons", Portions.agree("oignon", 1.0, 2.0, "fr"))
         assertEquals("petits oignons rouges, émincé", Portions.agree("petit oignon rouge, émincé", 1.0, 2.0, "fr"))

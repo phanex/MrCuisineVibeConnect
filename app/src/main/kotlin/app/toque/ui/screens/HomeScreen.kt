@@ -4,16 +4,19 @@ import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
+import app.toque.companion.RobotCompanion
+import app.toque.core.companion.WaitingEnd
 import app.toque.core.i18n.I18n
 import app.toque.core.i18n.tr
 import app.toque.core.machine.Accessory
 import app.toque.core.machine.Snapshot
 import app.toque.core.recipes.CommunityRecipes
+import app.toque.core.recipes.Portions
 import app.toque.core.recipes.UserRecipes
 import app.toque.ui.HoldButton
 import app.toque.ui.Icon
-import app.toque.ui.MachineBar
 import app.toque.ui.KnobFocus
+import app.toque.ui.MachineBar
 import app.toque.ui.MainActivity
 import app.toque.ui.Screen
 import app.toque.ui.TimerPanel
@@ -47,15 +50,19 @@ class HomeScreen(a: MainActivity) : Screen(a) {
     private lateinit var timerText: TextView
     private lateinit var timerCount: TextView
     private lateinit var turboBtn: HoldButton
+    private lateinit var receivedCard: LinearLayout
+    private lateinit var receivedTitle: TextView
+    private lateinit var receivedLabel: TextView
     private lateinit var searchHint: TextView
-    /** Titre de la recette guidée cherché dans la base (catalogue pas encore chargé) : une fois par recette. */
-    private var titleLookup = ""
     /** Éléments que la molette parcourt, dans l'ordre de lecture, avec le rayon de leurs coins. */
     private val knobTargets = ArrayList<Pair<View, Float>>()
     private lateinit var recipesTile: View
     private val knob by lazy { KnobFocus(view, HomeKnob()) }
+    /** Titre de la recette guidée cherché dans la base (catalogue pas encore chargé) : une fois par recette. */
+    private var titleLookup = ""
     private var unsub: (() -> Unit)? = null
     private var unsubTimers: (() -> Unit)? = null
+    private var unsubCompanion: (() -> Unit)? = null
     /** Ce qui s'adapte dans une tuile quand la barre du bas lui prend de la hauteur. */
     private class TileParts(val top: View, val text: View, val sub: TextView)
     private val tiles = ArrayList<TileParts>()
@@ -64,7 +71,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         override fun run() {
             refreshClock()
             // Heure pas encore réglée : on regarde souvent, pour l'afficher dès qu'elle l'est.
-            view.postDelayed(this, WallClock.nextMs(a, 10_000))
+            view.postDelayed(this, WallClock.nextMs(10_000))
         }
     }
 
@@ -195,6 +202,11 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         shortcuts.addView(freqBtn, LinearLayout.LayoutParams(Ui.u(50), Ui.u(50)))
         left.addView(shortcuts, Ui.lp(Ui.MATCH, Ui.WRAP, t = 28))
 
+        // Recette envoyée par un téléphone : elle attend ici, rien ne démarre.
+        receivedCard = receivedCard()
+        receivedCard.visibility = View.GONE
+        left.addView(receivedCard, Ui.lp(Ui.MATCH, Ui.WRAP, t = 16))
+
         resumeCard = Ui.horizontal(c, Gravity.CENTER_VERTICAL).apply {
             minimumHeight = Ui.u(50)
             setPadding(Ui.u(16), 0, Ui.u(10), 0)
@@ -206,6 +218,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         knobTargets += searchBar to 22f
         knobTargets += recentBtn to 22f
         knobTargets += freqBtn to 22f
+        knobTargets += receivedCard to 24f
         knobTargets += resumeCard to 22f
         resumeCard.addView(resumeText, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
         val cancel = android.widget.FrameLayout(c)
@@ -331,7 +344,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         return watch
     }
 
-    /** La molette sur l'accueil : recherche, raccourcis, carte « Reprendre », puis les six tuiles. */
+    /** La molette sur l'accueil : recherche, raccourcis, cartes, puis les six tuiles. */
     private inner class HomeKnob : KnobFocus.Slots {
         override val size: Int get() = knobTargets.size
         /** Au premier cran : la recette en cours s'il y en a une, sinon « Recettes ». */
@@ -369,6 +382,42 @@ class HomeScreen(a: MainActivity) : Screen(a) {
     override fun onKnobPress(): Boolean {
         knob.press()
         return true
+    }
+
+    private fun receivedCard(): LinearLayout {
+        val card = Ui.horizontal(c)
+        card.setPadding(Ui.u(22), Ui.u(16), Ui.u(12), Ui.u(16))
+        card.background = Ui.pressable(Ui.round(Ui.ACCENT_DIM, 24f), 24f)
+        card.addView(Icon(c, Icon.Kind.PHONE, Ui.ACCENT_INK), LinearLayout.LayoutParams(Ui.u(26), Ui.u(26)).apply { rightMargin = Ui.u(14) })
+        val col = Ui.vertical(c)
+        receivedLabel = Ui.ellipsize(Ui.text(c, tr("Reçue du téléphone"), 15f, Ui.TEXT2))
+        col.addView(receivedLabel)
+        receivedTitle = Ui.ellipsize(Ui.text(c, "", 19f, Ui.TEXT, Ui.MEDIUM))
+        col.addView(receivedTitle, Ui.lp(t = 2))
+        card.addView(col, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
+        card.addView(Icon(c, Icon.Kind.CHEVRON, Ui.TEXT2), LinearLayout.LayoutParams(Ui.u(24), Ui.u(24)).apply { leftMargin = Ui.u(14) })
+        val remove = android.widget.FrameLayout(c)
+        remove.addView(Icon(c, Icon.Kind.CLOSE, Ui.TEXT2), Ui.flp(Ui.u(24), Ui.u(24), Gravity.CENTER))
+        remove.background = Ui.pressable(Ui.round(0, 28f), 28f)
+        remove.isClickable = true
+        remove.contentDescription = tr("Retirer la recette reçue")
+        remove.setOnClickListener { a.app.companion?.hub?.clearWaiting(WaitingEnd.REMOVED) }
+        card.addView(remove, LinearLayout.LayoutParams(Ui.u(56), Ui.u(56)).apply { leftMargin = Ui.u(8) })
+        card.isClickable = true
+        card.setOnClickListener { openReceived() }
+        return card
+    }
+
+    private fun openReceived() {
+        val hub = a.app.companion?.hub ?: return
+        val w = hub.waitingRecipe ?: return
+        val r = a.app.recipes.get(w.recipeId)
+        if (r != null) a.push(RecipeScreen(a, r))
+        else {
+            // Supprimée depuis l'envoi (synchronisation) : rien à cuisiner.
+            a.toast(tr("Recette introuvable"), Ui.WARN)
+            hub.clearWaiting(WaitingEnd.REMOVED)
+        }
     }
 
     private fun tileLp(gap: Boolean) = LinearLayout.LayoutParams(0, Ui.MATCH, 1f).apply { if (gap) rightMargin = Ui.u(16) }
@@ -421,7 +470,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
 
     private fun refreshClock() {
         // Après une coupure de courant, la tablette se croit en 2010 : rien de faux tant que l'heure n'est pas réglée.
-        if (!WallClock.known(a)) {
+        if (!WallClock.known) {
             clock.text = WallClock.UNKNOWN
             date.text = tr("Réglage de l'heure…")
             // Salut neutre : « Bonjour » se traduit ailleurs par « Good morning ».
@@ -447,11 +496,17 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         recipesSub.text = when {
             !repo.loaded -> tr("Chargement…")
             n == 0 -> tr("Aucune recette pour l'instant")
-            else -> listOfNotNull(
-                when (lidl) { 0 -> null; 1 -> tr("1 recette"); else -> tr("%d recettes", lidl) },
-                when (perso) { 0 -> null; 1 -> tr("1 recette perso"); else -> tr("%d recettes perso", perso) },
-                when (community) { 0 -> null; 1 -> tr("1 de la communauté"); else -> tr("%d de la communauté", community) },
-            ).joinToString("\n")
+            else -> {
+                // Deux lignes au plus sous la tuile : s'il y a aussi des recettes perso, celles de la communauté
+                // sont comptées avec les autres (leur nombre reste dans Réglages › Recettes de la communauté).
+                val merged = perso > 0 && community > 0
+                val others = if (merged) lidl + community else lidl
+                listOfNotNull(
+                    when (others) { 0 -> null; 1 -> tr("1 recette"); else -> tr("%d recettes", others) },
+                    when (perso) { 0 -> null; 1 -> tr("1 recette perso"); else -> tr("%d recettes perso", perso) },
+                    if (merged) null else when (community) { 0 -> null; 1 -> tr("1 de la communauté"); else -> tr("%d de la communauté", community) },
+                ).joinToString("\n")
+            }
         }
         val favs = repo.index.entries.count { it.favorite }
         favSub.text = when {
@@ -472,6 +527,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
             shortcuts.visibility = if (hasActiveRecipe) View.GONE else View.VISIBLE
         }
         if (title != null) resumeText.text = tr("Reprendre « %s » — étape %d", title, a.prefs.guidedStep + 1)
+        refreshReceived()
     }
 
     /**
@@ -484,7 +540,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         if (guided.isEmpty()) return null
         val repo = a.app.recipes
         if (repo.loaded) {
-            val title = repo.index.entries.firstOrNull { it.id == guided }?.title ?: return null
+            val title = repo.index.entry(guided)?.title ?: return null
             if (a.prefs.guidedTitle != "$guided\t$title") a.prefs.guidedTitle = "$guided\t$title"
             return title
         }
@@ -503,15 +559,41 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         return null
     }
 
+    /**
+     * Carte de la recette reçue, à la place de celle de la recette en cours. Les deux à la fois ne
+     * tiennent pas sous les raccourcis : les raccourcis « Récentes » et « Fréquentes » (aussi dans
+     * Recettes) laissent alors leur place, la recette reçue au-dessus, la recette en cours dessous.
+     */
+    private fun refreshReceived() {
+        val w = a.app.companion?.hub?.waitingRecipe
+        receivedCard.visibility = if (w != null) View.VISIBLE else View.GONE
+        if (w != null) {
+            receivedTitle.text = w.title
+            // Le nombre de personnes choisi (sur la page de la recette ou depuis un téléphone).
+            val unit = a.app.recipes.get(w.recipeId)?.servingUnit.orEmpty()
+            receivedLabel.text = if (w.servings > 0) tr("Reçue du téléphone") + " · " + Portions.label(w.servings, unit) else tr("Reçue du téléphone")
+        }
+        val both = w != null && resumeCard.visibility == View.VISIBLE
+        shortcuts.visibility = if (resumeCard.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        // Les deux cartes plus serrées, la recette en cours sur une ligne ; le rappel du bouton rotatif
+        // (aussi dans Réglages › Outils) revient dès qu'une carte s'en va.
+        if (both) knobChip.visibility = View.GONE
+        val pad = if (both) 10 else 16
+        receivedCard.setPadding(Ui.u(22), Ui.u(pad), Ui.u(12), Ui.u(pad))
+        (resumeCard.layoutParams as LinearLayout.LayoutParams).topMargin = Ui.u(if (w != null) 10 else 28)
+        resumeCard.requestLayout()
+    }
+
     override fun onShow() {
         refreshClock()
         refresh()
         refreshTimers()
         unsub = a.app.recipes.onChange { refresh() }
         unsubTimers = Timers.of(a).listen { refreshTimers() }
+        unsubCompanion = a.app.companion?.onChange { ch -> if (ch == RobotCompanion.Change.WAITING) refreshReceived() }
         a.updates.onChange = { refresh() }
         view.removeCallbacks(tick)
-        view.postDelayed(tick, WallClock.nextMs(a, 10_000))
+        view.postDelayed(tick, WallClock.nextMs(10_000))
     }
 
     override fun onHide() {
@@ -520,6 +602,8 @@ class HomeScreen(a: MainActivity) : Screen(a) {
         unsub?.invoke()
         unsubTimers?.invoke()
         unsubTimers = null
+        unsubCompanion?.invoke()
+        unsubCompanion = null
         a.updates.onChange = null
         view.removeCallbacks(tick)
     }

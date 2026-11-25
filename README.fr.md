@@ -9,6 +9,12 @@ gardant **les recettes Lidl**.
 🌐 **[toqueapp.org](https://toqueapp.org)**, le site communautaire de Toque : partagez vos recettes,
 trouvez celles des autres et envoyez-les sur votre robot.
 
+📱 **[Toque Compagnon](https://github.com/Wuki60/ToqueCompagnon)**, l'appli pour téléphone et
+tablette : suivez la cuisson et envoyez des recettes sur votre robot par le Wi-Fi de la maison.
+
+❤️ **[Soutenir Toque](https://toqueapp.org/donate.php)** : Toque est gratuit et sans publicité, un don
+aide à le faire vivre.
+
 ## Robots pris en charge
 
 | Robot | Étiquette sous le robot | État | Installation |
@@ -52,6 +58,32 @@ catalan et ukrainien.
 
 Une question, ou un robot que vous aimeriez voir pris en charge : [page Contact](https://toqueapp.org/contact.php).
 Si Toque vous rend service, vous pouvez [soutenir le projet](https://toqueapp.org/donate.php).
+
+## Téléphone et tablette : [Toque Compagnon](https://github.com/Wuki60/ToqueCompagnon)
+
+Toque Compagnon est l'appli Android pour téléphone et tablette qui accompagne Toque, sur le Connect
+et le Smart (en test). Elle parle au robot par le Wi-Fi de la maison seulement, jamais par Internet.
+
+- **Suivez la cuisson en direct** : temps restant, température, vitesse et poids, avec des
+  notifications même appli fermée.
+- **Pilotez dans les limites** : pause, arrêt, reprise, changement de réglage, tare de la balance, et
+  cuisson manuelle couvercle fermé. Lancer une recette, une étape ou un programme, le Turbo, la
+  reprise après ouverture du couvercle et le mixage à chaud restent sur le robot. Chaque commande du
+  téléphone passe par les mêmes contrôles de sécurité qu'un appui sur l'écran du robot.
+- **Recettes** : parcourez les recettes du robot avec leurs photos, changez le nombre de personnes,
+  gérez vos favoris, envoyez une recette sur l'accueil du robot et écrivez les vôtres.
+- Une **liste de courses** gardée sur le téléphone, l'affichage tablette et paysage, en français,
+  anglais, allemand, espagnol, catalan et ukrainien.
+
+**L'obtenir** : téléchargez l'APK dans la
+[dernière version de Toque Compagnon](https://github.com/Wuki60/ToqueCompagnon/releases/latest). Il
+faut Toque 0.10.0 ou plus récent sur le robot.
+
+**Relier un téléphone** : sur le robot, *Réglages › Téléphone › Appairer un téléphone*, puis scannez
+le QR code avec l'appli, ou saisissez le code à 6 chiffres affiché dessous (valable 2 minutes). Le
+robot n'écoute qu'une fois un téléphone appairé ou l'écran d'appairage ouvert, et un téléphone non
+appairé ne le voit pas, même sur le même Wi-Fi. L'écran d'appairage liste les téléphones appairés et
+retire ceux qui ne servent plus.
 
 ## Installer avec un agent IA (Connect)
 
@@ -294,9 +326,10 @@ déjà enregistrés pour git).
 - Contributions : @pierok13 (veille, notes et quantités, paliers, sons, récentes, certificats Android 6,
   capteur du bol), @lucasbraud, @OUTSIDE2k8 (traduction espagnole), @Locodice67 (traduction allemande, heure au démarrage,
   script d'installation), @baptiste-gislot, @florentdestremau (bouton rotatif), @maximehuran (lumière
-  du bouton en veille), @badrbelhaj1 (Magisk au redémarrage, TWRP du SKMC 1100 A1, chauffe sans
-  mélange, menu des réglages, filtres et tri des recettes, minuteurs, roue des couleurs, couleurs de
-  la molette, écran de démarrage, vérification rapide du port série, contrôles d'installation,
+  du bouton en veille), @badrbelhaj1 (Toque Compagnon, l'appli téléphone et sa partie robot,
+  Magisk au redémarrage, TWRP du SKMC 1100 A1, chauffe sans mélange, menu des réglages, filtres et
+  tri des recettes, liste des recettes prête en une seconde, minuteurs, roue des couleurs, couleurs
+  de la molette, écran de démarrage, vérification rapide du port série, contrôles d'installation,
   corrections d'interface), @meuca1 (traduction catalane), @Flav974 (portage du Smart :
   protocole, programmes, captures), @Tidusneo24150 (Camybrith Cooking : plages de température et
   modes des recettes du Smart, relecture sur un vrai Smart), @pierrearnou (couleurs d'accent,

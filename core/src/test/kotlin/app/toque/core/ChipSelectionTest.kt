@@ -15,7 +15,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Plusieurs pastilles à la fois et tri de la liste de recettes (recettes inventées). */
+/** Plusieurs pastilles à la fois et tri de la liste du robot (recettes inventées). */
 class ChipSelectionTest {
     private fun r(id: String, title: String, cat: String, min: Int, rating: Double = 0.0, votes: Int = 0, fav: Boolean = false,
                   user: Boolean = false, ingredients: List<String> = emptyList()) =
@@ -94,11 +94,11 @@ class ChipSelectionTest {
         assertEquals(emptyList<String>(), ids(ChipSelection("Entrées", user = true)))
     }
 
-    @Test fun oneChipSelectsLikeTheChipAlone() {
+    @Test fun oneChipSelectsLikeThePhone() {
         val texts = listOf("", "soupe", "riz", "lait, riz", "pomes", "xyzzy")
         for (chip in RecipeChip.list(index) + RecipeChip.category("Inconnue")) for (q in texts) {
-            val alone = RecipeChip.select(index, chip, q, { recent }, { frequent }).map { it.entry.id }
-            assertEquals("${chip.key} « $q »", alone, ids(ChipSelection.of(chip), q))
+            val phone = RecipeChip.select(index, chip, q, { recent }, { frequent }).map { it.entry.id }
+            assertEquals("${chip.key} « $q »", phone, ids(ChipSelection.of(chip), q))
             assertTrue(ChipSelection.of(chip).isOn(chip))
         }
     }

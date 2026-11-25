@@ -3,6 +3,7 @@ package app.toque.recipes
 import android.os.Environment
 import app.toque.Logbook
 import app.toque.core.i18n.tr
+import app.toque.core.recipes.Recipe
 import app.toque.core.recipes.RecipeCodec
 import app.toque.core.recipes.RecipeSource
 import app.toque.core.recipes.UserRecipes
@@ -14,7 +15,8 @@ import java.io.File
  * À appeler hors du fil de l'interface.
  */
 class RecipeFiles(private val repo: RecipeRepo, private val log: Logbook) {
-    class Result(val ok: Boolean, val message: String)
+    /** [toAdapt] : étapes importées dont le réglage machine est hors des règles (à adapter au moment de cuisiner). */
+    class Result(val ok: Boolean, val message: String, val toAdapt: Int = 0)
 
     private val dir: File get() = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
 
@@ -43,6 +45,7 @@ class RecipeFiles(private val repo: RecipeRepo, private val log: Logbook) {
         var added = 0
         var updated = 0
         var bad = 0
+        var toAdapt = 0
         for (f in files) {
             val text = try { f.readText() } catch (_: Exception) { continue }
             // Les autres fichiers JSON du dossier ne sont pas des recettes Toque.
@@ -56,16 +59,40 @@ class RecipeFiles(private val repo: RecipeRepo, private val log: Logbook) {
                 continue
             }
             bad += unreadable
-            val mine = list.map { UserRecipes.imported(it) }
+            val mine = list.map { reviewed(UserRecipes.imported(it)) }
+            for (r in mine) toAdapt += adapt(r)
             if (mine.isEmpty()) continue
             repo.upsertAll(mine, rebuild = false)
             for (r in mine) if (r.id in present) updated++ else added++
         }
         if (found == 0) return Result(false, tr("Aucun fichier de recettes Toque dans Download"))
         repo.refresh()
-        log.write("recettes", "import : $added nouvelles, $updated mises à jour, $bad illisibles ($found fichiers)")
+        log.write("recettes", "import : $added nouvelles, $updated mises à jour, $bad illisibles, $toAdapt étapes à adapter ($found fichiers)")
         if (added + updated == 0) return Result(false, tr("Aucune recette lisible dans les fichiers de Download"))
         val note = if (bad > 0) " " + tr("(%d illisibles)", bad) else ""
-        return Result(true, tr("%d recettes ajoutées, %d mises à jour", added, updated) + note)
+        val adapt = if (toAdapt > 0) " ; " + tr("%d étapes ont un réglage à adapter au moment de cuisiner", toAdapt) else ""
+        return Result(true, tr("%d recettes ajoutées, %d mises à jour", added, updated) + note + adapt, toAdapt)
+    }
+
+    companion object {
+        /**
+         * Un fichier ne dit pas ce qui a été vérifié sur ce robot : chaque étape avec un réglage machine
+         * devra être confirmée sur le robot avant son premier lancement, quoi que dise le fichier.
+         */
+        fun reviewed(r: Recipe): Recipe = r.copy(steps = r.steps.map { if (it.machine != null && !it.needsReview) it.copy(needsReview = true) else it })
+
+        /**
+         * Étapes dont le réglage est hors des règles : importées quand même, bloquées à la cuisson comme
+         * aujourd'hui. Un réglage que le cœur refuse de décrire (programme d'un autre robot à une
+         * température hors de sa plage) compte aussi.
+         */
+        fun adapt(r: Recipe): Int = r.steps.count { s ->
+            val m = s.machine ?: return@count false
+            try {
+                !m.valid
+            } catch (_: RuntimeException) {
+                true
+            }
+        }
     }
 }

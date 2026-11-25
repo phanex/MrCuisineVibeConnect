@@ -3,9 +3,9 @@ package app.toque.core.recipes
 import app.toque.core.i18n.tr
 
 /**
- * Une pastille de la liste de recettes (« Toutes », « Favoris », « Soupes »…) : la liste ([list])
- * et ce qu'une pastille seule montre ([select]) ne se calculent qu'ici. [category] n'a de sens que
- * pour [Kind.CATEGORY].
+ * Une pastille de la liste de recettes (« Toutes », « Favoris », « Soupes »…). Les mêmes sur le
+ * robot et sur le téléphone : la liste ([list]) et ce qu'elle montre ([select]) ne se calculent
+ * qu'ici. [category] n'a de sens que pour [Kind.CATEGORY].
  */
 data class RecipeChip(val kind: Kind, val category: String = "") {
     enum class Kind(val key: String) {
@@ -54,7 +54,7 @@ data class RecipeChip(val kind: Kind, val category: String = "") {
         val QUICK = RecipeChip(Kind.QUICK)
         fun category(name: String) = RecipeChip(Kind.CATEGORY, name)
 
-        /** Les pastilles toujours là. */
+        /** Les pastilles toujours là (et les seules d'un robot qui ne donne pas sa liste). */
         val FIXED: List<RecipeChip> = listOf(ALL, RECENT, FREQUENT, FAVORITES)
         const val QUICK_MINUTES = 30
         const val MAX_CATEGORIES = 30
@@ -77,7 +77,8 @@ data class RecipeChip(val kind: Kind, val category: String = "") {
         /**
          * Ce que montre la pastille [chip] avec le texte [query] : recherche tolérante (ou par
          * ingrédients séparés par des virgules) dans le filtre de la pastille ; pour Récentes et
-         * Fréquentes, l'ordre des cuissons, que le texte ne fait que filtrer.
+         * Fréquentes, l'ordre des cuissons, que le texte ne fait que filtrer. [limit] borne la
+         * recherche ; le robot montre tout (sa grille recycle ses cases), le téléphone charge page par page.
          */
         fun select(
             index: SearchIndex,
@@ -85,9 +86,10 @@ data class RecipeChip(val kind: Kind, val category: String = "") {
             query: String,
             recentIds: () -> List<String> = { emptyList() },
             frequentIds: () -> List<String> = { emptyList() },
+            limit: Int = Int.MAX_VALUE,
         ): List<SearchIndex.Hit> {
             val f = chip.filter
-            val found = if (query.contains(',')) index.withIngredients(query.split(','), f) else index.search(query, f)
+            val found = if (query.contains(',')) index.withIngredients(query.split(','), f) else index.search(query, f, limit)
             if (!chip.byUsage) return found
             val ids = if (chip.kind == Kind.RECENT) recentIds() else frequentIds()
             val byId = HashMap<String, SearchIndex.Entry>()
