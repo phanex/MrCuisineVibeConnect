@@ -10,8 +10,6 @@ import app.toque.core.i18n.I18n
 import app.toque.core.i18n.tr
 import app.toque.core.machine.Accessory
 import app.toque.core.machine.Snapshot
-import app.toque.core.robot.Feature
-import app.toque.core.robot.RobotProfiles
 import app.toque.core.recipes.CommunityRecipes
 import app.toque.core.recipes.Portions
 import app.toque.core.recipes.UserRecipes
