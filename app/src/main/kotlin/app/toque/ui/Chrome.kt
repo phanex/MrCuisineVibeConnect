@@ -50,7 +50,7 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
     private val temp = barChip("", Icon.Kind.THERMO, Ui.TEXT2)
     private val tempIcon = temp.getChildAt(0) as Icon
     /** Triangle rouge sur la température, qui clignote tant que le bol est chaud (≥ 60 °C). */
-    private val hotWarning = Icon(a, Icon.Kind.WARNING_FILLED, Ui.DANGER)
+    val hotWarning = Icon(a, Icon.Kind.WARNING_FILLED, Ui.DANGER)
     private val blink = ObjectAnimator.ofFloat(hotWarning, "alpha", 1f, 0.12f).apply {
         duration = 500
         repeatMode = ValueAnimator.REVERSE
@@ -63,19 +63,23 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
     private val home = Icon(a, Icon.Kind.HOME, Ui.TEXT)
     /** Minuteur de cuisine : bouton rond au repos, pastille orange (temps restant, nombre) quand il en tourne. */
     private val timerButton = Icon(a, Icon.Kind.TIMER, Ui.TEXT)
-    private val timerChip = Ui.chip(a, "", Icon.Kind.TIMER, Ui.ACCENT, Ui.ACCENT_DIM)
-    private val timerText = Ui.chipText(timerChip)
-    private val timerCount = Ui.text(a, "", 14f, Ui.ON_ACCENT, Ui.BOLD).apply {
+    private val timerChip = Ui.horizontal(a, Gravity.CENTER_VERTICAL).apply {
+        background = Ui.pressable(Ui.round(Ui.ACCENT_DIM, ITEM / 2f, Ui.ACCENT, 1.5f), ITEM / 2f)
+        setPadding(Ui.u(14), 0, Ui.u(16), 0)
+        addView(Icon(a, Icon.Kind.TIMER, Ui.ACCENT_INK), LayoutParams(Ui.u(24), Ui.u(24)).apply { rightMargin = Ui.u(8) })
+    }
+    private val timerText = Ui.text(a, "", CHIP_TEXT, Ui.ACCENT_INK, Ui.MEDIUM)
+    private val timerCount = Ui.text(a, "", 15f, Ui.ON_ACCENT, Ui.BOLD).apply {
         gravity = Gravity.CENTER
-        background = Ui.round(Ui.ACCENT, 12f)
-        minWidth = Ui.u(24)
+        background = Ui.round(Ui.ACCENT, 13f)
+        minWidth = Ui.u(26)
     }
     private val handler = Handler(Looper.getMainLooper())
     private val tick = object : Runnable {
         override fun run() {
-            // « --:-- » tant que l'heure n'est pas réglée ou que le Wi-Fi est coupé (voir WallClock).
-            Ui.chipText(clock).text = WallClock.text(a)
-            handler.postDelayed(this, WallClock.nextMs(a, 10_000))
+            // « --:-- » tant que l'heure n'est pas réglée (voir WallClock).
+            Ui.chipText(clock).text = WallClock.text()
+            handler.postDelayed(this, WallClock.nextMs(10_000))
         }
     }
     private var adminTaps = 0
@@ -92,9 +96,9 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
         addView(titleView, LayoutParams(0, Ui.WRAP, 1f).apply { leftMargin = Ui.u(6) })
         roundButton(timerButton) { TimerPanel.open(a) }
         timerButton.contentDescription = tr("Minuteur")
-        addView(timerButton, LayoutParams(Ui.u(TOUCH), Ui.u(TOUCH)).apply { rightMargin = Ui.u(4) })
-        timerChip.addView(timerCount, LayoutParams(Ui.WRAP, Ui.u(24)).apply { leftMargin = Ui.u(8) })
-        timerChip.background = Ui.pressable(Ui.round(Ui.ACCENT_DIM, 40f, Ui.ACCENT, 1.5f), 40f)
+        addView(timerButton, LayoutParams(Ui.u(TOUCH), Ui.u(TOUCH)).apply { rightMargin = Ui.u(6) })
+        timerChip.addView(timerText)
+        timerChip.addView(timerCount, LayoutParams(Ui.WRAP, Ui.u(26)).apply { leftMargin = Ui.u(8) })
         timerChip.isClickable = true
         timerChip.setOnClickListener { TimerPanel.open(a) }
         timerChip.visibility = View.GONE
@@ -195,8 +199,8 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
         // Bol retiré : pour la base le couvercle est « ouvert », mais ce n'est pas lui qu'il faut fermer.
         Ui.chipText(lid).text = if (s.bowlRemoved) tr("Bol retiré") else tr("Couvercle ouvert")
         (lid.getChildAt(0) as Icon).set(if (s.bowlRemoved) Icon.Kind.POT else Icon.Kind.LID)
-        // Capteur du bol seul : seulement si la détection du bol est exigée (la personne a alors vérifié que
-        // le capteur est fiable, sens réglé). Jamais deux fois « Bol retiré ».
+        // Capteur du bol seul (couvercle vu fermé) : seulement si la détection du bol est exigée, la personne
+        // a alors vérifié que le capteur est fiable (sens réglé). Jamais deux fois « Bol retiré ».
         bowl.visibility = if (s.hasSample && a.prefs.requireBowl && !s.bowlDetected && !s.bowlRemoved) View.VISIBLE else View.GONE
         if (s.hasSample) {
             temp.visibility = View.VISIBLE
@@ -315,7 +319,7 @@ class MachineBar(private val a: MainActivity) : FrameLayout(a) {
         jobRow.addView(okBtn, Ui.lp(Ui.WRAP, Ui.WRAP, l = 10))
         addView(jobRow, Ui.flp(Ui.MATCH, Ui.WRAP))
         // Alerte : la même carte, en rouge sombre ; en rouge pâle sur le thème clair, où le texte est foncé.
-        faultRow.background = if (Ui.light) Ui.round(0xFFFDE7E7.toInt(), RADIUS, 0xFFF2C4C4.toInt(), 1f)
+        faultRow.background = if (Ui.light) Ui.round(0xFFFDE7E7.toInt(), RADIUS, 0xFFEFAFAF.toInt(), 1f)
             else Ui.round(0xFF3A1416.toInt(), RADIUS, 0xFF6B2529.toInt(), 1f)
         faultRow.setPadding(Ui.u(TEXT_INSET), Ui.u(INSET), Ui.u(INSET), Ui.u(INSET))
         faultRow.minimumHeight = Ui.u(BUTTON + 2 * INSET)
@@ -420,6 +424,8 @@ class MachineBar(private val a: MainActivity) : FrameLayout(a) {
         const val TEXT_INSET = 28
         /** Bouts arrondis du rayon des boutons plus [INSET] : le bouton de droite épouse le bord de la carte. */
         const val RADIUS = BUTTON / 2f + INSET
+        /** Hauteur de la barre affichée, espace du bas compris. */
+        const val HEIGHT = BUTTON + 2 * INSET + BOTTOM_GAP
 
         /** La barre est affichée pour [s] : un programme (même terminé, jusqu'à « OK »), Turbo ou une alerte. */
         fun shownFor(s: Snapshot): Boolean = s.jobActive || s.turboActive || s.hasFault

@@ -9,6 +9,12 @@ and still uses **the official Lidl recipes**.
 🌐 **[toqueapp.org](https://toqueapp.org)**, the Toque community site: share your recipes, find other
 users' ones and send them to your robot.
 
+📱 **[Toque Compagnon](https://github.com/Wuki60/ToqueCompagnon)**, the phone and tablet app: follow
+the cooking and send recipes to your robot over your home Wi-Fi.
+
+❤️ **[Support Toque](https://toqueapp.org/donate.php)**: Toque is free and ad-free, a donation helps keep
+it going.
+
 ## Supported robots
 
 | Robot | Label under the robot | Status | How to install |
@@ -52,6 +58,31 @@ Toque's own recipe site, free and ad-free, in English, French, German, Spanish, 
 
 A question, or a robot you would like Toque to support: [contact page](https://toqueapp.org/contact.php).
 If Toque helps you, you can [support the project](https://toqueapp.org/donate.php).
+
+## Phone and tablet: [Toque Compagnon](https://github.com/Wuki60/ToqueCompagnon)
+
+Toque Compagnon is the Android app for phones and tablets that goes with Toque, on the Connect and
+the Smart (in test). It talks to the robot over your home Wi-Fi only, never through the Internet.
+
+- **Follow the cooking live**: time left, temperature, speed and weight, with notifications even when
+  the app is closed.
+- **Control it within limits**: pause, stop, resume, change the setting, tare the scale, and start a
+  manual cooking with the lid closed. Starting a recipe, a step or a program, Turbo, resuming after
+  the lid was opened and blending hot food stay on the robot. Every command from the phone goes
+  through the same safety checks as a press on the robot's screen.
+- **Recipes**: browse the robot's recipes with their photos, change the number of people, mark your
+  favourites, send a recipe to the robot's Home screen, and write your own.
+- A **shopping list** kept on the phone, tablet and landscape layouts, in English, French, German,
+  Spanish, Catalan and Ukrainian.
+
+**Get it**: download the APK from the
+[latest release of Toque Compagnon](https://github.com/Wuki60/ToqueCompagnon/releases/latest). It
+needs Toque 0.10.0 or later on the robot.
+
+**Link a phone**: on the robot, *Settings › Phone › Pair a phone*, then scan the QR code with the app,
+or type the 6-digit code shown under it (valid 2 minutes). The robot listens only once a phone is
+paired or the pairing screen is open, and a phone that is not paired cannot see it, even on the same
+Wi-Fi. The pairing screen lists the paired phones and removes the ones you no longer use.
 
 ## Install with an AI agent (Connect)
 
@@ -286,9 +317,10 @@ already stored for git).
 - Contributions: @pierok13 (standby, notes and quantities, speed stages, sounds, recent recipes,
   Android 6 roots, bowl sensor), @lucasbraud, @OUTSIDE2k8 (Spanish), @Locodice67 (German, clock at start, install
   script), @baptiste-gislot, @florentdestremau (rotary knob), @maximehuran (knob light in standby),
-  @badrbelhaj1 (Magisk at restart, SKMC 1100 A1 TWRP, heat without stirring, settings menu, recipe
-  filters and sort, kitchen timers, colour wheel, knob ring colours, startup screen, fast serial
-  port check, install checks, interface fixes),
+  @badrbelhaj1 (Toque Compagnon, the phone app and its robot side, Magisk at restart, SKMC 1100 A1
+  TWRP, heat without stirring, settings menu, recipe filters and sort, recipe list ready in a second,
+  kitchen timers, colour wheel, knob ring colours, startup screen, fast serial port check, install
+  checks, interface fixes),
   @meuca1 (Catalan), @Flav974 (Smart port: protocol, programs, captures), @Tidusneo24150 (Camybrith
   Cooking: Smart temperature ranges and recipe modes, review on a real Smart), @pierrearnou (accent
   colours, switches), @oscarsanchezdm (recipe language, light theme), @phanex (Ukrainian, search in

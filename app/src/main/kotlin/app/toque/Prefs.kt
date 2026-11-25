@@ -102,6 +102,13 @@ class Prefs(context: Context) {
             p.edit().putBoolean("requireBowl", v).commit()
         }
 
+    /** Un téléphone appairé peut lancer une cuisson manuelle (Réglages › Compagnon). */
+    var remoteStart: Boolean
+        get() = p.getBoolean("remoteStart", true)
+        set(v) {
+            p.edit().putBoolean("remoteStart", v).commit()
+        }
+
     /** Capteur du bol lu à l'envers (bases qui signalent « bol » quand il est retiré). */
     var invertBowl: Boolean
         get() = p.getBoolean("invertBowl", false)

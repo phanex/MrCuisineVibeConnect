@@ -77,6 +77,8 @@ class RecipesScreen(
     private var sort = kept.sort
     private var query = ""
     private var results: List<SearchIndex.Hit> = emptyList()
+    /** Les résultats affichés correspondent au catalogue chargé (sinon : rien n'est encore connu). */
+    private var resultsLoaded = false
     private var generation = 0
     private lateinit var input: EditText
     private lateinit var chipScroller: HorizontalScrollView
@@ -241,14 +243,15 @@ class RecipesScreen(
             row.setPadding(Ui.u(20), 0, Ui.u(20), 0)
             val on = o == sort
             row.background = Ui.pressable(Ui.round(if (on) Ui.ACCENT_DIM else Ui.SURFACE3, 32f), 32f)
-            row.addView(Ui.text(c, o.label(query.isNotBlank()), 20f, if (on) Ui.ACCENT else Ui.TEXT, Ui.MEDIUM), LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
-            if (on) row.addView(Icon(c, Icon.Kind.CHECK, Ui.ACCENT), LinearLayout.LayoutParams(Ui.u(26), Ui.u(26)))
+            row.addView(Ui.text(c, o.label(query.isNotBlank()), 20f, if (on) Ui.ACCENT_INK else Ui.TEXT, Ui.MEDIUM), LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
+            if (on) row.addView(Icon(c, Icon.Kind.CHECK, Ui.ACCENT_INK), LinearLayout.LayoutParams(Ui.u(26), Ui.u(26)))
             row.isClickable = true
             row.setOnClickListener { chooseSort(o) }
             card.addView(row, Ui.lp(b = 10))
             rows += row
         }
-        a.showOverlay(card, 480)
+        // Le bouton Stop de la barre machine reste à portée pendant un programme.
+        a.showOverlay(card, 480, spareMachineBar = true)
         val focus = KnobFocus(card, object : KnobFocus.Slots {
             override val size: Int get() = rows.size
             override fun start(): Int = options.indexOf(sort)
@@ -311,6 +314,7 @@ class RecipesScreen(
         val order = sort
         val repo = a.app.recipes
         val index = repo.index
+        val loaded = repo.loaded
         refreshSort()
         searchExec.execute {
             val hits = sel.select(index, q, order, { repo.recentIds() }, { repo.mostCookedIds() })
@@ -323,6 +327,7 @@ class RecipesScreen(
                     framedCard = -1
                 }
                 results = hits
+                resultsLoaded = loaded
                 adapter.notifyDataSetChanged()
                 refreshEmpty()
             }
@@ -337,20 +342,24 @@ class RecipesScreen(
 
     private fun refreshEmpty() {
         val repo = a.app.recipes
-        val none = repo.loaded && repo.count == 0
+        val none = resultsLoaded && repo.count == 0
         count.text = if (results.isEmpty()) "" else if (results.size == 1) tr("1 recette") else tr("%d recettes", results.size)
-        empty.visibility = if (results.isEmpty() && repo.loaded) View.VISIBLE else View.GONE
+        empty.visibility = if (results.isEmpty()) View.VISIBLE else View.GONE
+        // Ingrédients et étapes pas encore dans l'index (les deux secondes après le démarrage) : on attend sa réponse.
+        val waitingFull = query.isNotBlank() && !repo.index.full
         emptyText.text = when {
+            !resultsLoaded -> tr("Chargement…")
             none && a.prefs.mode == Prefs.Mode.HARDWARE ->
                 tr("Les recettes Lidl apparaîtront après la première synchronisation.\nRéglages › Recettes › Lidl › Synchroniser.")
             none -> tr("Les recettes Lidl apparaîtront après la première synchronisation, une fois Toque installé sur le robot.")
+            waitingFull -> tr("Recherche dans les ingrédients…")
             selection.byUsage && query.isBlank() -> tr("Aucune recette cuisinée pour l'instant.\nLes recettes apparaissent ici dès leur première cuisson.")
             selection == ChipSelection.of(RecipeChip.FAVORITES) && query.isBlank() -> tr("Aucun favori pour l'instant.\nTouchez l'étoile d'une recette pour l'ajouter.")
             selection == ChipSelection.of(RecipeChip.COMMUNITY) && query.isBlank() ->
                 tr("Aucune recette de la communauté pour l'instant.\nRéglages › Recettes › Communauté › Synchroniser.")
             selection == ChipSelection.of(RecipeChip.USER) && query.isBlank() ->
                 tr("Aucune recette perso pour l'instant.\nTouchez « Nouvelle recette », ou le crayon d'une recette Lidl pour en faire votre version.")
-            selection.hasFilters -> tr("Aucune recette avec ces filtres.\nTouchez « Toutes » pour les retirer.")
+            selection.hasFilters -> Ui.guillemets(tr("Aucune recette avec ces filtres.\nTouchez « Toutes » pour les retirer."))
             else -> tr("Aucune recette ne correspond.\nAstuce : séparez plusieurs ingrédients par des virgules.")
         }
     }

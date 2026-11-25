@@ -1,5 +1,11 @@
 package app.toque.core
 
+import app.toque.core.companion.ApiError
+import app.toque.core.companion.CatalogChipWire
+import app.toque.core.companion.CatalogFilter
+import app.toque.core.companion.CatalogPageWire
+import app.toque.core.companion.CatalogQuery
+import app.toque.core.companion.CatalogSearch
 import app.toque.core.recipes.Recipe
 import app.toque.core.recipes.RecipeChip
 import app.toque.core.recipes.RecipeFilter
@@ -7,10 +13,11 @@ import app.toque.core.recipes.RecipeSource
 import app.toque.core.recipes.SearchIndex
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Pastilles de la liste de recettes : leur liste, et une pastille seule montre ce que l'écran montrait avant RecipeChip. */
+/** Pastilles de la liste de recettes : les mêmes, et les mêmes recettes, sur le robot et le téléphone. */
 class RecipeChipsTest {
     private fun r(id: String, title: String, cat: String, min: Int, fav: Boolean = false, user: Boolean = false, ingredients: List<String> = emptyList()) =
         Recipe(id = id, title = title, category = cat, totalMinutes = min, favorite = fav,
@@ -89,6 +96,12 @@ class RecipeChipsTest {
         assertFalse("toqueapp-12" in RecipeChip.select(both, RecipeChip.USER, "").map { it.entry.id })
         assertTrue("toqueapp-12" in RecipeChip.select(both, RecipeChip.ALL, "").map { it.entry.id })
         assertTrue("toqueapp-12" in RecipeChip.select(both, RecipeChip.category("Soupes"), "").map { it.entry.id })
+        // Sur le fil : la même clé dans les deux sens, et le filtre que le téléphone renvoie.
+        assertEquals(RecipeChip.COMMUNITY, CatalogChipWire.of(RecipeChip.COMMUNITY).toChip())
+        assertEquals(CatalogFilter.COMMUNITY, CatalogFilter.of(RecipeChip.COMMUNITY))
+        assertEquals(RecipeChip.COMMUNITY, CatalogQuery(filter = CatalogFilter.COMMUNITY).chip)
+        // Un téléphone plus ancien ne connaît pas ce filtre : il laisse tomber la pastille, sans erreur.
+        assertNull(CatalogChipWire("inconnu").toChip())
     }
 
     @Test fun everyChipSelectsLikeTheRobotDid() {
@@ -96,6 +109,10 @@ class RecipeChipsTest {
         for (chip in chips) for (q in texts) {
             val now = RecipeChip.select(index, chip, q, { recent }, { frequent }).map { it.entry.id }
             assertEquals("${chip.key} « $q »", before(chip, q), now)
+            // Le téléphone : même liste (catalogue de moins de 500 recettes), page par page.
+            val query = CatalogQuery(q, CatalogFilter.of(chip), 0, 50, chip.category)
+            assertEquals(chip, query.chip)
+            assertEquals("${chip.key} « $q » (téléphone)", now, CatalogSearch.page(index, query, recent, frequent).items.map { it.id })
         }
         // Quelques contrôles lisibles.
         assertEquals(listOf("3", "5", "6"), RecipeChip.select(index, RecipeChip.category("Desserts"), "").map { it.entry.id })
@@ -104,5 +121,58 @@ class RecipeChipsTest {
         assertEquals(listOf("6"), RecipeChip.select(index, RecipeChip.RECENT, "riz", { recent }).map { it.entry.id })
         assertEquals(setOf("1", "3", "4", "5", "8", "9"), RecipeChip.select(index, RecipeChip.QUICK, "").map { it.entry.id }.toSet())
         assertEquals(listOf("perso-veloute"), RecipeChip.select(index, RecipeChip.USER, "").map { it.entry.id })
+    }
+
+    @Test fun pagesCarryTheChipsOnTheFirstPageOnly() {
+        val first = CatalogSearch.page(index, CatalogQuery(limit = 3))
+        assertEquals(RecipeChip.list(index), first.filters!!.map { it.toChip() })
+        assertNull(CatalogSearch.page(index, CatalogQuery(offset = 3, limit = 3)).filters)
+        // Aller-retour JSON ; une page sans « filters » (robot plus ancien) se relit sans pastilles.
+        val back = CatalogPageWire.fromMap(app.toque.core.json.Json.parse(app.toque.core.json.Json.write(first.toMap())) as Map<String, Any?>)
+        assertEquals(first, back)
+        assertNull(CatalogPageWire.fromMap(mapOf("total" to 0, "offset" to 0, "items" to emptyList<Any>())).filters)
+        assertEquals(mapOf("filter" to "category", "category" to "Soupes"), CatalogChipWire.of(RecipeChip.category("Soupes")).toMap())
+        assertEquals(mapOf("filter" to "quick"), CatalogChipWire.of(RecipeChip.QUICK).toMap())
+        // Pastille inconnue (robot plus récent) ou catégorie sans nom : ignorée.
+        assertNull(CatalogChipWire("seasonal").toChip())
+        assertNull(CatalogChipWire("category", "").toChip())
+    }
+
+    @Test fun apiAcceptsEveryChipAndRejectsBadValues() {
+        val f = HubFixture()
+        val t = f.pair()
+        fun page(q: Map<String, String>) = CatalogPageWire.fromMap(f.json(f.req("GET", "/api/recipes", t, query = q)))
+        fun status(q: Map<String, String>) = f.req("GET", "/api/recipes", t, query = q)
+        val data = CompanionData.index
+        // La première page porte les pastilles du robot.
+        assertEquals(RecipeChip.list(data), page(emptyMap()).filters!!.map { it.toChip() })
+        assertNull(page(mapOf("offset" to "20")).filters)
+        val soupes = page(mapOf("filter" to "category", "category" to "Soupes", "limit" to "50"))
+        assertEquals(RecipeChip.select(data, RecipeChip.category("Soupes"), "").map { it.entry.id }, soupes.items.map { it.id })
+        assertTrue(soupes.items.all { it.category == "Soupes" })
+        assertEquals(13, soupes.total)
+        assertEquals(RecipeChip.select(data, RecipeChip.QUICK, "").size, page(mapOf("filter" to "quick", "limit" to "50")).total)
+        assertEquals(0, page(mapOf("filter" to "user")).total)
+        assertEquals(0, page(mapOf("filter" to "category", "category" to "Inconnue")).total)
+        // Anciens paramètres : inchangés.
+        assertEquals(25, page(mapOf("filter" to "all")).total)
+        assertEquals(25, page(mapOf("filter" to "")).total)
+        assertTrue(page(mapOf("filter" to "favorites")).items.all { it.favorite })
+        // Valeurs refusées.
+        for (q in listOf(
+            mapOf("filter" to "category"),
+            mapOf("filter" to "category", "category" to ""),
+            mapOf("filter" to "category", "category" to "  "),
+            mapOf("filter" to "category", "category" to "x".repeat(101)),
+            mapOf("filter" to "category", "category" to "a\nb"),
+            mapOf("filter" to "all", "category" to "Soupes"),
+            mapOf("category" to "Soupes"),
+            mapOf("filter" to "Category", "category" to "Soupes"),
+            mapOf("filter" to "categories"),
+        )) {
+            val r = status(q)
+            assertEquals("$q", 400, r.status)
+            assertEquals("bad_request", ApiError.fromMap(f.json(r)).code)
+        }
     }
 }

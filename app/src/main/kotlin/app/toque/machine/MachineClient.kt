@@ -122,7 +122,7 @@ class MachineClient(private val context: Context) {
     fun resume(hot: Boolean = false, cb: (Verdict) -> Unit) =
         sendRaw(Ipc.RESUME, Bundle().apply { putBoolean("hot", hot) }, cb)
     fun stop(cb: (Verdict) -> Unit = {}) = sendRaw(Ipc.STOP, null, cb)
-    fun clearFinished() = sendRaw(Ipc.CLEAR, null, null)
+    fun clearFinished(cb: ((Verdict) -> Unit)? = null) = sendRaw(Ipc.CLEAR, null, cb)
     /** [auto] : tare faite par Toque (recette), qui n'apprend jamais le poids du bol vide. */
     fun tare(auto: Boolean = false) = sendRaw(Ipc.TARE, if (auto) Bundle().apply { putBoolean("auto", true) } else null, null)
     fun forgetEmptyBowl() = sendRaw(Ipc.FORGET_BOWL, null, null)

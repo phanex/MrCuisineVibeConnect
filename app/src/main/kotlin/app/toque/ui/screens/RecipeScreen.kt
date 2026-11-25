@@ -12,6 +12,8 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import app.toque.companion.RobotCompanion
+import app.toque.core.companion.WaitingEnd
 import app.toque.core.i18n.I18n
 import app.toque.core.i18n.tr
 import app.toque.core.recipes.McOnline
@@ -71,6 +73,10 @@ class RecipeScreen(a: MainActivity, val recipe: Recipe) : Screen(a) {
                 outline.setRoundRect(0, 0, view.width, view.height, Ui.uf(24f))
         }
         ImageLoader.load(img, a.app.recipes.imageFile(recipe.image), Ui.u(420))
+        header.addView(receivedBadge, Ui.flp(Ui.WRAP, Ui.WRAP, Gravity.TOP or Gravity.START).apply {
+            leftMargin = Ui.u(10); topMargin = Ui.u(10)
+        })
+        refreshReceived()
         left.addView(header, LinearLayout.LayoutParams(Ui.MATCH, 0, 1f))
 
         val meta = Ui.horizontal(c)
@@ -105,7 +111,7 @@ class RecipeScreen(a: MainActivity, val recipe: Recipe) : Screen(a) {
 
         val actions = Ui.horizontal(c)
         actions.addView(Ui.button(c, tr("Cuisiner"), Ui.Style.PRIMARY, Icon.Kind.PLAY, height = 66, textSize = 22f) {
-            a.push(CookScreen(a, shown, 0))
+            cook()
         }, LinearLayout.LayoutParams(0, Ui.WRAP, 1f).apply { rightMargin = Ui.u(12) })
         val fav = Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.STAR, height = 66) { toggleFavorite() }
         favIcon = fav.getChildAt(0) as Icon
@@ -170,6 +176,8 @@ class RecipeScreen(a: MainActivity, val recipe: Recipe) : Screen(a) {
     private val panes = LinkedHashMap<Tab, android.widget.ScrollView>()
     private var reviewsApiId: Long? = null
     private var reviewsStarted = false
+    /** Texte sur fond accent, comme les boutons et puces choisis (Ui.button, Ui.toggleChip). */
+    private val onAccent get() = Ui.ON_ACCENT
 
     /** Onglet à la façon des puces de choix, en 48 de haut ; [count] en plus clair (0 : rien). */
     private fun tabView(label: String, count: Int, onClick: () -> Unit): TabView {
@@ -188,8 +196,6 @@ class RecipeScreen(a: MainActivity, val recipe: Recipe) : Screen(a) {
     private fun selectTab(t: Tab) {
         if (t !in tabs) return
         tab = t
-        // Onglet choisi : texte sur fond accent, comme les boutons et puces choisis (Ui.button, Ui.toggleChip).
-        val onAccent = Ui.ON_ACCENT
         for ((k, v) in tabs) {
             val on = k == t
             v.row.background = Ui.pressable(if (on) Ui.round(Ui.ACCENT, 24f) else Ui.round(Ui.SURFACE2, 24f, Ui.STROKE, 1f), 24f)
@@ -637,7 +643,60 @@ class RecipeScreen(a: MainActivity, val recipe: Recipe) : Screen(a) {
     }
 
     override fun onKnobPress(): Boolean {
-        a.push(CookScreen(a, shown, 0))
+        cook()
         return true
+    }
+
+    private fun cook() {
+        // La recette reçue du téléphone est lancée : elle quitte l'accueil.
+        val hub = a.app.companion?.hub
+        if (hub != null && isReceived()) hub.clearWaiting(WaitingEnd.LAUNCHED)
+        a.push(CookScreen(a, shown, 0))
+    }
+
+    // ------------------------------------------------------------------ recette reçue du téléphone
+
+    /** Pastille « Reçue du téléphone » sur la photo, tant que cette recette attend sur l'accueil. */
+    private val receivedBadge: LinearLayout by lazy {
+        val b = Ui.horizontal(c)
+        b.setPadding(Ui.u(10), Ui.u(5), Ui.u(12), Ui.u(5))
+        b.background = Ui.round(0xB3000000.toInt(), 16f)
+        b.addView(Icon(c, Icon.Kind.PHONE, Ui.ACCENT), LinearLayout.LayoutParams(Ui.u(16), Ui.u(16)).apply { rightMargin = Ui.u(6) })
+        b.addView(Ui.text(c, tr("Reçue du téléphone"), 14f, Ui.ON_PHOTO, Ui.MEDIUM))
+        b
+    }
+    private var unsubCompanion: (() -> Unit)? = null
+    private var unsubAdjusted: (() -> Unit)? = null
+
+    private fun isReceived(): Boolean = a.app.companion?.hub?.waitingRecipe?.recipeId == recipe.id
+
+    private fun refreshReceived() {
+        receivedBadge.visibility = if (isReceived()) View.VISIBLE else View.GONE
+    }
+
+    override fun onShow() {
+        refreshReceived()
+        unsubCompanion = a.app.companion?.onChange { ch -> if (ch == RobotCompanion.Change.WAITING) refreshReceived() }
+        // Nombre de personnes (ou autre adaptation) changé ailleurs, depuis un téléphone : la page suit.
+        unsubAdjusted = a.app.recipes.onAdjusted { id -> if (id == recipe.id) reloadAdjustments() }
+        reloadAdjustments()
+    }
+
+    override fun onHide() {
+        unsubCompanion?.invoke()
+        unsubCompanion = null
+        unsubAdjusted?.invoke()
+        unsubAdjusted = null
+    }
+
+    /** Reprend les adaptations enregistrées si elles ont changé hors de cette page. */
+    private fun reloadAdjustments() {
+        val saved = a.app.recipes.adjustmentsOf(recipe.id)
+        if (saved == adjustments) return
+        adjustments = saved
+        base = recipe.corrected(saved)
+        shown = recipe.adjusted(saved)
+        renderIngredients()
+        renderSteps()
     }
 }

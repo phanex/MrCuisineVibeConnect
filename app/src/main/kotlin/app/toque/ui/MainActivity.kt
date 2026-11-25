@@ -1,5 +1,6 @@
 package app.toque.ui
 
+import app.toque.core.companion.CommandResult
 import android.app.Activity
 import android.content.Intent
 import android.media.AudioManager
@@ -17,7 +18,9 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import app.toque.Prefs
+import app.toque.TimeSync
 import app.toque.ToqueApp
+import app.toque.companion.RobotCompanion
 import app.toque.core.i18n.I18n
 import app.toque.core.i18n.tr
 import app.toque.core.machine.Accessory
@@ -36,8 +39,10 @@ import app.toque.core.robot.RobotProfile
 import app.toque.core.robot.RobotProfiles
 import app.toque.recipes.LidlSync
 import app.toque.recipes.SyncService
+import app.toque.ui.screens.CookScreen
 import app.toque.ui.screens.HomeScreen
 import app.toque.ui.screens.KnobSetupScreen
+import app.toque.ui.screens.ManualScreen
 import app.toque.ui.screens.SettingsScreen
 import app.toque.ui.screens.SiteLinkScreen
 import java.text.SimpleDateFormat
@@ -57,6 +62,10 @@ class MainActivity : Activity() {
     private val main = Handler(Looper.getMainLooper())
     private var unsubscribe: (() -> Unit)? = null
     private var unsubscribeEvents: (() -> Unit)? = null
+    private var unsubscribeCompanion: (() -> Unit)? = null
+    private var unsubscribeRemoteStart: (() -> Unit)? = null
+    /** Recette reçue déjà annoncée (heure d'envoi), pour ne la signaler qu'une fois. */
+    private var announcedSentAt = 0L
     private var tone: ToneGenerator? = null
     private var toastView: TextView? = null
     private var lastKnobMs = 0L
@@ -122,6 +131,10 @@ class MainActivity : Activity() {
         }
 
         app.recipes.load()
+        // L'heure ne s'affiche qu'avec le Wi-Fi connecté (voir WallClock).
+        WallClock.online = { TimeSync.online(applicationContext) }
+        // Langue de l'interface, vue par les téléphones (l'activité est recréée quand elle change).
+        app.companion?.refreshRobot()
         SyncService.schedule(this)
         push(HomeScreen(this))
         if (reopenSettings) {
@@ -134,11 +147,11 @@ class MainActivity : Activity() {
         }
         // Robot pas encore confirmé : on le reconnaît sans rien lui envoyer, la personne confirme.
         // Pas d'écran de démarrage alors : la base reste fermée jusqu'à la réponse, il cacherait la question.
+        // Sinon, par-dessus l'accueil, le temps que la base soit prête.
         if (!prefs.robotConfirmed) {
             Splash.done = true
             root.post { askRobot() }
         } else {
-            // Par-dessus l'accueil, le temps que la base soit prête.
             splash.start()
             // Ensuite (une seule fois) : proposer de relier un compte Toque.
             if (!prefs.siteOffered) root.post { offerSite() }
@@ -230,7 +243,8 @@ class MainActivity : Activity() {
         prefs.robotId = p.id
         RobotProfiles.active = p
         machine.reconfigure { v -> if (!v.ok) refusal(v) }
-        app.recipes.load()
+        // Catalogue déjà chargé : relu avec le filtre du nouveau robot (fiches courtes, sans relire chaque recette).
+        app.recipes.refreshLater()
         refreshTitle()
         // Les Réglages ouverts montrent des choses propres au robot (recettes Lidl, import) : on les refait.
         if (current is SettingsScreen && before !== p) replace(SettingsScreen.reopened(this))
@@ -279,6 +293,29 @@ class MainActivity : Activity() {
         recreate()
     }
 
+    /**
+     * Couleur et/ou thème demandés par un téléphone (fil principal ; null : inchangé). Appliqués comme
+     * dans les Réglages (l'interface est reconstruite), mais on reste sur l'accueil, sans ouvrir les
+     * Réglages. Refusé quand la reconstruction ferait perdre quelque chose : un programme (même en pause
+     * ou terminé, encore affiché), ou tout autre écran que l'accueil seul (recette guidée, éditeur,
+     * appairage, réglages…), une fenêtre ou l'alarme du minuteur ouvertes. La veille sur l'accueil accepte.
+     */
+    fun appearanceFromPhone(accent: Int?, light: Boolean?): CommandResult {
+        val s = snapshot
+        if (s.jobActive || s.busy) return CommandResult.refuse("busy",
+            tr("Un programme est en cours sur le robot : changez l'apparence une fois qu'il est fini"))
+        if (stack.size != 1 || current !is HomeScreen || overlayShown || timerAlarm.shown)
+            return CommandResult.refuse("busy",
+                tr("Le robot n'est pas sur son écran d'accueil : revenez-y sur le robot, puis réessayez"))
+        if (light != null) prefs.lightTheme = light
+        if (accent != null) prefs.accentColor = accent
+        Ui.setTheme(prefs.lightTheme)
+        Ui.setAccent(if (prefs.accentColor != 0) prefs.accentColor else Ui.ACCENTS[0])
+        // Pas de reopenSettings : l'accueil reste l'écran du robot.
+        recreate()
+        return CommandResult.OK
+    }
+
     /** Applique la langue choisie dans les réglages : l'interface est reconstruite, on revient aux réglages. */
     fun applyLanguage() {
         I18n.select(I18n.resolve(prefs.language, Locale.getDefault().language).code)
@@ -298,10 +335,14 @@ class MainActivity : Activity() {
             spareMachineBar()
         }
         unsubscribeEvents = app.machine.onEvent { e -> onMachineEvent(e) }
+        announcedSentAt = app.companion?.hub?.waitingRecipe?.sentAt ?: 0L
+        unsubscribeCompanion = app.companion?.onChange { c -> if (c == RobotCompanion.Change.WAITING) announceReceived() }
+        unsubscribeRemoteStart = app.companion?.onRemoteStart { name -> remoteStarted(name) }
         topBar.startClock()
         standby.start()
         updates.onStart()
         startTimers()
+        root.postDelayed(syncCheck, 60_000)
     }
 
     // ------------------------------------------------------------------ minuteurs de cuisine
@@ -327,7 +368,7 @@ class MainActivity : Activity() {
     }
 
     /** Hauteur de la barre machine quand elle est affichée (à laisser libre), 0 sinon. */
-    fun machineBarSpace(): Int = if (machineBar.visibility == View.VISIBLE) machineBar.height else 0
+    fun machineBarSpace(): Int = if (machineBar.visibility == View.VISIBLE) machineBar.height.takeIf { it > 0 } ?: Ui.u(MachineBar.HEIGHT) else 0
 
     private fun spareMachineBar() {
         val bottom = machineBarSpace()
@@ -339,6 +380,15 @@ class MainActivity : Activity() {
                 lp.bottomMargin = want
                 overlay.layoutParams = lp
             }
+        }
+    }
+
+    /** Chaque minute : la synchro automatique des recettes regarde si le robot est inutilisé (voir AutoSync). */
+    private val syncCheck = object : Runnable {
+        override fun run() {
+            SyncService.reportUi(standby.idleMs, snapshot.busy || current is CookScreen || current?.keepAwake == true)
+            SyncService.consider(this@MainActivity)
+            root.postDelayed(this, 60_000)
         }
     }
 
@@ -356,7 +406,13 @@ class MainActivity : Activity() {
         Timers.of(this).onRing = null
         unsubscribe?.invoke()
         unsubscribeEvents?.invoke()
+        unsubscribeCompanion?.invoke()
+        unsubscribeCompanion = null
+        unsubscribeRemoteStart?.invoke()
+        unsubscribeRemoteStart = null
         topBar.stopClock()
+        root.removeCallbacks(syncCheck)
+        SyncService.reportUi(-1, false)
         standby.stop()
         // Toque n'est plus à l'écran (appli d'origine, paramètres Android…) : blanc du robot.
         KnobLight.release()
@@ -390,6 +446,9 @@ class MainActivity : Activity() {
 
     val current: Screen? get() = stack.lastOrNull()
     val depth: Int get() = stack.size
+
+    /** [s] est encore dans la pile (affiché ou recouvert par un autre écran). */
+    fun isOnStack(s: Screen): Boolean = s in stack
 
     fun push(s: Screen) {
         hideKeyboard()
@@ -565,6 +624,41 @@ class MainActivity : Activity() {
         }
     }
 
+    /**
+     * Une recette vient d'arriver d'un téléphone : simple message, et seulement s'il ne dérange rien
+     * (pas en veille, pas de fenêtre ouverte, pas pendant une recette guidée). Rien ne s'interrompt :
+     * la recette attend sur l'accueil.
+     */
+    private fun announceReceived() {
+        val w = app.companion?.hub?.waitingRecipe ?: return
+        if (w.sentAt == announcedSentAt) return
+        announcedSentAt = w.sentAt
+        // Recette retrouvée après une relance de l'interface : déjà annoncée à l'époque.
+        if (w.sender.isRobot || System.currentTimeMillis() - w.sentAt > 60_000) return
+        if (standby.asleep || overlayShown || current is CookScreen) return
+        toast(tr("Recette reçue du téléphone : %s", w.title), Ui.ACCENT_INK)
+    }
+
+    /**
+     * Cuisson manuelle lancée depuis un téléphone : un message, et l'écran Cuisson manuelle si
+     * l'accueil est affiché (ses cartes suivent la cuisson). Ailleurs, rien ne change d'écran ;
+     * la veille se lève d'elle-même (programme en cours).
+     */
+    private fun remoteStarted(name: String) {
+        toast(tr("Cuisson lancée depuis %s", name.ifBlank { tr("un téléphone") }), Ui.ACCENT_INK)
+        if (depth == 1 && current is HomeScreen && !overlayShown) push(ManualScreen(this))
+    }
+
+    /**
+     * « Arrêter la recette » demandé par un téléphone (sa confirmation est faite là-bas) : la recette
+     * guidée ouverte s'arrête comme avec son bouton. false s'il n'y en a pas.
+     */
+    fun stopGuidedRecipe(): Boolean {
+        val cook = stack.lastOrNull { it is CookScreen } as? CookScreen ?: return false
+        cook.stopRecipe()
+        return true
+    }
+
     /** Quantité à peser atteinte. */
     fun weighBeep() {
         if (prefs.sound) Sounds.weighReached(prefs.weighSound)
@@ -668,9 +762,10 @@ class MainActivity : Activity() {
      * Démarre un programme ; si le contenu est chaud, demande d'abord la confirmation
      * de mixage (comme l'appli d'origine, mais avant tout mouvement).
      */
-    fun startJob(spec: JobSpec, onHotConfirmed: () -> Unit = {}, done: (Verdict) -> Unit = {}) {
+    fun startJob(spec: JobSpec, onHotConfirmed: () -> Unit = {}, onHotAsked: () -> Unit = {}, done: (Verdict) -> Unit = {}) {
         machine.start(spec) { v ->
             if (!v.ok && v.has(SafetyPolicy.HOT_BLEND) && v.violations.size == 1) {
+                onHotAsked()
                 confirm(
                     tr("Contenu chaud"),
                     // Smart : la base ne mesure la température qu'après une chauffe ; Toque la croit chaude.
@@ -799,7 +894,6 @@ class MainActivity : Activity() {
     companion object {
         private var reopenSettings = false
         private const val STORAGE_REQUEST = 7
-        /** Appui de la molette, pour knobKind (les crans sont -1 et 1). */
         private const val PRESS = 2
 
         /** MotionEvent.AXIS_SCROLL (API 26), valeur fixe pour Android 6. */

@@ -355,6 +355,8 @@ Undo: Toque › Settings › Advanced › *Back to the stock app* (it re-enables
 - Recipes: Settings › Recipes › Lidl › Sync (monsieur-cuisine.com, no account). Nightly re-sync.
 - Clock: set automatically (time zone from the Internet connection); Settings › Language and time.
 - To work on the robot later over Wi-Fi: `adb connect <robot IP>:5555`.
+- Phone and tablet: the Toque Compagnon app (https://github.com/Wuki60/ToqueCompagnon/releases/latest).
+  Pair it on the robot: Settings › Phone › Pair a phone.
 
 ## Working on the code
 
@@ -371,3 +373,9 @@ temperatures, Lidl recipe type) and its own codec (`ConnectCodec`, `SmartCodec`)
 written in French and wrapped in `tr(...)`.
 Motor safety rules live in `core/.../machine/Safety.kt` and are enforced by `MachineController`:
 keep them strict, and add a test in `ControllerTest` for any behaviour change.
+The robot side of Toque Compagnon (pairing, the local server for paired phones) is in
+`core/.../companion/` and `app/.../companion/`; its contract is `docs/COMPANION.md`. The phone app
+(github.com/Wuki60/ToqueCompagnon) holds an exact copy of `core/`: change `core/` here only, list
+every change to the protocol, the wire classes or the API, and prefer adding a field to changing one
+(an older phone or robot must keep working). Every command from a phone goes through
+`MachineController`, with the same checks as a press on the screen.

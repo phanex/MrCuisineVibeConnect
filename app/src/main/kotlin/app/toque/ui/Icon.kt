@@ -13,7 +13,7 @@ class Icon(context: Context, var kind: Kind, color: Int) : View(context) {
         BACK, SEARCH, PLAY, PAUSE, STOP, THERMO, SPEED, CLOCK, REVERSE, SCALE, BOOK, STAR, STAR_FILLED,
         SETTINGS, PLUS, MINUS, CHECK, CLOSE, KNEAD, STEAM, FLAME, BOLT, SYNC, LID, WARNING, HOME, WHISK,
         CHEVRON, LINK, INFO, POT, TIMER, DROP, EDIT, TRASH, PEOPLE, DOWNLOAD, UPLOAD, GLOBE, BELL,
-        WARNING_FILLED, SCREEN, KNOB,
+        PHONE, WARNING_FILLED, SCREEN, KNOB,
     }
 
     var color: Int = color
@@ -206,6 +206,10 @@ class Icon(context: Context, var kind: Kind, color: Int) : View(context) {
                 p.moveTo(6f, 17f); p.lineTo(6f, 11f); p.cubicTo(6f, 7f, 8.5f, 4.5f, 12f, 4.5f); p.cubicTo(15.5f, 4.5f, 18f, 7f, 18f, 11f)
                 p.lineTo(18f, 17f); canvas.drawPath(p, stroke); canvas.drawLine(4f, 17f, 20f, 17f, stroke)
                 rect.set(9.5f, 17.5f, 14.5f, 21.5f); canvas.drawArc(rect, 0f, 180f, false, stroke); canvas.drawLine(12f, 2.5f, 12f, 4.5f, stroke)
+            }
+            Kind.PHONE -> {
+                rect.set(7f, 2.5f, 17f, 21.5f); canvas.drawRoundRect(rect, 2.5f, 2.5f, stroke)
+                canvas.drawLine(10.5f, 18f, 13.5f, 18f, stroke)
             }
             Kind.POT -> {
                 rect.set(4f, 9f, 20f, 20f); canvas.drawRoundRect(rect, 3f, 3f, stroke)

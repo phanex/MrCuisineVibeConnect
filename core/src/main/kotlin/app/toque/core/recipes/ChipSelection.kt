@@ -3,7 +3,7 @@ package app.toque.core.recipes
 import app.toque.core.i18n.tr
 
 /**
- * Ordre de la liste de recettes. [TITLE] : l'ordre habituel (favoris puis titre, ou
+ * Ordre de la liste de recettes du robot. [TITLE] : l'ordre habituel (favoris puis titre, ou
  * pertinence quand un texte est tapé). Pas d'ordre « les plus récentes » : le catalogue ne donne pas
  * de date de publication fiable (seulement la date de dernière modification de la fiche).
  */
@@ -53,10 +53,10 @@ enum class RecipeSort(val key: String) {
 }
 
 /**
- * Pastilles choisies dans la liste de recettes : plusieurs filtres à la fois (une catégorie,
+ * Pastilles choisies dans la liste de recettes du robot : plusieurs filtres à la fois (une catégorie,
  * « 30 min max », Favoris, Mes recettes ou Communauté), ou une vue par les cuissons (Récentes, Fréquentes),
- * qui est un ordre et reste seule. Aucune pastille : « Toutes ». [of] donne la sélection d'une seule
- * pastille, qui montre la même chose que [RecipeChip.select].
+ * qui est un ordre et reste seule. Aucune pastille : « Toutes ». Le téléphone, lui, envoie une seule pastille
+ * ([RecipeChip.select]) ; [of] donne la sélection équivalente.
  */
 data class ChipSelection(
     val category: String = "",
@@ -135,12 +135,12 @@ data class ChipSelection(
         val u = usage
         if (u != null) return RecipeChip.select(index, RecipeChip(u), query, recentIds, frequentIds)
         val f = filter
-        val found = if (query.contains(',')) index.withIngredients(query.split(','), f) else index.search(query, f)
+        val found = if (query.contains(',')) index.withIngredients(query.split(','), f) else index.search(query, f, Int.MAX_VALUE)
         return RecipeSort.apply(found, sort)
     }
 
     companion object {
-        /** La sélection d'une seule pastille (celle d'un raccourci de l'accueil). */
+        /** La sélection d'une seule pastille (celle du téléphone, ou d'un raccourci de l'accueil). */
         fun of(chip: RecipeChip): ChipSelection = ChipSelection().tap(chip)
     }
 }

@@ -52,7 +52,7 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
             // n'est pas touchée, pour que celle de la nuit termine le travail.
             val r = LidlSync.Report(false, tr("Synchronisation arrêtée"))
             // Des fiches ont été enregistrées sans recharger le catalogue : le faire maintenant, sans attendre.
-            if (dirty) repo.load()
+            if (dirty) repo.refreshLater()
             prefs.lastSyncResult = SimpleDateFormat(tr("dd/MM à HH:mm"), I18n.locale).format(Date()) + " : " + r.message
             log.write("synchro", r.message)
             return r
@@ -221,10 +221,14 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
     }
 
     private fun photos(ids: Collection<String>, progress: (String) -> Unit) {
+        // L'adresse de la photo vient de l'index (fiches courtes), sans relire chaque recette.
+        if (!repo.loaded) repo.refresh()
+        val images = HashMap<String, String>()
+        for (e in repo.index.entries) images[e.id] = e.image
         val missing = ArrayList<String>()
         for (id in ids) {
             checkStop()
-            val url = repo.get(id)?.image ?: continue
+            val url = images[id] ?: continue
             if (url.startsWith("http") && repo.imageFile(url) == null) missing += url
         }
         var inARow = 0
@@ -261,7 +265,7 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
         val tmp = File(repo.imagesDir, "$name.part")
         FileOutputStream(tmp).use { bmp.compress(Bitmap.CompressFormat.JPEG, 85, it) }
         bmp.recycle()
-        if (!tmp.renameTo(File(repo.imagesDir, name))) tmp.delete()
+        if (tmp.renameTo(File(repo.imagesDir, name))) repo.photoSaved(name) else tmp.delete()
     }
 
     private fun get(url: String, language: String): String =
@@ -339,5 +343,8 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
     companion object {
         private const val MAX_WIDTH = 800
         private val running = AtomicBoolean(false)
+
+        /** Une synchro du site est en cours. */
+        val isRunning: Boolean get() = running.get()
     }
 }

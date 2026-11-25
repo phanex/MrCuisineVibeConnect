@@ -1,6 +1,5 @@
 package app.toque.ui.screens
 
-import app.toque.core.protocol.SmartProgram
 import app.toque.core.robot.RobotProfiles
 import android.content.Context
 import android.text.Editable
@@ -17,14 +16,15 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import app.toque.core.i18n.tr
 import app.toque.core.machine.JobKind
-import app.toque.core.machine.Limits
 import app.toque.core.recipes.Ingredient
 import app.toque.core.recipes.IngredientGroup
 import app.toque.core.recipes.Recipe
 import app.toque.core.recipes.RecipeAdjustments
+import app.toque.core.recipes.RecipeRules
 import app.toque.core.recipes.Step
 import app.toque.core.recipes.StepMachine
 import app.toque.core.recipes.StepProgram
+import app.toque.core.recipes.StepSettings
 import app.toque.core.recipes.UserRecipes
 import app.toque.core.recipes.Weigh
 import app.toque.ui.Icon
@@ -111,10 +111,25 @@ private object Edit {
  * ligne chacun, « 500 g de farine ») et étapes, chacune avec son réglage du robot et sa pesée si
  * besoin. Les réglages passent par les mêmes limites de sécurité que la cuisson manuelle.
  */
-class RecipeEditScreen(a: MainActivity, start: Recipe, private val isNew: Boolean) : Screen(a) {
+class RecipeEditScreen(a: MainActivity, private val start: Recipe, private val isNew: Boolean) : Screen(a) {
     companion object {
         /** Durée du message « Ingrédient supprimé · Rétablir ». */
         const val UNDO_MS = 6000L
+
+        /** Éditeurs créés (clés faibles), fil principal seulement. */
+        private val opened = java.util.WeakHashMap<RecipeEditScreen, Boolean>()
+
+        /**
+         * La recette [id] est ouverte dans l'éditeur du robot (écran encore dans la pile, même
+         * recouvert par une étape) : le téléphone ne l'enregistre pas pendant ce temps. Fil principal.
+         */
+        fun isEditing(id: String): Boolean = opened.keys.any {
+            it.draft.id == id && !it.a.isFinishing && !it.a.isDestroyed && it.a.isOnStack(it)
+        }
+    }
+
+    init {
+        opened[this] = true
     }
 
     override val title = if (isNew) tr("Nouvelle recette") else tr("Modifier la recette")
@@ -421,7 +436,7 @@ class RecipeEditScreen(a: MainActivity, start: Recipe, private val isNew: Boolea
         bar.addView(Ui.text(c, if (r.step == null) tr("Ingrédient supprimé") else tr("Étape supprimée"), 17f, Ui.TEXT),
             Ui.lp(Ui.WRAP, Ui.WRAP, r = 8))
         // « Rétablir » et non « Annuler » : ce dernier est déjà traduit par « Cancel », « Abbrechen »…
-        val undo = Ui.text(c, tr("Rétablir"), 18f, Ui.ACCENT, Ui.MEDIUM).apply {
+        val undo = Ui.text(c, tr("Rétablir"), 18f, Ui.ACCENT_INK, Ui.MEDIUM).apply {
             gravity = Gravity.CENTER
             setPadding(Ui.u(18), 0, Ui.u(18), 0)
             background = Ui.pressable(Ui.round(0, 24f), 24f)
@@ -469,7 +484,8 @@ class RecipeEditScreen(a: MainActivity, start: Recipe, private val isNew: Boolea
     private fun save() {
         a.hideKeyboard()
         val r = draft.copy(title = draft.title.trim().replace(Regex("\\s+"), " "))
-        UserRecipes.problem(r)?.let { a.toast(it, Ui.WARN); return }
+        // Les limites de l'éditeur (communes avec le téléphone) ; ce qui n'a pas changé n'est pas rejugé.
+        RecipeRules.check(r, start)?.let { a.toast(it.message, Ui.WARN); return }
         // Le nombre de personnes vient d'être choisi ici : la fiche s'ouvre à ce nombre.
         val adj = a.app.recipes.adjustmentsOf(r.id)
         if (adj.servings != 0) a.app.recipes.setAdjustments(r.id, adj.copy(servings = 0))
@@ -570,20 +586,11 @@ class StepEditScreen(
     private fun program(p: StepProgram?) {
         a.hideKeyboard()
         val m = machine
+        // Réglage de départ de chaque genre : le même que le robot annonce au téléphone (StepSettings).
         machine = when (p) {
             null -> null
             m?.program -> m
-            StepProgram.MANUAL -> StepMachine(seconds = 60, speed = 2)
-            StepProgram.KNEAD -> StepMachine(StepProgram.KNEAD, seconds = 90, speed = 4)
-            StepProgram.STEAM -> StepMachine(StepProgram.STEAM, seconds = 20 * 60)
-            StepProgram.TOAST -> StepMachine(StepProgram.TOAST, seconds = 7 * 60)
-            StepProgram.TURBO -> StepMachine(StepProgram.TURBO, pulses = 3)
-            // Programmes du Smart : durée et température par défaut de l'appli d'origine (raisonnables).
-            StepProgram.MIXER -> StepMachine(StepProgram.MIXER, seconds = 30)
-            StepProgram.SMOOTHIE -> StepMachine(StepProgram.SMOOTHIE, seconds = 60)
-            StepProgram.SOUS_VIDE -> StepMachine(StepProgram.SOUS_VIDE, seconds = 3600, tempC = 60)
-            StepProgram.SLOW_COOK -> StepMachine(StepProgram.SLOW_COOK, seconds = 2 * 3600, tempC = 90)
-            StepProgram.FERMENT -> StepMachine(StepProgram.FERMENT, seconds = 8 * 3600, tempC = 40)
+            else -> StepSettings.default(p)
         }
         renderSetting()
         if (p == StepProgram.MANUAL && m?.program != StepProgram.MANUAL) openManual()
@@ -622,33 +629,20 @@ class StepEditScreen(
                     { set(m.copy(pulses = m.pulses - 1)) }, { set(m.copy(pulses = m.pulses + 1)) }), Ui.lp(Ui.WRAP, Ui.WRAP, t = 6))
             }
             StepProgram.KNEAD, StepProgram.STEAM, StepProgram.TOAST -> {
-                val max = when (m.program) {
-                    StepProgram.KNEAD -> (Limits.MAX_MS_KNEAD / 1000).toInt()
-                    StepProgram.TOAST -> (Limits.MAX_MS_TOAST / 1000).toInt()
-                    else -> (Limits.MAX_MS_DEFAULT / 1000).toInt()
-                }
-                val step = when (m.program) { StepProgram.KNEAD -> 15; StepProgram.TOAST -> 30; else -> 60 }
+                // Bornes et pas de l'éditeur, les mêmes que le robot annonce au téléphone (StepSettings).
+                val kind = StepSettings.kind(m.program)
+                val max = kind.maxSeconds
+                val step = kind.secondsStep
                 box.addView(Edit.label(c, tr("Durée")), Ui.lp(t = 10))
                 box.addView(Edit.stepper(c, Ui.clock(m.seconds * 1000L), m.seconds > step, m.seconds < max,
                     { set(m.copy(seconds = (m.seconds - step).coerceAtLeast(step))) },
                     { set(m.copy(seconds = (m.seconds + step).coerceAtMost(max))) }), Ui.lp(Ui.WRAP, Ui.WRAP, t = 6))
-                val hint = when (m.program) {
-                    StepProgram.STEAM -> tr("Mettez au moins 500 g d'eau dans le bol. 120 °C, la lame reste immobile.")
-                    StepProgram.TOAST -> tr("Dorer oignons, lardons, viandes à 130 °C, avec un brassage doux en sens inverse.")
-                    else -> tr("Pâtes à pain, pizza, brioche. Alterne sens inverse et normal à vitesse 4.")
-                }
-                box.addView(Ui.text(c, hint, 16f, Ui.TEXT2).apply { setLineSpacing(0f, 1.15f) }, Ui.lp(t = 10))
+                box.addView(Ui.text(c, StepSettings.hint(m.program), 16f, Ui.TEXT2).apply { setLineSpacing(0f, 1.15f) }, Ui.lp(t = 10))
             }
             StepProgram.MIXER, StepProgram.SMOOTHIE, StepProgram.SOUS_VIDE, StepProgram.SLOW_COOK, StepProgram.FERMENT -> {
                 // Bornes de l'appli d'origine du Smart pour ce programme.
-                val sp = when (m.program) {
-                    StepProgram.MIXER -> SmartProgram.MIXER
-                    StepProgram.SMOOTHIE -> SmartProgram.SMOOTHIE
-                    StepProgram.SOUS_VIDE -> SmartProgram.SOUS_VIDE
-                    StepProgram.SLOW_COOK -> SmartProgram.MIJOTER_BRASSE
-                    else -> SmartProgram.FERMENTER_BRASSE
-                }
-                val step = if (sp.maxS <= 600) 10 else if (sp.maxS <= 3 * 3600) 5 * 60 else 15 * 60
+                val sp = StepSettings.smartProgram(m.program)!!
+                val step = StepSettings.kind(m.program).secondsStep
                 box.addView(Edit.label(c, tr("Durée")), Ui.lp(t = 10))
                 box.addView(Edit.stepper(c, Ui.clock(m.seconds * 1000L), m.seconds - step >= sp.minS, m.seconds + step <= sp.maxS,
                     { set(m.copy(seconds = (m.seconds - step).coerceAtLeast(sp.minS))) },
@@ -659,7 +653,7 @@ class StepEditScreen(
                         { set(m.copy(tempC = (m.tempC - 1).coerceAtLeast(sp.minCelsius))) },
                         { set(m.copy(tempC = (m.tempC + 1).coerceAtMost(sp.maxCelsius))) }), Ui.lp(Ui.WRAP, Ui.WRAP, t = 6))
                 }
-                box.addView(Ui.text(c, tr("Programme du Monsieur Cuisine Smart, comme sur son appli d'origine."), 16f, Ui.TEXT2)
+                box.addView(Ui.text(c, StepSettings.hint(m.program), 16f, Ui.TEXT2)
                     .apply { setLineSpacing(0f, 1.15f) }, Ui.lp(t = 10))
             }
         }
@@ -678,10 +672,9 @@ class StepEditScreen(
 
     private fun done() {
         a.hideKeyboard()
+        // L'étape telle que saisie (poids non borné), jugée par les limites communes avec le téléphone.
+        RecipeRules.step(Step(text.trim(), machine, if (grams > 0) Weigh("", grams) else null))?.let { a.toast(it.message, Ui.WARN); return }
         val s = result()
-        if (s.text.isEmpty() && s.machine == null && s.weigh == null) { a.toast(tr("Écrivez ce qu'il faut faire"), Ui.WARN); return }
-        if (grams > RecipeAdjustments.MAX_GRAMS) { a.toast(tr("Entrez un poids entre 1 et %d g", RecipeAdjustments.MAX_GRAMS), Ui.WARN); return }
-        s.machine?.violations()?.firstOrNull()?.let { a.toast(it.message, Ui.WARN); return }
         finished = true
         a.back()
         onDone(s)

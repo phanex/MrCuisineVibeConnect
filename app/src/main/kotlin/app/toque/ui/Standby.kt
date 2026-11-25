@@ -33,6 +33,9 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
 
     val asleep: Boolean get() = view != null
 
+    /** Temps sans geste ni signe de vie du robot (programme, couvercle, balance), en ms. */
+    val idleMs: Long get() = SystemClock.uptimeMillis() - lastInputMs
+
     /** Sortie de veille (pas à l'arrêt de l'écran) : l'alerte de mise à jour regarde à ce moment-là. */
     var onWake: (() -> Unit)? = null
 
@@ -54,8 +57,8 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
     /** Heure pas encore réglée : on regarde souvent, pour la montrer dès qu'elle l'est (le reste attend la minute). */
     private val clockTick = object : Runnable {
         override fun run() {
-            clock?.text = WallClock.text(a)
-            if (!WallClock.known(a) && view != null) main.postDelayed(this, WallClock.UNKNOWN_TICK_MS)
+            clock?.text = WallClock.text()
+            if (!WallClock.known && view != null) main.postDelayed(this, WallClock.UNKNOWN_TICK_MS)
         }
     }
 
@@ -136,7 +139,7 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
             "off" -> KnobLight.start(0)
         }
         main.postDelayed(tick, 60_000)
-        if (!WallClock.known(a)) main.postDelayed(clockTick, WallClock.UNKNOWN_TICK_MS)
+        if (!WallClock.known) main.postDelayed(clockTick, WallClock.UNKNOWN_TICK_MS)
     }
 
     private fun wake() {
@@ -155,7 +158,7 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
     }
 
     private fun refresh() {
-        clock?.text = WallClock.text(a)
+        clock?.text = WallClock.text()
         val temp = a.snapshot.actualTempC
         hot?.let {
             it.text = if (temp >= 50) tr("Bol chaud : %d °C", temp) else ""

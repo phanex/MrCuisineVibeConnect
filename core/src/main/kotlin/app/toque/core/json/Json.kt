@@ -4,6 +4,9 @@ package app.toque.core.json
 object Json {
     class ParseException(message: String, val position: Int) : Exception("$message (position $position)")
 
+    /** Imbrication maximale d'objets et de tableaux : au-delà, ParseException (jamais de débordement de pile). */
+    const val MAX_DEPTH = 64
+
     fun parse(text: String): Any? {
         val p = Parser(text)
         p.ws()
@@ -15,6 +18,11 @@ object Json {
 
     private class Parser(val s: String) {
         var i = 0
+        var depth = 0
+
+        fun enter() {
+            if (++depth > MAX_DEPTH) throw ParseException("imbrication trop profonde", i)
+        }
 
         fun ws() {
             while (i < s.length && (s[i] == ' ' || s[i] == '\n' || s[i] == '\r' || s[i] == '\t')) i++
@@ -40,6 +48,24 @@ object Json {
         }
 
         fun obj(): Map<String, Any?> {
+            enter()
+            try {
+                return objBody()
+            } finally {
+                depth--
+            }
+        }
+
+        fun arr(): List<Any?> {
+            enter()
+            try {
+                return arrBody()
+            } finally {
+                depth--
+            }
+        }
+
+        fun objBody(): Map<String, Any?> {
             val m = LinkedHashMap<String, Any?>()
             i++
             ws()
@@ -61,7 +87,7 @@ object Json {
             }
         }
 
-        fun arr(): List<Any?> {
+        fun arrBody(): List<Any?> {
             val l = ArrayList<Any?>()
             i++
             ws()

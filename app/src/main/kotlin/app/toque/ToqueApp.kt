@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Process
+import app.toque.companion.RobotCompanion
 import app.toque.core.i18n.I18n
 import app.toque.core.robot.RobotProfiles
 import app.toque.machine.MachineClient
@@ -15,15 +16,18 @@ import app.toque.ui.MainActivity
 import java.util.Locale
 import javax.net.ssl.HttpsURLConnection
 
-class ToqueApp : Application() {
+open class ToqueApp : Application() {
     lateinit var prefs: Prefs
         private set
     lateinit var log: Logbook
         private set
     val machine: MachineClient by lazy { MachineClient(this) }
-    val recipes: RecipeRepo by lazy { RecipeRepo(this) }
+    val recipes: RecipeRepo by lazy { RecipeRepo(this, log) }
     /** toqueapp.org : compte relié, recettes de la communauté. */
     val site: app.toque.site.SiteAccount by lazy { app.toque.site.SiteAccount(this) }
+    /** Toque Compagnon (téléphones sur le Wi-Fi) ; processus de l'interface seulement, null s'il n'a pas pu démarrer. */
+    var companion: RobotCompanion? = null
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -61,8 +65,25 @@ class ToqueApp : Application() {
             }
         }
         log.write("interface", "démarrage")
+        startBackground()
+        companion = try {
+            RobotCompanion(this).also {
+                configureCompanion(it)
+                it.start()
+            }
+        } catch (t: Throwable) {
+            log.crash("compagnon", t)
+            null
+        }
+    }
+
+    /** Tâches de fond réseau (heure). Les essais d'interface (Robolectric) n'en lancent aucune. */
+    protected open fun startBackground() {
         TimeSync.start(this, prefs, log)
     }
+
+    /** Réglage du compagnon avant son démarrage (essais : port libre sur la boucle locale). */
+    protected open fun configureCompanion(c: RobotCompanion) {}
 
     private fun isMainProcess(): Boolean {
         val pid = Process.myPid()

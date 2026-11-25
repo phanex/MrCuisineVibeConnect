@@ -6,6 +6,8 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import app.toque.core.companion.CookSession
+import app.toque.core.companion.WaitingFor
 import app.toque.core.i18n.tr
 import app.toque.core.machine.Accessory
 import app.toque.core.machine.EventType
@@ -18,13 +20,13 @@ import app.toque.core.machine.Snapshot
 import app.toque.core.protocol.Mcc
 import app.toque.core.recipes.PermittedSetting
 import app.toque.core.recipes.Portions
+import app.toque.core.time.KitchenTimerList
 import app.toque.core.recipes.Recipe
 import app.toque.core.recipes.Step
 import app.toque.core.recipes.StepDurations
 import app.toque.core.recipes.StepIngredients
 import app.toque.core.recipes.StepMachine
 import app.toque.core.recipes.StepProgram
-import app.toque.core.time.KitchenTimerList
 import app.toque.ui.HoldButton
 import app.toque.ui.Icon
 import app.toque.ui.IngredientsCard
@@ -42,6 +44,31 @@ import app.toque.ui.Ui
  * la lame (sauf changement de sens). La progression est mémorisée (reprise après coupure).
  */
 class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : Screen(a) {
+    companion object {
+        /** Début des clés gardées pour l'étape [i] de la recette [id] (« J'ai vérifié ce réglage », « Utiliser … »). */
+        fun stepKey(id: String, i: Int): String = "$id|$i|"
+
+        /**
+         * Un téléphone vient d'écrire la recette [id] : aux rangs [steps], un réglage a été tapé ou changé, ou une
+         * étape à réglage est arrivée d'un autre rang. Oublie toute vérification ([Prefs.reviewedSteps]) et toute
+         * adaptation adoptée ([Prefs.adaptedSteps]) gardées à ces rangs, quel que soit leur réglage, pour que la
+         * carte « Réglage à vérifier » revienne avant le premier lancement, même pour un réglage au même résumé
+         * qu'un réglage vérifié avant à ce rang. Les autres étapes gardent les leurs. Fil principal, dans le bloc
+         * qui enregistre la recette.
+         */
+        fun forgetConfirmations(prefs: app.toque.Prefs, id: String, steps: Collection<Int>) {
+            if (steps.isEmpty()) return
+            val starts = steps.map { stepKey(id, it) }
+            fun keep(keys: Set<String>): Set<String> = keys.filterNot { k -> starts.any { k.startsWith(it) } }.toSet()
+            val reviewed = prefs.reviewedSteps
+            val r = keep(reviewed)
+            if (r.size != reviewed.size) prefs.reviewedSteps = r
+            val adapted = prefs.adaptedSteps
+            val ad = keep(adapted)
+            if (ad.size != adapted.size) prefs.adaptedSteps = ad
+        }
+    }
+
     override val title = recipe.title
     private var index = startStep.coerceIn(0, maxOf(0, recipe.steps.size - 1))
     /** Ouverture de l'écran, pour la durée affichée à la fin (seulement si la recette a été suivie depuis le début). */
@@ -56,7 +83,7 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
     }
     /**
      * Étapes dont le réglage refusé est remplacé par le réglage permis le plus proche, adopté d'un
-     * appui (« Utiliser … ») : c'est lui qui part et qui s'enchaîne.
+     * appui (« Utiliser … ») : c'est lui qui part, qui s'enchaîne et qui est décrit aux téléphones.
      */
     private val adopted = HashMap<Int, StepMachine>().apply {
         // Adoptés lors d'une cuisson précédente : repris seulement si la proposition est toujours la même.
@@ -93,6 +120,13 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
     private var hotBlendOk = false
     /** Message fixe de l'étape (vérification, refus), réaffiché hors cuisson. */
     private var panelInfo = ""
+    /** Poids relevé en quittant (ou en lançant) chaque étape de pesée, pour le compagnon. */
+    private val weighed = HashMap<Int, Int>()
+    /** Étapes dont la question « mixer à chaud » est posée à l'écran. */
+    private val hotAsked = HashSet<Int>()
+    /** Dernière session envoyée au compagnon (rien n'est renvoyé tant qu'elle ne change pas). */
+    private var sessionKey = ""
+    private var sessionEnded = false
 
     private lateinit var segments: LinearLayout
     private lateinit var counter: TextView
@@ -181,6 +215,8 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
     private fun next() {
         if (index >= recipe.steps.size - 1) {
             countCooked()
+            noteWeighed(index)
+            endSession(completed = true)
             a.prefs.guidedRecipe = ""
             a.chime(1)
             // « Bon appétit ! » et la suite : nettoyage, note, Terminer.
@@ -199,27 +235,27 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
     }
 
     /**
-     * Arrête la recette (après la confirmation de [askStop]) : le programme lancé par cette recette
-     * s'arrête (jamais un autre), « Reprendre » disparaît de l'accueil et l'écran se ferme. La recette
-     * n'est pas comptée comme cuisinée (sauf si un de ses programmes l'avait déjà été en démarrant).
+     * Arrête la recette, sans confirmation (celle de l'écran est dans [askStop] ; un téléphone pourra
+     * l'appeler après la sienne) : le programme lancé par cette recette s'arrête, la session se clôt
+     * comme non terminée pour les téléphones, « Reprendre » disparaît de l'accueil et l'écran se ferme.
+     * La recette n'est pas comptée comme cuisinée (sauf si un de ses programmes l'avait déjà été en démarrant).
      */
-    private fun stopRecipe() {
+    fun stopRecipe() {
         if (stopped) return
         stopped = true
         if (launchedActive(a.snapshot)) a.machine.stop()
         launchedStep = -1
         launchedCount = 1
+        endSession(completed = false)
         a.prefs.guidedRecipe = ""
         a.toast(tr("Recette arrêtée"), Ui.TEXT2)
-        if (a.current === this) a.back()
+        if (a.current === this) a.back() else if (a.isOnStack(this)) a.home()
     }
-
-    /** Le programme lancé depuis cette recette est en cours (ni terminé ni arrêté). */
-    private fun launchedActive(s: Snapshot): Boolean =
-        launchedStep >= 0 && s.jobActive && s.state != JobState.FINISHED && s.state != JobState.ABORTED
 
     private fun go(i: Int) {
         if (i < 0 || i >= recipe.steps.size) return
+        if (i > index) noteWeighed(index)
+        hotAsked.clear()
         index = i
         weighArmed = false
         a.prefs.guidedRecipe = recipe.id
@@ -270,9 +306,15 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
         nextLabel.text = if (index == n - 1) tr("Terminer") else tr("Suivant")
         buildPanel()
         onSnapshot(a.snapshot)
+        publish()
     }
 
     private lateinit var startBtn: View
+    /** Valeurs du réglage affiché : celles de l'étape, ou celles de la cuisson lancée (réglable depuis un téléphone). */
+    private var lineTime: TextView? = null
+    private var lineTemp: TextView? = null
+    private var lineSpeed: TextView? = null
+    private var lineDir: View? = null
     private var turboBtn: HoldButton? = null
     private var reviewBtn: View? = null
     private var panelState: TextView? = null
@@ -331,13 +373,19 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
         if (index in adopted) info.addView(adaptedRow(orig, m), Ui.lp(t = 12))
 
         val grid = Ui.vertical(c)
-        fun line(icon: Icon.Kind, label: String, value: String, color: Int = Ui.TEXT) {
+        fun line(icon: Icon.Kind, label: String, value: String, color: Int = Ui.TEXT): TextView {
             val r = Ui.horizontal(c)
             r.addView(Icon(c, icon, Ui.TEXT2), LinearLayout.LayoutParams(Ui.u(22), Ui.u(22)).apply { rightMargin = Ui.u(10) })
             r.addView(Ui.text(c, label, 17f, Ui.TEXT2), LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
-            r.addView(Ui.text(c, value, 24f, color, Ui.LIGHT))
+            val v = Ui.text(c, value, 24f, color, Ui.LIGHT)
+            r.addView(v)
             grid.addView(r, Ui.lp(t = 10))
+            return v
         }
+        lineTime = null
+        lineTemp = null
+        lineSpeed = null
+        lineDir = null
         if (proposal != null) {
             // Ce que demande la recette, en une ligne : la place reste au motif du refus et à la proposition.
             grid.addView(Ui.text(c, tr("La recette demande :"), 16f, Ui.TEXT2))
@@ -345,12 +393,15 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
         } else if (m.program == StepProgram.TURBO) {
             line(Icon.Kind.BOLT, tr("Impulsions"), if (m.pulses > 0) "× ${m.pulses}" else tr("au besoin"))
         } else {
-            line(Icon.Kind.CLOCK, tr("Durée"), Ui.duration(m.seconds))
+            lineTime = line(Icon.Kind.CLOCK, tr("Durée"), Ui.duration(m.seconds))
             if (m.program == StepProgram.MANUAL) {
-                line(Icon.Kind.THERMO, tr("Température"), if (m.tempC > 0) "${Mcc.celsiusForLevel(m.temperatureLevel)} °C" else "—",
+                lineTemp = line(Icon.Kind.THERMO, tr("Température"), if (m.tempC > 0) "${Mcc.celsiusForLevel(m.temperatureLevel)} °C" else "—",
                     if (m.tempC > 0) Ui.tempColor(m.tempC) else Ui.TEXT2)
-                line(Icon.Kind.SPEED, tr("Vitesse"), "${m.speed}")
-                if (m.reverse) line(Icon.Kind.REVERSE, tr("Sens"), tr("Inverse"), Ui.COOL)
+                lineSpeed = line(Icon.Kind.SPEED, tr("Vitesse"), "${m.speed}")
+                // Toujours construite : un téléphone peut passer l'étape en cours en sens inverse.
+                lineDir = (line(Icon.Kind.REVERSE, tr("Sens"), tr("Inverse"), Ui.COOL).parent as View).apply {
+                    visibility = if (m.reverse) View.VISIBLE else View.GONE
+                }
                 if (m.accessory == Accessory.WHISK) line(Icon.Kind.WHISK, tr("Accessoire"), Accessory.WHISK.label, Ui.WARN)
             }
         }
@@ -382,7 +433,9 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
             reviewBtn = rb
             panel.addView(rb, Ui.lp(t = 8, b = 8))
             // Les programmes gardent leur nom en titre (c'est lui qu'on vérifie) et la phrase : leur seule ligne laisse la place.
-            if (!reviewTitle) panelInfo = tr("Réglage importé : vérifiez-le avant de lancer.")
+            // Tapé sur un téléphone : il n'a pas été « importé », la carte dit d'où il vient.
+            if (!reviewTitle) panelInfo = if (step.reviewAlone) tr("Réglage saisi sur le téléphone : vérifiez-le avant de lancer.")
+                else tr("Réglage importé : vérifiez-le avant de lancer.")
         }
         panelState?.text = panelInfo
         if (proposal != null) {
@@ -423,7 +476,7 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
      * Le bouton nomme le réglage : l'appui vaut vérification (« J'ai vérifié ce réglage »). Rien ne part.
      */
     private fun adopt(i: Int, from: StepMachine, to: StepMachine) {
-        if (i != index || i in adopted) return
+        if (i != index || stopped || i in adopted) return
         adopted[i] = to
         reviewed += i
         a.prefs.adaptedSteps = a.prefs.adaptedSteps + adaptKey(i, from, to)
@@ -460,11 +513,11 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
         }
         card.addView(Ui.text(c, tr("Toque utilise : %s", to.summary), 20f, Ui.TEXT), Ui.lp(t = 10))
         if (from.program == StepProgram.MANUAL)
-            card.addView(Ui.text(c, tr("Pour un autre réglage : « Ajuster à la main »."), 17f, Ui.TEXT2), Ui.lp(t = 14))
+            card.addView(Ui.text(c, Ui.guillemets(tr("Pour un autre réglage : « Ajuster à la main ».")), 17f, Ui.TEXT2), Ui.lp(t = 14))
         val row = Ui.horizontal(c, Gravity.END or Gravity.CENTER_VERTICAL)
         row.addView(Ui.button(c, tr("Fermer"), Ui.Style.SECONDARY, height = 60) { a.closeOverlay() })
         card.addView(row, Ui.lp(t = 22))
-        a.showOverlay(card, 680)
+        a.showOverlay(card, 680, spareMachineBar = true)
     }
 
     // ------------------------------------------------------------------ étape à la main
@@ -513,9 +566,9 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
                     panel.addView(Ui.text(c, tr("Quantités pour %s", Portions.label(recipe.servings, recipe.servingUnit)), 16f, Ui.TEXT2), Ui.lp(t = 4))
                 }
             } else {
-                // Une durée seulement : en grand.
+                // Une durée seulement : en grand, comme sur la maquette.
                 val box = Ui.vertical(c, Gravity.CENTER)
-                box.addView(Icon(c, Icon.Kind.TIMER, Ui.ACCENT), LinearLayout.LayoutParams(Ui.u(56), Ui.u(56)))
+                box.addView(Icon(c, Icon.Kind.TIMER, Ui.ACCENT_INK), LinearLayout.LayoutParams(Ui.u(56), Ui.u(56)))
                 box.addView(Ui.text(c, Ui.clock(seconds * 1000L), 44f, Ui.TEXT, Ui.LIGHT), Ui.lp(Ui.WRAP, Ui.WRAP, t = 10))
                 box.addView(Ui.text(c, tr("Durée lue dans l'étape"), 16f, Ui.TEXT2), Ui.lp(Ui.WRAP, Ui.WRAP, t = 6))
                 panel.addView(box, LinearLayout.LayoutParams(Ui.MATCH, 0, 1f))
@@ -553,7 +606,7 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
                 }, Ui.flp(Ui.MATCH, Ui.WRAP))
             } else {
                 val b = Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.TIMER, height = 60, textSize = 20f) { TimerPanel.open(a) }
-                val t = Ui.text(c, "", 20f, Ui.ACCENT, Ui.MEDIUM)
+                val t = Ui.text(c, "", 20f, Ui.ACCENT_INK, Ui.MEDIUM)
                 b.addView(t)
                 offerTime = t
                 box.addView(b, Ui.flp(Ui.MATCH, Ui.WRAP))
@@ -568,11 +621,6 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
         refreshOffer()
     }
 
-    override fun onHide() {
-        unsubTimers?.invoke()
-        unsubTimers = null
-    }
-
     private fun launch() {
         if (stopped) return
         val first = index
@@ -582,13 +630,16 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
         val count = series?.phases?.size ?: 1
         a.prefs.guidedRecipe = recipe.id
         a.prefs.guidedStep = first
-        a.startJob(job, onHotConfirmed = { hotBlendOk = true }) { v ->
+        noteWeighed(first)
+        a.startJob(job, onHotConfirmed = { hotBlendOk = true }, onHotAsked = { hotAsked += first; publish() }) { v ->
             if (v.ok) {
                 countCooked()
                 launchedStep = first
                 launchedCount = count
                 seenPhase = 0
+                hotAsked.remove(first)
             }
+            publish()
         }
     }
 
@@ -623,6 +674,9 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
     private fun continues(i: Int): Boolean {
         val s = recipe.steps.getOrNull(i) ?: return false
         val written = s.machine ?: return false
+        // Réglage tapé sur un téléphone, encore à vérifier : jamais enchaîné, il a sa propre carte. (Un réglage
+        // importé à vérifier s'enchaîne comme avant : la première étape de la série le liste et se vérifie.)
+        if (s.reviewAlone && s.needsReview && i !in reviewed) return false
         // Réglage adopté à la place d'un réglage refusé : il s'enchaîne ; un refusé non adopté, jamais.
         val m = machine(i) ?: return false
         val prev = machine(i - 1) ?: return false
@@ -638,6 +692,11 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
     }
 
     override fun onSnapshot(s: Snapshot) {
+        showSnapshot(s)
+        publish()
+    }
+
+    private fun showSnapshot(s: Snapshot) {
         val w = recipe.steps.getOrNull(index)?.weigh
         if (w != null) {
             weighValue.text = if (s.hasSample) "${s.weightG} g" else "—"
@@ -683,6 +742,8 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
                 ps.text = panelInfo
             }
         }
+        showSettings(m, if (mine && launchedCount == 1 && s.kind == JobKind.MANUAL && s.phaseCount == 1 &&
+            m.program == StepProgram.MANUAL && s.state != JobState.FINISHED && s.state != JobState.ABORTED) s else null)
         if (mine && ps != null) {
             ps.setTextColor(Ui.TEXT2)
             ps.text = when (s.state) {
@@ -700,24 +761,113 @@ class CookScreen(a: MainActivity, private val recipe: Recipe, startStep: Int) : 
         }
     }
 
-    /**
-     * La recette attend la personne (pesée, étape à la main, étape à lancer, mixage à chaud à
-     * confirmer, fin de recette) : tout sauf le programme lancé d'ici, en cours ou en pause.
-     */
-    override val cookWaiting: Boolean
-        get() {
-            val s = a.snapshot
-            val launchedActive = launchedStep >= 0 && s.jobActive && s.state != JobState.FINISHED && s.state != JobState.ABORTED
-            return recipe.steps.isNotEmpty() && !launchedActive
+    /** Réglage affiché dans le panneau : celui de l'étape, ou celui de la cuisson en cours [job] (changé depuis un téléphone). */
+    private fun showSettings(m: StepMachine, job: Snapshot?) {
+        val seconds = if (job != null) (job.totalMs / 1000).toInt() else m.seconds
+        val level = job?.jobTempLevel ?: m.temperatureLevel
+        val speed = job?.jobSpeed ?: m.speed
+        val reverse = job?.jobReverse ?: m.reverse
+        lineTime?.let { setIfChanged(it, Ui.duration(seconds)) }
+        lineTemp?.let {
+            val t = Mcc.celsiusForLevel(level)
+            setIfChanged(it, if (level > 0) "$t °C" else "—")
+            it.setTextColor(if (level > 0) Ui.tempColor(t) else Ui.TEXT2)
         }
+        lineSpeed?.let { setIfChanged(it, "$speed") }
+        lineDir?.visibility = if (reverse && speed > 0) View.VISIBLE else View.GONE
+    }
+
+    private fun setIfChanged(t: TextView, v: String) {
+        if (t.text.toString() != v) t.text = v
+    }
+
+    // ------------------------------------------------------------------ compagnon
+
+    private fun noteWeighed(i: Int) {
+        val s = a.snapshot
+        if (recipe.steps.getOrNull(i)?.weigh != null && s.hasSample) weighed[i] = s.weightG
+    }
+
+    /** Le programme lancé depuis cette recette est en cours (ni terminé ni arrêté). */
+    private fun launchedActive(s: Snapshot): Boolean =
+        launchedStep >= 0 && s.jobActive && s.state != JobState.FINISHED && s.state != JobState.ABORTED
+
+    /** Ce que le robot attend de la personne en ce moment. */
+    private fun waitingFor(s: Snapshot): WaitingFor {
+        val step = recipe.steps[index]
+        return when {
+            launchedActive(s) -> if (s.state == JobState.PAUSED) WaitingFor.RESUME else WaitingFor.NOTHING
+            index == recipe.steps.size - 1 && index in done -> WaitingFor.FINISH
+            step.weigh != null && index !in weighed -> WaitingFor.WEIGH
+            step.machine != null && index !in done -> if (index in hotAsked) WaitingFor.HOT_BLEND else WaitingFor.LAUNCH
+            else -> WaitingFor.HAND
+        }
+    }
+
+    /** Pesée, étape à la main, étape à lancer, mixage à chaud à confirmer ou fin de recette. */
+    override val cookWaiting: Boolean
+        get() = !sessionEnded && recipe.steps.isNotEmpty() &&
+            waitingFor(a.snapshot).let { it != WaitingFor.NOTHING && it != WaitingFor.RESUME }
+
+    /** Ce que le robot attend en ce moment, et les étapes couvertes par le programme lancé. */
+    private fun publish() {
+        val hub = a.app.companion?.hub ?: return
+        if (sessionEnded || recipe.steps.isEmpty()) return
+        val s = a.snapshot
+        val active = launchedActive(s)
+        val running = if (active) (launchedStep until launchedStep + launchedCount).toList() else emptyList()
+        val waitingFor = waitingFor(s)
+        val key = "$index|${done.sorted()}|$running|$waitingFor|${weighed.toSortedMap()}|${hotAsked.sorted()}|${adopted.keys.sorted()}|${reviewed.sorted()}"
+        if (key == sessionKey) return
+        sessionKey = key
+        try {
+            hub.updateSession(CookSession.of(cooked(), index, HashSet(done), running, waitingFor, HashMap(weighed), HashSet(hotAsked)))
+        } catch (t: Throwable) {
+            a.app.log.write("compagnon", "session : $t")
+        }
+    }
+
+    private fun endSession(completed: Boolean) {
+        if (sessionEnded) return
+        sessionEnded = true
+        try {
+            a.app.companion?.hub?.endSession(completed)
+        } catch (t: Throwable) {
+            a.app.log.write("compagnon", "fin de session : $t")
+        }
+    }
+
+    /**
+     * Écran quitté (retour, accueil) : la recette n'est plus suivie à l'écran, la session se clôt
+     * pour les téléphones. Recouvert par un autre écran (« Ajuster à la main »), elle continue.
+     */
+    override fun onHide() {
+        unsubTimers?.invoke()
+        unsubTimers = null
+        view.post { if (!a.isOnStack(this)) endSession(completed = false) }
+    }
+
+    /**
+     * La recette telle qu'elle cuit, pour les téléphones : les réglages adoptés à la place des
+     * réglages refusés, et plus de « à vérifier » sur un réglage déjà vérifié ici (« J'ai vérifié ce
+     * réglage », ou l'appui sur « Utiliser … » qui nomme le réglage).
+     */
+    private fun cooked(): Recipe = if (adopted.isEmpty() && reviewed.isEmpty()) recipe else recipe.copy(steps = recipe.steps.mapIndexed { i, st ->
+        val m = adopted[i]
+        when {
+            m != null -> st.copy(machine = m, needsReview = false)
+            st.needsReview && i in reviewed -> st.copy(needsReview = false)
+            else -> st
+        }
+    })
 
     /** Réglage en clair, indépendant de la langue (la clé des réglages adoptés). */
     private fun code(m: StepMachine): String =
         "${m.program.key}/${m.seconds}/${m.speed}/${m.tempC}/${if (m.reverse) 1 else 0}/${m.accessory.name}/${m.pulses}"
 
-    private fun adaptKey(i: Int, from: StepMachine, to: StepMachine): String = "${recipe.id}|$i|${code(from)}>${code(to)}"
+    private fun adaptKey(i: Int, from: StepMachine, to: StepMachine): String = stepKey(recipe.id, i) + "${code(from)}>${code(to)}"
 
-    private fun reviewKey(i: Int): String = "${recipe.id}|$i|${recipe.steps[i].machine?.summary ?: ""}"
+    private fun reviewKey(i: Int): String = stepKey(recipe.id, i) + (recipe.steps[i].machine?.summary ?: "")
 
     /** Le programme qui se termine est le dernier réglage machine de la recette. */
     private fun endsRecipe(e: MachineEvent): Boolean {
