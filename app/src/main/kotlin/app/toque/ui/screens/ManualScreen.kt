@@ -301,7 +301,7 @@ class ManualScreen(
             setReverse(true)
         })
         val dirFocused = (selected == 3)
-        dirRow.background = if (dirFocused) Ui.round(Ui.SURFACE, 34f, Ui.TEXT3, 2.5f) else null
+        dirRow.background = if (dirFocused) Ui.round(Ui.SURFACE, 34f, Ui.ACCENT, 2f) else null
         val pad = if (dirFocused) Ui.u(3) else 0
         dirRow.setPadding(pad, pad, pad, pad)
         accRow.removeAllViews()
@@ -314,7 +314,7 @@ class ManualScreen(
             setAccessory(Accessory.WHISK)
         })
         val accFocused = (selected == 4)
-        accRow.background = if (accFocused) Ui.round(Ui.SURFACE, 34f, Ui.TEXT3, 2.5f) else null
+        accRow.background = if (accFocused) Ui.round(Ui.SURFACE, 34f, Ui.ACCENT, 2f) else null
         val accPad = if (accFocused) Ui.u(3) else 0
         accRow.setPadding(accPad, accPad, accPad, accPad)
 
@@ -324,7 +324,7 @@ class ManualScreen(
         hint.text = v.firstOrNull()?.message ?: if (onPick == null && a.snapshot.hot && speed >= 4) tr("Contenu chaud : confirmation demandée") else idleHint()
         Ui.setButtonEnabled(startBtn, v.isEmpty())
         val startFocused = (selected == 5)
-        val startBase = if (startFocused) Ui.round(Ui.ACCENT, 40f, Ui.TEXT3, 3f) else Ui.round(Ui.ACCENT, 40f)
+        val startBase = if (startFocused) Ui.round(Ui.ACCENT, 40f, Ui.ACCENT_INK, 3f) else Ui.round(Ui.ACCENT, 40f)
         startBtn.background = Ui.pressable(startBase, 40f)
         showRing(a.snapshot)
     }

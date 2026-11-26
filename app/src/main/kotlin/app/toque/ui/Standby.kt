@@ -69,6 +69,16 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
         running = true
         lastInputMs = SystemClock.uptimeMillis()
         main.postDelayed(check, 10_000)
+        // Ensure screen backlight and base relays are awake if the previous process died in deep sleep.
+        a.machine.setStandby(false)
+        KnobLight.stop()
+        Thread {
+            val bl = java.io.File("/sys/class/leds/lcd-backlight/brightness")
+            if (bl.exists()) {
+                val cur = try { bl.readText().trim() } catch (_: Exception) { "" }
+                if (cur == "0") RootShell.run("echo 200 > /sys/class/leds/lcd-backlight/brightness", 5_000)
+            }
+        }.start()
     }
 
     fun stop() {

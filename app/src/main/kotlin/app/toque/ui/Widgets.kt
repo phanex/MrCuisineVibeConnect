@@ -31,6 +31,7 @@ class ValueCard(c: Context, label: String, icon: Icon.Kind) : LinearLayout(c) {
         EDITING     // En cours de modification : bordure épaisse orange Ui.ACCENT 2.5f
     }
     private var focusState = State.IDLE
+    private var baseValueColor = Ui.TEXT
 
     init {
         orientation = VERTICAL
@@ -59,8 +60,9 @@ class ValueCard(c: Context, label: String, icon: Icon.Kind) : LinearLayout(c) {
     }
 
     fun set(value: String, unit: String = "", sub: String = "", color: Int = Ui.TEXT) {
+        baseValueColor = color
         valueView.text = value
-        valueView.setTextColor(color)
+        valueView.setTextColor(if (focusState == State.EDITING && color == Ui.TEXT) Ui.ACCENT_INK else color)
         unitView.text = unit
         subView.text = sub
     }
@@ -83,11 +85,13 @@ class ValueCard(c: Context, label: String, icon: Icon.Kind) : LinearLayout(c) {
     private fun refreshBg() {
         val (strokeColor, strokeWidth) = when (focusState) {
             State.IDLE -> Ui.STROKE to 1f
-            State.FOCUSED -> Ui.TEXT3 to 2.5f
-            State.EDITING -> Ui.ACCENT_INK to 2.5f
+            State.FOCUSED -> Ui.ACCENT to 2f
+            State.EDITING -> Ui.ACCENT to 3.5f
         }
         background = Ui.round(Ui.SURFACE, 26f, strokeColor, strokeWidth)
         iconView.color = if (focusState == State.EDITING) Ui.ACCENT_INK else Ui.TEXT2
+        unitView.setTextColor(if (focusState == State.EDITING) Ui.ACCENT_INK else Ui.TEXT2)
+        valueView.setTextColor(if (focusState == State.EDITING && baseValueColor == Ui.TEXT) Ui.ACCENT_INK else baseValueColor)
     }
 
     companion object {
