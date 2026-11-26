@@ -84,6 +84,7 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
     private var lastStartMs = 0L
     private lateinit var turbo: HoldButton
     private lateinit var startBtn: LinearLayout
+    private var scroller: android.widget.ScrollView? = null
 
     override fun build(): View {
         val root = Ui.vertical(c)
@@ -148,7 +149,9 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
             row.addView(View(c), LinearLayout.LayoutParams(0, Ui.MATCH, 1f).apply { if (k < 3) rightMargin = Ui.u(16) })
         if (many) {
             rows.addView(row, Ui.lp(Ui.MATCH, Ui.u(rowHeight(progs.size - 1 - (progs.size - 1) % 4))))
-            root.addView(Ui.scroll(c, rows), LinearLayout.LayoutParams(Ui.MATCH, 0, 1f))
+            val sv = Ui.scroll(c, rows)
+            scroller = sv
+            root.addView(sv, LinearLayout.LayoutParams(Ui.MATCH, 0, 1f))
         } else {
             root.addView(row, LinearLayout.LayoutParams(Ui.MATCH, 0, 1f))
         }
@@ -198,15 +201,27 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
             }
             p.unit.text = if (s < 60) "s" else if (s >= 3600) "h" else "min"
             p.temp?.text = "${p.celsius} °C"
-            val isFocused = (i == focusedIndex)
-            val isSelected = (i == selected)
+            val isActive = (i == focusedIndex)
+            val isEditing = isActive && editing
             val (strokeColor, strokeWidth) = when {
-                isSelected && editing -> Ui.ACCENT_INK to 2.5f
-                isFocused -> Ui.TEXT3 to 2.5f
-                isSelected -> Ui.ACCENT_INK to 1.5f
+                isEditing -> Ui.ACCENT to 3.5f
+                isActive -> Ui.ACCENT to 2f
                 else -> Ui.STROKE to 1f
             }
             p.card.background = Ui.round(Ui.SURFACE, 26f, strokeColor, strokeWidth)
+            p.value.setTextColor(if (isEditing) Ui.ACCENT_INK else Ui.TEXT)
+            p.unit.setTextColor(if (isEditing) Ui.ACCENT_INK else Ui.TEXT2)
+        }
+    }
+
+    private fun scrollToCard(index: Int) {
+        val sv = scroller ?: return
+        val row = progs.getOrNull(index)?.card?.parent as? View ?: return
+        sv.post {
+            val y = sv.scrollY
+            val h = sv.height
+            if (row.top < y) sv.smoothScrollTo(0, row.top)
+            else if (row.bottom > y + h) sv.smoothScrollTo(0, row.bottom - h)
         }
     }
 
@@ -223,7 +238,9 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
             val next = (focusedIndex + delta).coerceIn(0, progs.size - 1)
             if (next != focusedIndex) {
                 focusedIndex = next
+                selected = next
                 refresh()
+                scrollToCard(next)
             }
         }
         return true
