@@ -112,13 +112,9 @@ class BootReceiver : BroadcastReceiver() {
         if (prefs.bootLaunch) {
             val open = Intent(c, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             c.startActivity(open)
-            // L'alarme de sécurité de 20 s n'est utile que si l'appli d'origine est encore active comme lanceur.
-            // En mode HARDWARE avec appli d'origine désactivée, Toque est le seul écran d'accueil : aucun sursaut.
-            if (prefs.mode != Prefs.Mode.HARDWARE) {
-                val am = c.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-                am.set(AlarmManager.ELAPSED_REALTIME, SystemClock.elapsedRealtime() + 20_000,
-                    PendingIntent.getActivity(c, 1, open, PendingIntent.FLAG_UPDATE_CURRENT))
-            }
+            val am = c.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            am.set(AlarmManager.ELAPSED_REALTIME, SystemClock.elapsedRealtime() + 20_000,
+                PendingIntent.getActivity(c, 1, open, PendingIntent.FLAG_UPDATE_CURRENT))
         }
     }
 }

@@ -908,7 +908,7 @@ class SettingsScreen(a: MainActivity, private val startOn: Family? = null) : Scr
                 if (sync.components().hardwareService != null && !sync.setVendorHardware(false))
                     problems += tr("impossible de couper l'appli d'origine du moteur")
                 sync.forceStop()
-                RootShell.run("pm disable de.silpion.mc2/activity.MainActivity 2>/dev/null; pm disable com.example.endurancetest 2>/dev/null", 8_000)
+                // RootShell.run("pm disable de.silpion.mc2/activity.MainActivity 2>/dev/null; pm disable com.example.endurancetest 2>/dev/null", 8_000)
             }
             view.post {
                 if (problems.isNotEmpty()) {

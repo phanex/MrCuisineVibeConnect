@@ -410,11 +410,11 @@ class MainActivity : Activity() {
         prefs.returnBubble = false
         ReturnBubble.stop(this)
         if (prefs.vendorSession) endVendorSession()
-        else if (prefs.mode == Prefs.Mode.HARDWARE) {
-            Thread {
-                RootShell.run("pm disable de.silpion.mc2/activity.MainActivity 2>/dev/null; pm disable com.example.endurancetest 2>/dev/null", 5_000)
-            }.start()
-        }
+        // else if (prefs.mode == Prefs.Mode.HARDWARE) {
+        //     Thread {
+        //         RootShell.run("pm disable de.silpion.mc2/activity.MainActivity 2>/dev/null; pm disable com.example.endurancetest 2>/dev/null", 5_000)
+        //     }.start()
+        // }
     }
 
     override fun onPause() {
@@ -876,7 +876,7 @@ class MainActivity : Activity() {
         prefs.vendorSession = false
         toast(tr("Reprise de la main sur le robot…"))
         Thread {
-            RootShell.run("pm disable de.silpion.mc2/activity.MainActivity 2>/dev/null; pm disable com.example.endurancetest 2>/dev/null", 8_000)
+            // RootShell.run("pm disable de.silpion.mc2/activity.MainActivity 2>/dev/null; pm disable com.example.endurancetest 2>/dev/null", 8_000)
             val sync = LidlSync(this, prefs, app.recipes, app.log)
             sync.forceStop()
             sync.setVendorHardware(false)
