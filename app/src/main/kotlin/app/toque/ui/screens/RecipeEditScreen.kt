@@ -696,7 +696,6 @@ class StepEditScreen(
             // 48 de haut au moins : au doigt (la puce commune en fait 40).
             for ((p, label) in row) line.addView(Ui.toggleChip(c, label, m?.program == p) { program(p) }.apply {
                 minimumHeight = Ui.u(48)
-                setGravity(Gravity.CENTER)
             }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 8))
             box.addView(line, Ui.lp(b = 8))
         }
