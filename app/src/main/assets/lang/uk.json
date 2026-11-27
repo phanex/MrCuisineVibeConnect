@@ -953,7 +953,7 @@
   "Pétrir, vapeur, yaourt, nettoyage": "Автоматичні режими",
   "Depuis Mealie": "З Mealie",
   "Toque crée une copie de cette recette dans Mes recettes, telle qu'elle est affichée, pour que vous la modifiiez. La recette reste telle quelle dans Mealie.": "Toque створює копію цього рецепта в «Мої рецепти» такою, як вона показана, щоб ви могли її змінити. У Mealie рецепт лишається без змін.",
-  "Vous hébergez vos recettes avec Mealie ? Reliez le robot à votre serveur : toutes ses recettes arrivent dans Toque, chaque nuit et à la demande. Les réglages écrits dans les étapes (« 5 min/100 °C/vitesse 1 ») sont proposés, à vérifier avant de lancer.": "Синхронізує рецепти з вашого сервера Mealie щоночі та за запитом.\nНалаштування в кроках (напр. «5 min, 100°C, speed 1») підтягуються як підказка перед запуском.",
+  "Vous hébergez vos recettes avec Mealie ? Reliez le robot à votre serveur : toutes ses recettes arrivent dans Toque, chaque nuit et à la demande. Les réglages écrits dans les étapes (« 5 min/100 °C/vitesse 1 ») sont proposés, à vérifier avant de lancer.": "Управління роботом вказувати в кроках рецепта (напр. «5 min, 100°C, speed 1»).\nПідтягуються як підказка перед запуском.",
   "Aucun serveur Mealie relié.": "Сервер Mealie не підключено.",
   "Relier mon serveur": "Підключити",
   "Relié à %s": "Підключено до %s",
