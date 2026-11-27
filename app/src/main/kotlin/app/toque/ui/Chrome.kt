@@ -74,8 +74,8 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
         addView(tempIcon, LayoutParams(Ui.u(20), Ui.u(20)).apply { rightMargin = Ui.u(6) })
         addView(tempText)
     }
-    private val lid = Ui.chip(a, tr("Couvercle ouvert"), Icon.Kind.LID, Ui.WARN, 0x33FFC14D)
-    private val bowl = Ui.chip(a, tr("Bol retiré"), Icon.Kind.POT, Ui.WARN, 0x33FFC14D)
+    private val lid = barChip(tr("Couvercle ouvert"), Icon.Kind.LID, Ui.WARN, 0x33FFC14D)
+    private val bowl = barChip(tr("Bol retiré"), Icon.Kind.POT, Ui.WARN, 0x33FFC14D)
     private val linkIcon = Icon(a, Icon.Kind.LINK, Ui.OK)
     private val clock = Ui.text(a, "", 28f, Ui.TEXT, Ui.THIN)
     private val home = Icon(a, Icon.Kind.HOME, Ui.TEXT)
@@ -136,8 +136,8 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
         timerChip.visibility = View.GONE
         addView(timerChip, chipParams(16))
 
-        addView(lid, Ui.lp(Ui.WRAP, Ui.WRAP, r = 16))
-        addView(bowl, Ui.lp(Ui.WRAP, Ui.WRAP, r = 16))
+        addView(lid, chipParams(16))
+        addView(bowl, chipParams(16))
         addView(tempBox, Ui.lp(Ui.WRAP, Ui.WRAP, r = 20))
         addView(linkIcon, Ui.lp(Ui.u(20), Ui.u(20), r = 16))
         addView(clock, Ui.lp(Ui.WRAP, Ui.WRAP))
