@@ -49,6 +49,7 @@ abstract class Screen(val a: MainActivity) {
 /** Barre supérieure : retour, titre, minuteurs, état de la base, heure. */
 class TopBar(private val a: MainActivity) : LinearLayout(a) {
     private val back = Icon(a, Icon.Kind.BACK, Ui.TEXT)
+    private val backGroup = Ui.horizontal(a, Gravity.CENTER_VERTICAL)
     /** Titre et, à côté, un compteur plus léger (« Recettes 1 118 »), alignés sur la même ligne de base. */
     private val titleBox = LinearLayout(a).apply {
         orientation = HORIZONTAL
@@ -60,8 +61,8 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
     private val counterView = Ui.text(a, "", 18f, Ui.TEXT2, Ui.LIGHT).apply {
         includeFontPadding = false
     }
-    private val tempIcon = Icon(a, Icon.Kind.THERMO, Ui.TEXT2)
-    private val tempText = Ui.text(a, "", 28f, Ui.TEXT, Ui.THIN)
+    private val temp = barChip("", Icon.Kind.THERMO, Ui.TEXT2)
+    private val tempIcon = temp.getChildAt(0) as Icon
     /** Triangle rouge sur la température, qui clignote tant que le bol est chaud (≥ 60 °C). */
     val hotWarning = Icon(a, Icon.Kind.WARNING_FILLED, Ui.DANGER)
     private val blink = ObjectAnimator.ofFloat(hotWarning, "alpha", 1f, 0.12f).apply {
@@ -69,17 +70,11 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
         repeatMode = ValueAnimator.REVERSE
         repeatCount = ValueAnimator.INFINITE
     }
-    private val tempBox = Ui.horizontal(a, Gravity.CENTER_VERTICAL).apply {
-        addView(hotWarning, LayoutParams(Ui.u(24), Ui.u(24)).apply { rightMargin = Ui.u(6) })
-        addView(tempIcon, LayoutParams(Ui.u(20), Ui.u(20)).apply { rightMargin = Ui.u(6) })
-        addView(tempText)
-    }
     private val lid = barChip(tr("Couvercle ouvert"), Icon.Kind.LID, Ui.WARN, 0x33FFC14D)
     private val bowl = barChip(tr("Bol retiré"), Icon.Kind.POT, Ui.WARN, 0x33FFC14D)
-    private val linkIcon = Icon(a, Icon.Kind.LINK, Ui.OK)
-    private val clock = Ui.text(a, "", 28f, Ui.TEXT, Ui.THIN)
+    private val link = barChip("", Icon.Kind.LINK, Ui.TEXT2)
+    private val clock = barChip("", Icon.Kind.CLOCK, Ui.TEXT)
     private val home = Icon(a, Icon.Kind.HOME, Ui.TEXT)
-    private val backGroup = Ui.horizontal(a, Gravity.CENTER_VERTICAL)
     /** Minuteur de cuisine : bouton rond au repos, pastille orange (temps restant, nombre) quand il en tourne. */
     private val timerButton = Icon(a, Icon.Kind.TIMER, Ui.TEXT)
     private val timerChip = Ui.horizontal(a, Gravity.CENTER_VERTICAL).apply {
@@ -97,7 +92,7 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
     private val tick = object : Runnable {
         override fun run() {
             // « --:-- » tant que l'heure n'est pas réglée (voir WallClock).
-            clock.text = WallClock.text()
+            Ui.chipText(clock).text = WallClock.text()
             handler.postDelayed(this, WallClock.nextMs(10_000))
         }
     }
@@ -107,48 +102,42 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
     init {
         orientation = HORIZONTAL
         setGravity(Gravity.CENTER_VERTICAL)
-        setPadding(Ui.u(34), Ui.u(TOP_GAP), Ui.u(24), 0)
-
-        // Retour + titre groupés à gauche comme une seule zone « Retour » ; accueil à droite.
+        // Un peu d'air au-dessus : sans lui, les pastilles touchent le bord de l'écran.
+        setPadding(Ui.u(10), Ui.u(TOP_GAP), Ui.u(18), 0)
+        // Transparente : le dégradé du fond passe aussi derrière la barre du haut.
         roundButton(back) { a.back() }
-        backGroup.addView(back, LayoutParams(Ui.u(TOUCH), Ui.u(TOUCH)))
-
         titleBox.addView(titleView)
         titleBox.addView(counterView, LayoutParams(Ui.WRAP, Ui.WRAP).apply { leftMargin = Ui.u(10) })
         counterView.visibility = View.GONE
-        backGroup.addView(titleBox, LayoutParams(Ui.WRAP, Ui.WRAP).apply {
-            leftMargin = Ui.u(12)
-            gravity = Gravity.CENTER_VERTICAL
-        })
+        // La flèche et le titre (avec son compteur) : une seule zone Retour.
+        backGroup.addView(back, LayoutParams(Ui.u(TOUCH), Ui.u(TOUCH)))
+        backGroup.addView(titleBox, LayoutParams(Ui.WRAP, Ui.WRAP).apply { leftMargin = Ui.u(6) })
         backGroup.setOnClickListener { a.back() }
         val leftSlot = Ui.horizontal(a, Gravity.CENTER_VERTICAL)
         leftSlot.addView(backGroup, LayoutParams(Ui.WRAP, Ui.WRAP))
-        addView(leftSlot, LayoutParams(0, Ui.WRAP, 1f).apply { rightMargin = Ui.u(12) })
-
-        // Indicateurs et horloge à droite
+        addView(leftSlot, LayoutParams(0, Ui.WRAP, 1f))
         roundButton(timerButton) { TimerPanel.open(a) }
         timerButton.contentDescription = tr("Minuteur")
-        addView(timerButton, LayoutParams(Ui.u(TOUCH), Ui.u(TOUCH)).apply { rightMargin = Ui.u(12) })
+        addView(timerButton, LayoutParams(Ui.u(TOUCH), Ui.u(TOUCH)).apply { rightMargin = Ui.u(6) })
         timerChip.addView(timerText)
         timerChip.addView(timerCount, LayoutParams(Ui.WRAP, Ui.u(26)).apply { leftMargin = Ui.u(8) })
         timerChip.isClickable = true
         timerChip.setOnClickListener { TimerPanel.open(a) }
         timerChip.visibility = View.GONE
-        addView(timerChip, chipParams(16))
-
-        addView(lid, chipParams(16))
-        addView(bowl, chipParams(16))
-        addView(tempBox, Ui.lp(Ui.WRAP, Ui.WRAP, r = 20))
-        addView(linkIcon, Ui.lp(Ui.u(20), Ui.u(20), r = 16))
-        addView(clock, Ui.lp(Ui.WRAP, Ui.WRAP))
+        addView(timerChip, chipParams(10))
+        addView(lid, chipParams(10))
+        addView(bowl, chipParams(10))
+        addView(temp, chipParams(10))
+        addView(link, chipParams(10))
+        addView(clock, chipParams(8))
         roundButton(home) { a.home() }
-        addView(home, LayoutParams(Ui.u(TOUCH), Ui.u(TOUCH)).apply { leftMargin = Ui.u(12) })
+        addView(home, LayoutParams(Ui.u(TOUCH), Ui.u(TOUCH)))
         lid.visibility = View.GONE
         bowl.visibility = View.GONE
-        tempBox.visibility = View.GONE
-        linkIcon.visibility = View.GONE
+        temp.visibility = View.GONE
         hotWarning.contentDescription = tr("Bol chaud")
         hotWarning.visibility = View.GONE
+        temp.addView(hotWarning, 0, LayoutParams(Ui.u(24), Ui.u(24)).apply { rightMargin = Ui.u(6) })
         // Accès caché aux réglages Android : 5 appuis rapides sur l'heure.
         clock.setOnClickListener {
             val now = System.currentTimeMillis()
@@ -229,11 +218,9 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
         } else {
             counterView.visibility = View.GONE
         }
-        back.visibility = if (canGoBack) View.VISIBLE else View.GONE
+        back.visibility = if (canGoBack) View.VISIBLE else View.INVISIBLE
         backGroup.isClickable = canGoBack
         home.visibility = if (canGoBack) View.VISIBLE else View.GONE
-        // Pas de doublon d'horloge sur l'écran d'accueil qui affiche déjà l'heure en grand.
-        clock.visibility = if (canGoBack) View.VISIBLE else View.GONE
     }
 
     fun update(s: Snapshot) {
@@ -245,26 +232,32 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
         // a alors vérifié que le capteur est fiable (sens réglé). Jamais deux fois « Bol retiré ».
         bowl.visibility = if (s.hasSample && a.prefs.requireBowl && !s.bowlDetected && !s.bowlRemoved) View.VISIBLE else View.GONE
         if (s.hasSample) {
-            tempBox.visibility = View.VISIBLE
-            tempText.text = "${s.actualTempC} °C"
-            val col = if (s.actualTempC >= 40) Ui.tempColor(s.actualTempC) else Ui.TEXT
-            tempText.setTextColor(col)
-            tempIcon.color = if (s.actualTempC >= 40) col else Ui.TEXT2
-        } else tempBox.visibility = View.GONE
+            temp.visibility = View.VISIBLE
+            Ui.chipText(temp).text = "${s.actualTempC} °C"
+            val col = if (s.actualTempC >= 40) Ui.tempColor(s.actualTempC) else Ui.TEXT2
+            Ui.chipText(temp).setTextColor(col)
+            tempIcon.color = col
+        } else temp.visibility = View.GONE
         showHot(s.hot)
         val mode = a.prefs.mode
         val simulated = mode != Prefs.Mode.HARDWARE
-        val showLink = s.hasFault || s.link != LinkState.READY || simulated
-        linkIcon.visibility = if (showLink) View.VISIBLE else View.GONE
-        if (showLink) {
-            linkIcon.color = when {
-                s.hasFault -> Ui.DANGER
-                s.link == LinkState.READY -> if (simulated) Ui.COOL else Ui.OK
-                s.link == LinkState.ARMING -> Ui.WARN
-                s.link == LinkState.LOST -> Ui.DANGER
-                else -> Ui.TEXT3
+        val (label, color) = when {
+            s.hasFault -> tr("Alerte") to Ui.DANGER
+            s.link == LinkState.READY -> {
+                val label = when (mode) {
+                    Prefs.Mode.DEMO -> tr("Démo · Base prête")
+                    Prefs.Mode.TWIN -> tr("Jumeau · Base prête")
+                    Prefs.Mode.HARDWARE -> tr("Base prête")
+                }
+                label to (if (simulated) Ui.COOL else Ui.OK)
             }
+            s.link == LinkState.ARMING -> tr("Connexion…") to Ui.WARN
+            s.link == LinkState.LOST -> tr("Liaison perdue") to Ui.DANGER
+            else -> tr("Base absente") to Ui.TEXT3
         }
+        Ui.chipText(link).text = label
+        Ui.chipText(link).setTextColor(color)
+        (link.getChildAt(0) as Icon).color = color
     }
 
     companion object {

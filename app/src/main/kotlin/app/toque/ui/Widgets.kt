@@ -88,10 +88,15 @@ class ValueCard(c: Context, label: String, icon: Icon.Kind) : LinearLayout(c) {
             State.FOCUSED -> Ui.ACCENT to 2f
             State.EDITING -> Ui.ACCENT to 3.5f
         }
-        background = Ui.round(Ui.SURFACE, 26f, strokeColor, strokeWidth)
-        iconView.color = if (focusState == State.EDITING) Ui.ACCENT_INK else Ui.TEXT2
-        unitView.setTextColor(if (focusState == State.EDITING) Ui.ACCENT_INK else Ui.TEXT2)
+        val bg = if (focusState == State.EDITING) Ui.SURFACE2 else Ui.SURFACE
+        val fg = if (focusState == State.EDITING) Ui.ACCENT_INK else Ui.TEXT2
+        background = Ui.round(bg, 26f, strokeColor, strokeWidth)
+        iconView.color = fg
+        unitView.setTextColor(fg)
         valueView.setTextColor(if (focusState == State.EDITING && baseValueColor == Ui.TEXT) Ui.ACCENT_INK else baseValueColor)
+        val btnFg = if (focusState == State.EDITING) Ui.ACCENT_INK else Ui.TEXT
+        (minus.getChildAt(0) as? Icon)?.color = btnFg
+        (plus.getChildAt(0) as? Icon)?.color = btnFg
     }
 
     companion object {
