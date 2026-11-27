@@ -17,8 +17,8 @@ class ValueCard(c: Context, label: String, icon: Icon.Kind) : LinearLayout(c) {
     private val unitView = Ui.text(c, "", 22f, Ui.TEXT2, Ui.LIGHT)
     private val subView = Ui.ellipsize(Ui.text(c, "", 16f, Ui.TEXT3))
     private val iconView = Icon(c, icon, Ui.TEXT2)
-    private val minus: View
-    private val plus: View
+    private val minus: LinearLayout
+    private val plus: LinearLayout
     var onMinus: () -> Unit = {}
     var onPlus: () -> Unit = {}
     var onSelect: () -> Unit = {}
