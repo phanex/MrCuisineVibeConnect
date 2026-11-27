@@ -32,14 +32,17 @@ import app.toque.core.robot.RobotProfiles
 import app.toque.machine.MachineService
 import app.toque.ui.MachineBar
 import app.toque.ui.MainActivity
+import app.toque.ui.ProgressLine
 import app.toque.ui.Splash
 import app.toque.ui.TopBar
+import app.toque.ui.Ui
 import app.toque.ui.screens.ManualScreen
 import app.toque.ui.screens.MealieLinkScreen
 import app.toque.ui.screens.HomeScreen
 import app.toque.ui.screens.PairingScreen
 import app.toque.ui.screens.RecipeScreen
 import app.toque.ui.screens.RecipesScreen
+import app.toque.ui.screens.KnobLightScreen
 import app.toque.ui.screens.SettingsScreen
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -297,7 +300,7 @@ class CompanionScreensTest {
         assertNull(findText(manual.view, "Reprendre"))
         assertFalse(shown(findText(manual.view, "Démarrer")))
         assertTrue(shown(findText(activity.window.decorView, "En pause")))
-        assertEquals(RingColour.ORANGE, RingColour.of(app.machine.snapshot))
+        assertEquals(RingColour.YELLOW, RingColour.of(app.machine.snapshot))
         shot("31-cuisson-manuelle-en-pause")
 
         // La molette reprend, comme le bouton de la barre.
@@ -361,6 +364,11 @@ class CompanionScreensTest {
             return button to card
         }
 
+        fun progressOf(b: MachineBar): ProgressLine {
+            fun find(v: View): ProgressLine? = if (v is ProgressLine) v else if (v is ViewGroup) (0 until v.childCount).firstNotNullOfOrNull { find(v.getChildAt(it)) } else null
+            return find(b)!!
+        }
+
         fun assertEvenMargins(b: MachineBar) {
             val (button, card) = lastButton(b)
             assertEquals("carte à gauche", MachineBar.SIDE, card.left)
@@ -377,7 +385,29 @@ class CompanionScreensTest {
         assertEvenMargins(bar(running.copy(jobState = "PAUSED", pauseReason = "USER"), "34-barre-en-pause"))
         assertEvenMargins(bar(running.copy(jobState = "ABORTED", endReason = "Arrêté"), "35-barre-arretee"))
         assertEvenMargins(bar(running.copy(jobState = "FINISHED", endReason = "Terminé", remainingMs = 0, elapsedMs = 600_000), "36-barre-terminee"))
-        assertEvenMargins(bar(running.copy(jobActive = false, jobState = "", turboActive = true), "37-barre-turbo"))
+        // Turbo : la même carte, à la même hauteur, avec son bouton Stop. Il s'arrête aussi quand on relâche (3 s au
+        // plus par appui) : la barre dit les secondes qui restent, et sa ligne, pleine au départ, se vide avec elles.
+        val full = bar(running.copy(jobActive = false, jobState = "", turboActive = true, turboRemainingMs = 3_000), "37a-barre-turbo-debut")
+        assertNotNull(findText(full, "3 s"))
+        assertEquals(1f, progressOf(full).progress, 0.001f)
+        val turbo = bar(running.copy(jobActive = false, jobState = "", turboActive = true, turboRemainingMs = 1_800), "37-barre-turbo")
+        assertNotNull("1,8 s restantes : « 2 s »", findText(turbo, "2 s"))
+        assertEquals(0.6f, progressOf(turbo).progress, 0.001f)
+        assertEquals(Ui.WARN, progressOf(turbo).color)
+        val turboCard = (0 until turbo.childCount).map { turbo.getChildAt(it) }.first { it.visibility == View.VISIBLE } as ViewGroup
+        assertEquals("carte à gauche", MachineBar.SIDE, turboCard.left)
+        assertEquals("carte à droite", 1024 - MachineBar.SIDE, turboCard.right)
+        assertEquals("carte en haut", 0, turboCard.top)
+        assertEquals("hauteur de la carte", MachineBar.BUTTON + 2 * MachineBar.INSET, turboCard.height)
+        assertEquals("espace sous la carte", MachineBar.BOTTOM_GAP, MachineBar.HEIGHT - turboCard.bottom)
+        assertNotNull(findText(turbo, "Turbo"))
+        assertNotNull(findText(turbo, "Relâchez pour arrêter"))
+        // Le bouton Stop reste : c'est le dernier bouton de la carte, aux mêmes marges que pour un programme.
+        assertEvenMargins(turbo)
+        // Un programme lancé ensuite reprend son temps et sa barre.
+        turbo.update(running)
+        assertNotNull(findText(turbo, "08:00"))
+        assertEquals(0.2f, progressOf(turbo).progress, 0.001f)
         assertEvenMargins(bar(running.copy(faultCode = "COMM_LOST", faultMessage = "Liaison avec la base moteur perdue"), "38-barre-alerte"))
         // Programme d'une heure et plus, titre de recette long.
         assertEvenMargins(bar(running.copy(jobLabel = "Velouté de potimarron aux châtaignes", totalMs = 5_400_000, remainingMs = 5_025_000),
@@ -425,8 +455,11 @@ class CompanionScreensTest {
         val settings = SettingsScreen(activity)
         activity.push(settings)
         idle(3)
-        assertNotNull(findText(settings.view, "Couleurs sur la molette"))
         openFamily(settings, "Molette et sons")
+        assertNotNull(findText(settings.view, "Lumière de la molette"))
+        activity.push(KnobLightScreen(activity))
+        idle(3)
+        assertNotNull(findText(activity.current!!.view, "Couleurs sur la molette"))
         shot("12-reglages-couleurs-molette")
     }
 
@@ -441,11 +474,12 @@ class CompanionScreensTest {
         val settings = SettingsScreen(activity, SettingsScreen.Family.RECIPES)
         activity.push(settings)
         idle(3)
-        // Pastilles de Recettes : Lidl, toqueapp.org, Mes recettes, Appli d'origine ; Mealie est dans la famille « Autres ».
-        for (chip in listOf("Lidl", "toqueapp.org", "Mes recettes", "Appli d'origine")) assertNotNull(chip, findText(settings.view, chip))
+        // Pastilles de Recettes, une par source : Lidl, toqueapp.org, Mealie, Mes recettes, Appli d'origine.
+        for (chip in listOf("Lidl", "toqueapp.org", "Mealie", "Mes recettes", "Appli d'origine")) assertNotNull(chip, findText(settings.view, chip))
         assertNull(findText(settings.view, "Communauté"))
+        assertNull("la famille « Autres » n'existe plus", findText(settings.view, "Autres"))
         shot("39b-reglages-recettes-pastilles")
-        openFamily(settings, "Autres")
+        openFamily(settings, "Mealie")
         assertNotNull(findText(settings.view, "Relier mon serveur"))
         shot("40-reglages-mealie-non-relie")
         activity.push(MealieLinkScreen(activity))
@@ -464,9 +498,10 @@ class CompanionScreensTest {
         app.prefs.mealieLastResult = "25/11 à 03:31 : 1 ajoutée(s)"
         app.recipes.upsertAll(listOf(r))
         waitFor("recette Mealie enregistrée") { app.recipes.index.entries.any { it.id == r.id } }
-        val linked = SettingsScreen(activity, SettingsScreen.Family.OTHERS)
+        val linked = SettingsScreen(activity, SettingsScreen.Family.RECIPES)
         activity.push(linked)
         idle(3)
+        openFamily(linked, "Mealie")
         assertNotNull(findText(linked.view, "Délier"))
         shot("42-reglages-mealie-relie")
         activity.push(RecipesScreen(activity))
@@ -477,6 +512,29 @@ class CompanionScreensTest {
         assertNotNull(findText(activity.window.decorView, "Depuis Mealie"))
         shot("44-recette-mealie")
         app.prefs.forgetMealie()
+    }
+
+    /**
+     * Soutien : la dernière famille du menu (11 lignes qui tiennent dans les 600 px), son code QR calculé à
+     * l'ouverture seulement et lu tel qu'il est dessiné, et l'adresse écrite en clair.
+     */
+    @Test fun supportScreen() {
+        start()
+        val settings = SettingsScreen(activity)
+        activity.push(settings)
+        idle(3)
+        assertNull("code QR calculé avant l'ouverture de la famille", findQr(settings.view)!!.code)
+        val entry = findText(settings.view, "Soutien")!!
+        var row: View = entry
+        while (!row.isClickable) row = row.parent as View
+        val at = IntArray(2)
+        row.getLocationInWindow(at)
+        assertTrue("ligne « Soutien » hors de l'écran : ${at[1] + row.height}", at[1] + row.height <= 600)
+        openFamily(settings, "Soutien")
+        assertNotNull(findText(settings.view, "Offrir un café"))
+        assertNotNull(findText(settings.view, "buymeacoffee.com/toqueapp"))
+        shot("45-reglages-soutien")
+        assertEquals("https://buymeacoffee.com/toqueapp", decodeQr(activity.window.decorView))
     }
 
     @Test fun companionScreens() {

@@ -8,6 +8,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -30,11 +31,13 @@ import app.toque.recipes.OnlineSync
 import app.toque.recipes.SyncProgress
 import app.toque.recipes.RecipeFiles
 import app.toque.core.mealie.MealieRecipes
+import app.toque.core.qr.QrCode
 import app.toque.core.recipes.CommunityRecipes
 import app.toque.core.recipes.UserRecipes
 import app.toque.ui.AccentWheel
 import app.toque.ui.Icon
 import app.toque.ui.MainActivity
+import app.toque.ui.QrView
 import app.toque.ui.Screen
 import app.toque.ui.Sounds
 import app.toque.ui.Ui
@@ -46,11 +49,11 @@ import app.toque.update.Updater
  * [startOn] : la famille à ouvrir (sinon la première). Voir [reopened] quand l'interface est refaite.
  */
 class SettingsScreen(a: MainActivity, private val startOn: Family? = null) : Screen(a) {
-    /** Les familles de réglages, dans l'ordre du menu : le quotidien d'abord, le technique à la fin. */
-    enum class Family { SCREEN, KNOB_SOUNDS, RECIPES, COOKING, SAFETY, PHONE, LANGUAGE_TIME, UPDATES, OTHERS, ADVANCED }
+    /** Les familles de réglages, dans l'ordre du menu : le quotidien d'abord, le technique ensuite, le soutien en dernier. */
+    enum class Family { SCREEN, KNOB_SOUNDS, RECIPES, COOKING, SAFETY, PHONE, LANGUAGE_TIME, UPDATES, ADVANCED, SUPPORT }
 
     /** D'où viennent les recettes : une pastille chacune, en haut de la famille « Recettes ». Mealie est dans « Autres ». */
-    private enum class Source { LIDL, SITE, MINE, STOCK }
+    private enum class Source { LIDL, SITE, MEALIE, MINE, STOCK }
 
     override val title = tr("Réglages")
     /** La famille ouverte. */
@@ -69,6 +72,7 @@ class SettingsScreen(a: MainActivity, private val startOn: Family? = null) : Scr
     private var openList: PopupWindow? = null
     private lateinit var modeRow: LinearLayout
     private lateinit var twinBox: LinearLayout
+    private lateinit var applyRow: LinearLayout
     private lateinit var host: EditText
     private lateinit var port: EditText
     private lateinit var syncText: TextView
@@ -83,6 +87,7 @@ class SettingsScreen(a: MainActivity, private val startOn: Family? = null) : Scr
     private lateinit var companionText: TextView
     private lateinit var emulateBox: LinearLayout
     private lateinit var programsText: TextView
+    private lateinit var phonesBox: LinearLayout
     /** Point sur « Avancé » et phrase au-dessus de « Machine » : tant que Toque ne pilote pas le vrai moteur. */
     private lateinit var modeDot: View
     private lateinit var modeText: TextView
@@ -104,6 +109,8 @@ class SettingsScreen(a: MainActivity, private val startOn: Family? = null) : Scr
     private lateinit var siteBtn: View
     private lateinit var mealieText: TextView
     private lateinit var mealieButtons: LinearLayout
+    /** Code QR de la page « Soutien » : calculé à la première ouverture de la famille seulement. */
+    private lateinit var supportQr: QrView
 
     override fun build(): View {
         val root = Ui.horizontal(c, Gravity.TOP)
@@ -113,7 +120,7 @@ class SettingsScreen(a: MainActivity, private val startOn: Family? = null) : Scr
         // barre de cuisson prend de la place en bas.
         val list = Ui.vertical(c)
         val families = Family.values()
-        for (f in families) list.addView(entry(f), Ui.lp(Ui.MATCH, Ui.u(ENTRY), b = if (f == families.last()) 0 else 4))
+        for (f in families) list.addView(entry(f), Ui.lp(Ui.MATCH, Ui.u(ENTRY), b = if (f == families.last()) 0 else ENTRY_GAP))
         menu = Ui.scroll(c, list)
         root.addView(menu, LinearLayout.LayoutParams(Ui.u(256), Ui.MATCH).apply { rightMargin = Ui.u(16) })
 
@@ -133,8 +140,8 @@ class SettingsScreen(a: MainActivity, private val startOn: Family? = null) : Scr
                 Family.PHONE -> phonePage(page)
                 Family.LANGUAGE_TIME -> languageAndTimePage(page)
                 Family.UPDATES -> updatesPage(page)
-                Family.OTHERS -> othersPage(page)
                 Family.ADVANCED -> advancedPage(page)
+                Family.SUPPORT -> supportPage(page)
             }
         }
         pane = Ui.scroll(c, box)
@@ -160,8 +167,8 @@ class SettingsScreen(a: MainActivity, private val startOn: Family? = null) : Scr
         Family.PHONE -> tr("Téléphone")
         Family.LANGUAGE_TIME -> tr("Langue et heure")
         Family.UPDATES -> tr("Mises à jour")
-        Family.OTHERS -> tr("Autres")
         Family.ADVANCED -> tr("Avancé")
+        Family.SUPPORT -> tr("Soutien")
     }
 
     private fun icon(f: Family): Icon.Kind = when (f) {
@@ -173,8 +180,8 @@ class SettingsScreen(a: MainActivity, private val startOn: Family? = null) : Scr
         Family.PHONE -> Icon.Kind.PHONE
         Family.LANGUAGE_TIME -> Icon.Kind.GLOBE   // le globe se reconnaît quelle que soit la langue affichée
         Family.UPDATES -> Icon.Kind.DOWNLOAD
-        Family.OTHERS -> Icon.Kind.PLUS
         Family.ADVANCED -> Icon.Kind.SETTINGS
+        Family.SUPPORT -> Icon.Kind.COFFEE
     }
 
     /** Une ligne du menu : l'icône de la famille et son nom (rapetissé plutôt que coupé dans une langue aux mots longs). */
@@ -199,6 +206,9 @@ class SettingsScreen(a: MainActivity, private val startOn: Family? = null) : Scr
         a.hideKeyboard()
         family = f
         last = f
+        if (f == Family.SUPPORT && supportQr.code == null) {
+            supportQr.code = try { QrCode.encode(DONATE_URL) } catch (t: Throwable) { null }
+        }
         for (x in Family.values()) {
             val on = x == f
             pages[x.ordinal].visibility = if (on) View.VISIBLE else View.GONE
@@ -274,12 +284,8 @@ class SettingsScreen(a: MainActivity, private val startOn: Family? = null) : Scr
 
     private fun knobAndSoundsPage(p: LinearLayout) {
         group(p, tr("Molette"))
-        val knob = listOf("normal" to tr("Normale"), "dim" to tr("Plus légère"), "off" to tr("Éteinte"))
-        p.addView(choice(tr("Molette pendant la veille"), dropdown(knob, a.prefs.standbyKnob) { a.prefs.standbyKnob = it }), Ui.lp(t = 8, b = 8))
-        line(p)
-        p.addView(toggle(tr("Couleurs sur la molette"), a.prefs.knobColours) { a.prefs.knobColours = it }, Ui.lp(t = 8))
-        p.addView(hint(tr("L'anneau de la molette montre l'état du robot : rouge pour un problème, orange pendant une pause, vert quand c'est à vous, cyan pendant un programme, blanc sinon.")),
-            Ui.lp(t = 4, b = 8))
+        // L'anneau lumineux : code couleur, luminosité et couleurs, sur leur écran.
+        p.addView(link(tr("Lumière de la molette")) { a.push(KnobLightScreen(a)) })
         line(p)
         // Les touches que la molette envoie : à côté de ses autres réglages (c'était dans « Avancé »).
         p.addView(link(tr("Bouton rotatif")) { a.push(KnobScreen(a)) })
@@ -295,7 +301,12 @@ class SettingsScreen(a: MainActivity, private val startOn: Family? = null) : Scr
 
     private fun recipesPage(p: LinearLayout) {
         sourceRow = Ui.horizontal(c)
-        p.addView(sourceRow, Ui.lp(t = 10, b = 10))
+        // Cinq pastilles : dans une langue aux mots longs, la rangée défile plutôt que de couper la dernière.
+        p.addView(android.widget.HorizontalScrollView(c).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            addView(sourceRow)
+        }, Ui.lp(t = 10, b = 10))
         line(p)
         for (s in Source.values()) {
             val page = Ui.vertical(c)
@@ -304,6 +315,7 @@ class SettingsScreen(a: MainActivity, private val startOn: Family? = null) : Scr
             when (s) {
                 Source.LIDL -> lidlPage(page)
                 Source.SITE -> communityPage(page)
+                Source.MEALIE -> mealiePage(page)
                 Source.MINE -> myRecipesPage(page)
                 Source.STOCK -> stockAppPage(page)
             }
@@ -319,9 +331,11 @@ class SettingsScreen(a: MainActivity, private val startOn: Family? = null) : Scr
             sourceRow.addView(Ui.toggleChip(c, when (s) {
                 Source.LIDL -> "Lidl"
                 Source.SITE -> "toqueapp.org"
+                Source.MEALIE -> "Mealie"
                 Source.MINE -> tr("Mes recettes")
                 Source.STOCK -> tr("Appli d'origine")
-            }, source == s) { source = s; renderSources() }, Ui.lp(Ui.WRAP, Ui.WRAP, r = 8))
+            }, source == s) { source = s; renderSources() }.apply { setPadding(Ui.u(15), Ui.u(10), Ui.u(15), Ui.u(10)) },
+                Ui.lp(Ui.WRAP, Ui.WRAP, r = if (s == Source.values().last()) 0 else 8))
             sourcePages[s.ordinal].visibility = if (source == s) View.VISIBLE else View.GONE
         }
     }
@@ -392,10 +406,25 @@ class SettingsScreen(a: MainActivity, private val startOn: Family? = null) : Scr
         p.addView(setting(accountText, accountButtons), Ui.lp(t = 8, b = 8))
     }
 
-    /** Famille « Autres » : ce qui vient en plus (un serveur Mealie pour l'instant), une rubrique chacun. */
-    private fun othersPage(p: LinearLayout) {
-        group(p, "Mealie")
-        mealiePage(p)
+    /**
+     * Famille « Soutien » : de quoi offrir un café au projet. Un code QR à scanner avec son téléphone
+     * (le robot n'a pas de navigateur) et l'adresse écrite en clair. Rien n'est envoyé ni ouvert depuis le
+     * robot ; le code n'est calculé qu'à la première ouverture de la famille (voir [open]).
+     */
+    private fun supportPage(p: LinearLayout) {
+        group(p, tr("Soutenir Toque"))
+        p.addView(hint(tr("Toque est gratuit et sans publicité. Si l'appli vous rend service, vous pouvez soutenir son développement en offrant un café : scannez le code avec l'appareil photo de votre téléphone.")),
+            Ui.lp(t = 6, b = 14))
+        val row = Ui.horizontal(c, Gravity.CENTER_VERTICAL)
+        supportQr = QrView(c)
+        row.addView(supportQr, LinearLayout.LayoutParams(Ui.u(SUPPORT_QR), Ui.u(SUPPORT_QR)).apply { rightMargin = Ui.u(24) })
+        val col = Ui.vertical(c)
+        col.addView(Icon(c, Icon.Kind.COFFEE, Ui.ACCENT_INK), LinearLayout.LayoutParams(Ui.u(44), Ui.u(44)))
+        col.addView(Ui.text(c, tr("Offrir un café"), 20f, Ui.TEXT, Ui.MEDIUM), Ui.lp(t = 10))
+        col.addView(Ui.text(c, DONATE_URL.removePrefix("https://"), 17f, Ui.TEXT2), Ui.lp(t = 4))
+        col.addView(Ui.text(c, tr("Merci pour votre soutien !"), 16f, Ui.TEXT2).apply { setLineSpacing(0f, 1.15f) }, Ui.lp(t = 14))
+        row.addView(col, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
+        p.addView(row, Ui.lp(b = 12))
     }
 
     /** Un serveur Mealie auto-hébergé : ses recettes arrivent en lecture seule, réglages proposés à vérifier. */
@@ -544,6 +573,9 @@ class SettingsScreen(a: MainActivity, private val startOn: Family? = null) : Scr
         p.addView(setting(companionText, Ui.button(c, tr("Appairer un téléphone"), Ui.Style.SECONDARY, Icon.Kind.PHONE, height = 52, textSize = 18f) {
             if (a.app.companion != null) a.push(PairingScreen(a)) else a.toast(tr("Compagnon indisponible : voyez le journal"), Ui.WARN)
         }), Ui.lp(t = 10, b = 8))
+        // Les téléphones appairés, ici même : les retirer ne demande plus d'ouvrir l'écran d'appairage.
+        phonesBox = Ui.vertical(c)
+        p.addView(phonesBox, Ui.lp(b = 12))
         line(p)
         p.addView(toggle(tr("Lancement depuis le téléphone"), a.prefs.remoteStart) { on ->
             val comp = a.app.companion
@@ -613,28 +645,38 @@ class SettingsScreen(a: MainActivity, private val startOn: Family? = null) : Scr
         modeRow = Ui.horizontal(c)
         p.addView(setting(Ui.text(c, tr("Machine"), 18f, Ui.TEXT), modeRow), Ui.lp(t = 4))
         twinBox = Ui.horizontal(c)
-        host = field(a.prefs.twinHost, tr("Hôte"))
-        port = field(a.prefs.twinPort.toString(), "Port").apply { inputType = InputType.TYPE_CLASS_NUMBER }
+        host = field(a.prefs.twinHost, tr("Hôte")).apply {
+            imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_ACTION_NEXT
+            setOnFocusChangeListener { _, has -> if (has && a.keyboardHeight > 0) Ui.revealInScroll(pane, twinBox, applyRow, 10) }
+        }
+        port = field(a.prefs.twinPort.toString(), "Port").apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_ACTION_DONE
+            setOnEditorActionListener { _, _, _ -> a.hideKeyboard(); true }
+            setOnFocusChangeListener { _, has -> if (has && a.keyboardHeight > 0) Ui.revealInScroll(pane, twinBox, applyRow, 10) }
+        }
         twinBox.addView(host, LinearLayout.LayoutParams(0, Ui.u(52), 1f).apply { rightMargin = Ui.u(10) })
         twinBox.addView(port, LinearLayout.LayoutParams(Ui.u(120), Ui.u(52)))
         p.addView(twinBox, Ui.lp(t = 8))
         linkText = hint("")
-        p.addView(setting(linkText, Ui.button(c, tr("Appliquer"), Ui.Style.PRIMARY, Icon.Kind.CHECK, height = 52, textSize = 18f) { applyMode() }),
-            Ui.lp(t = 8, b = 8))
+        applyRow = setting(linkText, Ui.button(c, tr("Appliquer"), Ui.Style.PRIMARY, Icon.Kind.CHECK, height = 52, textSize = 18f) { applyMode() })
+        p.addView(applyRow, Ui.lp(t = 8, b = 8))
         renderModes()
         line(p)
 
-        // Les outils, deux par ligne.
+        // Les outils, deux par ligne ; le dernier, seul sur la sienne, en prend toute la largeur.
         val tools = listOf<Pair<String, () -> Unit>>(
             tr("Diagnostic de la base moteur") to { a.push(DiagnosticsScreen(a)) },
             tr("Journal") to { a.push(LogScreen(a)) },
             tr("Paramètres Android") to { a.openAndroidSettings() },
+            // Régler Magisk (ses notifications pendant la cuisine, par exemple) sans PC ; un nom propre, pas traduit.
+            "Magisk" to { a.openMagisk() },
             tr("Revenir à l'appli d'origine") to { restoreVendor() },
         )
         for (pair in tools.chunked(2)) {
             val two = Ui.horizontal(c)
             for ((i, tool) in pair.withIndex())
-                two.addView(tile(tool.first, tool.second), LinearLayout.LayoutParams(0, Ui.u(52), 1f).apply { if (i == 0) rightMargin = Ui.u(8) })
+                two.addView(tile(tool.first, tool.second), LinearLayout.LayoutParams(0, Ui.u(52), 1f).apply { if (i == 0 && pair.size > 1) rightMargin = Ui.u(8) })
             p.addView(two, Ui.lp(t = 8))
         }
         p.addView(Ui.spacer(c, h = 8))
@@ -874,6 +916,7 @@ class SettingsScreen(a: MainActivity, private val startOn: Family? = null) : Scr
     }
 
     private fun applyMode() {
+        a.hideKeyboard()
         if (a.snapshot.busy) {
             a.toast(tr("Arrêtez d'abord le programme en cours"), Ui.WARN)
             return
@@ -1181,6 +1224,8 @@ class SettingsScreen(a: MainActivity, private val startOn: Family? = null) : Scr
     private fun refreshCompanion() {
         val comp = a.app.companion
         val n = comp?.hub?.pairing?.list?.size ?: 0
+        PairedPhones.fill(a, phonesBox)
+        phonesBox.visibility = if (n > 0) View.VISIBLE else View.GONE
         companionText.text = when (n) {
             0 -> tr("Aucun téléphone appairé")
             1 -> tr("1 téléphone appairé")
@@ -1206,9 +1251,14 @@ class SettingsScreen(a: MainActivity, private val startOn: Family? = null) : Scr
         unsubMealie = null
     }
 
+    override fun onKeyboard(visible: Boolean) {
+        if (visible && family == Family.ADVANCED && (host.hasFocus() || port.hasFocus())) Ui.revealInScroll(pane, twinBox, applyRow, 10)
+    }
+
     override fun onSnapshot(s: Snapshot) {
-        bowlText.text = if (s.hasSample) tr("Capteur du bol en ce moment : %s. Vérifiez qu'il change quand vous retirez le bol avant d'activer cette option.",
-            if (s.bowlDetected) tr("bol détecté") else tr("bol NON détecté")) else tr("Base non connectée")
+        if (family != Family.SAFETY) return
+        Ui.setText(bowlText, if (s.hasSample) tr("Capteur du bol en ce moment : %s. Vérifiez qu'il change quand vous retirez le bol avant d'activer cette option.",
+            if (s.bowlDetected) tr("bol détecté") else tr("bol NON détecté")) else tr("Base non connectée"))
         showInvertHint(s)
     }
 
@@ -1278,9 +1328,16 @@ class SettingsScreen(a: MainActivity, private val startOn: Family? = null) : Scr
             }
         }
 
-        /** Hauteur d'une ligne du menu, en pixels de référence. */
-        /** Hauteur d'une ligne du menu : les 10 familles tiennent dans la hauteur de l'écran du robot (600). */
+        /**
+         * Hauteur d'une ligne du menu et espace entre deux lignes, en pixels de référence : les 10 familles
+         * tiennent dans la hauteur de l'écran du robot (600 − 68 de barre du haut − 16 de marge = 516 ;
+         * 10 × 48 + 9 × 4 = 516).
+         */
         private const val ENTRY = 48
+        private const val ENTRY_GAP = 4
+        /** Page « Soutien » : la page Buy Me a Coffee du projet et le côté de son code QR. */
+        private const val DONATE_URL = "https://buymeacoffee.com/toqueapp"
+        private const val SUPPORT_QR = 220
         /** Hauteur la plus grande d'une liste déroulante (au-delà elle défile), et sa marge avec le bord de l'écran. */
         private const val LIST_MAX = 400
         private const val LIST_MARGIN = 8

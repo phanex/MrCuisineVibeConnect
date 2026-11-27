@@ -4,6 +4,7 @@ import app.toque.core.i18n.I18n
 import app.toque.core.i18n.tr
 import app.toque.core.recipes.Ingredient
 import app.toque.core.recipes.IngredientGroup
+import app.toque.core.recipes.OwnStepSettings
 import app.toque.core.recipes.Portions
 import app.toque.core.recipes.Recipe
 import app.toque.core.recipes.RecipeSource
@@ -25,14 +26,26 @@ object Wires {
 
     /**
      * [r] : la recette telle que le robot l'affiche ; [baseServings] : son nombre de personnes d'origine
-     * (0 : pas de réglage du nombre de personnes).
+     * (0 : pas de réglage du nombre de personnes) ; [own] : chez un robot qui prend le réglage du propriétaire
+     * depuis un téléphone, la recette lue pour cela (RecipeDetail.ownSettings, l'empreinte et l'auteur de chaque étape).
      */
-    fun recipe(r: Recipe, baseServings: Int = 0): RecipeDetail = RecipeDetail(
+    fun recipe(r: Recipe, baseServings: Int = 0, own: OwnStepsRead? = null): RecipeDetail = withOwn(recipeOnly(r, baseServings), own)
+
+    /** Les empreintes et auteurs de [own] sur la fiche [d], si elle a les mêmes étapes (sinon la fiche telle quelle). */
+    private fun withOwn(d: RecipeDetail, own: OwnStepsRead?): RecipeDetail {
+        if (own == null || own.source.steps.size != d.steps.size) return d
+        val keys = OwnStepSettings.keys(own.source)
+        val owned = own.owned
+        return d.copy(ownSettings = true, steps = d.steps.mapIndexed { i, s -> s.copy(key = keys[i], own = owned[i]?.by?.key.orEmpty()) })
+    }
+
+    private fun recipeOnly(r: Recipe, baseServings: Int): RecipeDetail = RecipeDetail(
         r.id, r.title, r.category, r.servings, r.servingUnit, r.prepMinutes, r.totalMinutes, r.difficulty, r.favorite,
         r.source == RecipeSource.USER, r.author, r.rating, r.ratingCount, r.image.isNotBlank(),
         r.ingredients.map { g -> IngredientGroupWire(g.title, g.items.map { IngredientWire(it.qty, it.unit, it.name, it.note, it.display) }) },
         r.steps.mapIndexed { i, s -> step(i, s) },
         language = r.language.ifBlank { I18n.code },
+        source = r.source.name.lowercase(Locale.ROOT),
     ).let { d ->
         if (baseServings <= 0 || r.servings <= 0) d else {
             val range = Portions.range(baseServings)
@@ -99,6 +112,10 @@ class CompanionApi(private val hub: CompanionHub) : HttpHandler {
         val phone = hub.pairing.authenticate(bearer(request))
             ?: return ApiError.response(401, "unauthorized", tr("Ce téléphone n'est pas appairé avec le robot"))
         hub.noteAuthenticated(request.remote)
+        // Téléphone en lecture seule : il lit tout, ne commande rien. Il garde seulement ce qui le concerne
+        // lui-même (se renommer, se désappairer, se mettre en lecture seule).
+        if (phone.readOnly && method != "GET" && !(seg.size >= 2 && seg[0] == "phones" && seg[1] == "me"))
+            return ApiError.response(403, "read_only", tr("Ce téléphone est en lecture seule : les commandes se font sur le robot"))
 
         return when {
             seg == listOf("robot") && method == "GET" -> ok(WhoAmI(hub.robotWire(), PhoneWire.of(phone)).toMap())
@@ -113,12 +130,20 @@ class CompanionApi(private val hub: CompanionHub) : HttpHandler {
             seg.size == 3 && seg[0] == "recipes" && seg[2] == "edit" && method == "GET" -> editable(seg[1])
             seg.size == 3 && seg[0] == "recipes" && seg[2] == "edit" && method == "POST" -> saveRecipe(seg[1], request, phone)
             seg.size == 3 && seg[0] == "recipes" && seg[2] == "copy" && method == "POST" -> copyRecipe(seg[1], phone)
+            seg.size == 3 && seg[0] == "recipes" && seg[2] == "steps" && method == "GET" -> ownSteps(seg[1])
+            seg.size == 4 && seg[0] == "recipes" && seg[2] == "steps" && method == "POST" -> setOwnStep(seg[1], seg[3], request, phone)
+            seg.size == 4 && seg[0] == "recipes" && seg[2] == "steps" && method == "DELETE" -> clearOwnStep(seg[1], seg[3], request, phone)
             seg == listOf("editor") && method == "GET" -> editor()
             seg == listOf("session", "stop") && method == "POST" -> refusedOrDone(hub.stopRecipe(phone))
             seg == listOf("robot", "appearance") && method == "POST" -> appearance(request, phone)
             seg == listOf("waiting") && method == "POST" -> sendRecipe(request, phone)
             seg == listOf("waiting") && method == "DELETE" ->
                 if (hub.removeWaiting(phone)) done() else ApiError.response(409, "no_waiting", tr("Aucune recette en attente"))
+            seg == listOf("phones", "me") && method == "POST" -> renameMe(request, phone)
+            // Sens unique : un téléphone se met lui-même en lecture seule ; seul le robot la lui retire.
+            seg == listOf("phones", "me", "read-only") && method == "POST" ->
+                hub.setPhoneReadOnly(phone.id, true)?.let { ok(PhoneWire.of(it).toMap()) }
+                    ?: ApiError.response(401, "unauthorized", tr("Ce téléphone n'est pas appairé avec le robot"))
             seg == listOf("phones", "me") && method == "DELETE" -> {
                 hub.pairing.remove(phone.id)
                 done()
@@ -130,8 +155,8 @@ class CompanionApi(private val hub: CompanionHub) : HttpHandler {
     }
 
     private fun known(seg: List<String>): Boolean = seg in listOf(listOf("robot"), listOf("state"), listOf("journal"),
-        listOf("recipes"), listOf("waiting"), listOf("phones", "me"), listOf("session", "stop"), listOf("robot", "appearance"), listOf("editor")) || (seg.size == 2 && seg[0] == "machine" && seg[1] in MACHINE) ||
-        (seg.size in 2..3 && seg[0] == "recipes")
+        listOf("recipes"), listOf("waiting"), listOf("phones", "me"), listOf("phones", "me", "read-only"), listOf("session", "stop"), listOf("robot", "appearance"), listOf("editor")) || (seg.size == 2 && seg[0] == "machine" && seg[1] in MACHINE) ||
+        (seg.size in 2..3 && seg[0] == "recipes") || (seg.size == 4 && seg[0] == "recipes" && seg[2] == "steps")
 
     private fun ok(m: Map<String, Any?>) = HttpResponse.json(200, m)
     private fun done() = ok(CommandReply(true, hub.currentRevision).toMap())
@@ -238,7 +263,7 @@ class CompanionApi(private val hub: CompanionHub) : HttpHandler {
         }
         if (!validId(id)) return ApiError.response(404, "not_found", tr("Recette introuvable"))
         val rec = (if (base) host.baseRecipe(id) else host.recipe(id)) ?: return ApiError.response(404, "not_found", tr("Recette introuvable"))
-        return ok(Wires.recipe(rec, host.baseServings(id)).toMap())
+        return ok(hub.detail(rec, host.baseServings(id)).toMap())
     }
 
     /** Nombre de personnes choisi depuis le téléphone ; réponse : la fiche à ce nombre. */
@@ -263,7 +288,7 @@ class CompanionApi(private val hub: CompanionHub) : HttpHandler {
                 else -> 409
             }, c.code, c.message)
         }
-        return ok(Wires.recipe(recipe, reply.baseServings).toMap())
+        return ok(hub.detail(recipe, reply.baseServings).toMap())
     }
 
     /** Couleur et/ou thème du robot choisis depuis le téléphone ; corps strict, rien n'est appliqué sur un refus. */
@@ -276,6 +301,24 @@ class CompanionApi(private val hub: CompanionHub) : HttpHandler {
             return ApiError.response(400, "bad_request", "Body must be {\"accent\": a colour the robot accepts (#RRGGBB), \"theme\": \"dark\"|\"light\"}")
         }
         return refusedOrDone(hub.setAppearance(phone, req))
+    }
+
+    /**
+     * Nom que ce téléphone se donne : seulement le sien (celui du jeton), nettoyé comme sur le robot ;
+     * réponse : ce téléphone tel que le robot le connaît désormais.
+     */
+    private fun renameMe(r: HttpRequest, phone: Phone): HttpResponse {
+        val (m, err) = body(r)
+        if (err != null) return err
+        val req = try {
+            RenamePhoneRequest.fromMap(m!!)
+        } catch (e: Exception) {
+            return ApiError.response(400, "bad_request", "Body must be {\"name\": text, empty for the default name}")
+        }
+        // Retiré entre l'authentification et ici : comme tout appel d'un téléphone retiré.
+        val renamed = hub.renamePhone(phone.id, req.name)
+            ?: return ApiError.response(401, "unauthorized", tr("Ce téléphone n'est pas appairé avec le robot"))
+        return ok(PhoneWire.of(renamed).toMap())
     }
 
     /** Favori choisi depuis le téléphone ; réponse : la recette et son nouvel état. */
@@ -354,6 +397,44 @@ class CompanionApi(private val hub: CompanionHub) : HttpHandler {
     private fun copyRecipe(id: String, phone: Phone): HttpResponse {
         if (!validId(id)) return ApiError.response(404, "not_found", tr("Recette introuvable"))
         return written(hub.copyRecipe(phone, id))
+    }
+
+    // ------------------------------------------------------------------ réglage du propriétaire d'une étape (Mealie)
+
+    private fun ownReply(r: Pair<OwnStepsWire?, EditError?>): HttpResponse {
+        val (w, e) = r
+        return if (w != null) ok(w.toMap()) else writeError(e ?: EditError.of(CommandResult.noAnswer()))
+    }
+
+    /** Rang d'étape du chemin : un nombre décimal de 0 à 10000, ou null. */
+    private fun stepIndex(s: String): Int? = if (s.isEmpty() || s.length > 5 || !s.all { it in '0'..'9' }) null else s.toInt().takeIf { it <= 10_000 }
+
+    private fun ownSteps(id: String): HttpResponse {
+        if (!validId(id)) return ApiError.response(404, "not_found", tr("Recette introuvable"))
+        return ownReply(hub.ownSteps(id))
+    }
+
+    /** Corps strict {"key": empreinte, "machine": réglage | null} ; réponse : les étapes relues. */
+    private fun setOwnStep(id: String, rank: String, r: HttpRequest, phone: Phone): HttpResponse {
+        if (!validId(id)) return ApiError.response(404, "not_found", tr("Recette introuvable"))
+        val index = stepIndex(rank) ?: return badParam("index")
+        val (m, err) = body(r)
+        if (err != null) return err
+        val req = try {
+            OwnStepRequest.fromMap(m!!, index)
+        } catch (e: BadEdit) {
+            return if (e.field == "machine_setting") ApiError.response(400, "bad_request", "Invalid machine setting", "steps", index)
+                else ApiError.response(400, "bad_request", "Body must be {\"key\": the step's key, \"machine\": a setting or null}", "steps", index)
+        }
+        return ownReply(hub.writeOwnStep(phone, id, index, req.key, req.machine, clear = false))
+    }
+
+    /** ?key= : l'empreinte de l'étape lue par le téléphone ; l'étape revient au réglage de la recette. */
+    private fun clearOwnStep(id: String, rank: String, r: HttpRequest, phone: Phone): HttpResponse {
+        if (!validId(id)) return ApiError.response(404, "not_found", tr("Recette introuvable"))
+        val index = stepIndex(rank) ?: return badParam("index")
+        val key = r.query["key"]?.takeIf { OwnStepSettings.isKey(it) } ?: return badParam("key")
+        return ownReply(hub.writeOwnStep(phone, id, index, key, null, clear = true))
     }
 
     private fun image(id: String): HttpResponse {

@@ -36,7 +36,7 @@
             android:resumeWhilePausing="true"
             android:screenOrientation="sensorLandscape"
             android:stateNotNeeded="true"
-            android:windowSoftInputMode="adjustPan|stateHidden">
+            android:windowSoftInputMode="adjustResize|stateHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

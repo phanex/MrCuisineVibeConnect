@@ -53,6 +53,9 @@ data class Capabilities(
     val measuresTemperature: Boolean = true,
 ) {
     fun has(f: Feature): Boolean = f in features
+
+    /** La plus basse des [temperaturesC], calculée une fois (lue à chaque état de la base, voir Snapshot.bowlTempText). */
+    val lowestTempC: Int? = temperaturesC.minOrNull()
 }
 
 /**

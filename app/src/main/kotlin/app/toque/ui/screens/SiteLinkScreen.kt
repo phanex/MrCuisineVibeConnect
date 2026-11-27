@@ -8,6 +8,7 @@ import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import app.toque.core.i18n.tr
 import app.toque.core.site.ToqueSite
@@ -23,6 +24,11 @@ import app.toque.ui.Ui
  */
 class SiteLinkScreen(a: MainActivity) : Screen(a) {
     override val title = tr("Compte Toque")
+    private lateinit var scroll: ScrollView
+    private lateinit var col: LinearLayout
+    private lateinit var intro: TextView
+    private lateinit var footer: TextView
+    private lateinit var codeRow: LinearLayout
     private lateinit var code: EditText
     private lateinit var email: EditText
     private lateinit var password: EditText
@@ -35,10 +41,11 @@ class SiteLinkScreen(a: MainActivity) : Screen(a) {
     private var working = false
 
     override fun build(): View {
-        val col = Ui.vertical(c)
+        col = Ui.vertical(c)
         col.setPadding(Ui.u(24), Ui.u(6), Ui.u(24), Ui.u(24))
-        col.addView(Ui.text(c, tr("Le compte est facultatif. Relié, le robot reçoit vos favoris du site et vous pouvez publier vos recettes depuis le robot."),
-            17f, Ui.TEXT2).apply { setLineSpacing(0f, 1.15f) }, Ui.lp(b = 14))
+        intro = Ui.text(c, tr("Le compte est facultatif. Relié, le robot reçoit vos favoris du site et vous pouvez publier vos recettes depuis le robot."),
+            17f, Ui.TEXT2).apply { setLineSpacing(0f, 1.15f) }
+        col.addView(intro, Ui.lp(b = 14))
         val columns = Ui.horizontal(c, Gravity.TOP)
         col.addView(columns)
 
@@ -48,17 +55,20 @@ class SiteLinkScreen(a: MainActivity) : Screen(a) {
         left.addView(Ui.text(c, tr("Avec un code (le plus simple)"), 21f, Ui.TEXT, Ui.MEDIUM))
         left.addView(Ui.text(c, tr("Sur toqueapp.org : Profil › Mes robots › « Afficher un code ». Tapez-le ici : il sert une fois, pendant 10 minutes."),
             16f, Ui.TEXT2).apply { setLineSpacing(0f, 1.15f) }, Ui.lp(t = 8))
+        codeRow = Ui.horizontal(c)
         code = field("", "ABC234", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS).apply {
             filters = arrayOf(InputFilter.AllCaps(), InputFilter.LengthFilter(8))
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.uf(28f))
-            letterSpacing = 0.25f
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.uf(24f))
+            letterSpacing = 0.16f
             gravity = Gravity.CENTER
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_ACTION_GO
             setOnEditorActionListener { _, _, _ -> withCode(); true }
+            setOnFocusChangeListener { _, has -> if (has && a.keyboardHeight > 0) Ui.revealInScroll(scroll, codeRow, codeRow) }
         }
-        left.addView(code, Ui.lp(Ui.MATCH, Ui.u(68), t = 14))
-        codeBtn = Ui.button(c, tr("Relier"), Ui.Style.PRIMARY, Icon.Kind.LINK, height = 58) { withCode() }
-        left.addView(codeBtn, Ui.lp(Ui.WRAP, Ui.WRAP, t = 12))
+        codeRow.addView(code, LinearLayout.LayoutParams(0, Ui.u(60), 1f).apply { rightMargin = Ui.u(12) })
+        codeBtn = Ui.button(c, tr("Relier"), Ui.Style.PRIMARY, Icon.Kind.LINK, height = 60) { withCode() }
+        codeRow.addView(codeBtn, Ui.lp(Ui.WRAP, Ui.WRAP))
+        left.addView(codeRow, Ui.lp(t = 14))
         codeMsg = Ui.text(c, "", 16f, Ui.WARN).apply { visibility = View.GONE }
         left.addView(codeMsg, Ui.lp(t = 10))
 
@@ -69,13 +79,15 @@ class SiteLinkScreen(a: MainActivity) : Screen(a) {
         right.addView(Ui.text(c, tr("Le mot de passe n'est pas gardé sur le robot."), 16f, Ui.TEXT2), Ui.lp(t = 8))
         email = field("", tr("E-mail"), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS).apply {
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_ACTION_NEXT
+            setOnFocusChangeListener { _, has -> if (has && a.keyboardHeight > 0) Ui.revealInScroll(scroll, this, loginBtn) }
         }
-        right.addView(email, Ui.lp(Ui.MATCH, Ui.u(58), t = 12))
+        right.addView(email, Ui.lp(Ui.MATCH, Ui.u(54), t = 12))
         password = field("", tr("Mot de passe"), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD).apply {
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_ACTION_GO
             setOnEditorActionListener { _, _, _ -> withPassword(); true }
+            setOnFocusChangeListener { _, has -> if (has && a.keyboardHeight > 0) Ui.revealInScroll(scroll, this, loginBtn) }
         }
-        right.addView(password, Ui.lp(Ui.MATCH, Ui.u(58), t = 10))
+        right.addView(password, Ui.lp(Ui.MATCH, Ui.u(54), t = 8))
         // Seulement quand le site le demande (compte à double authentification).
         otpBox = Ui.vertical(c).apply { visibility = View.GONE }
         otpBox.addView(Ui.text(c, tr("Code à 6 chiffres de votre appli d'authentification"), 16f, Ui.TEXT2))
@@ -83,17 +95,32 @@ class SiteLinkScreen(a: MainActivity) : Screen(a) {
             filters = arrayOf(InputFilter.LengthFilter(6))
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_ACTION_GO
             setOnEditorActionListener { _, _, _ -> withPassword(); true }
+            setOnFocusChangeListener { _, has -> if (has && a.keyboardHeight > 0) Ui.revealInScroll(scroll, this, loginBtn) }
         }
-        otpBox.addView(otp, Ui.lp(Ui.MATCH, Ui.u(58), t = 6))
-        right.addView(otpBox, Ui.lp(t = 10))
-        loginBtn = Ui.button(c, tr("Relier"), Ui.Style.PRIMARY, Icon.Kind.LINK, height = 58) { withPassword() }
-        right.addView(loginBtn, Ui.lp(Ui.WRAP, Ui.WRAP, t = 12))
+        otpBox.addView(otp, Ui.lp(Ui.MATCH, Ui.u(54), t = 6))
+        right.addView(otpBox, Ui.lp(t = 8))
+        loginBtn = Ui.button(c, tr("Relier"), Ui.Style.PRIMARY, Icon.Kind.LINK, height = 54) { withPassword() }
+        right.addView(loginBtn, Ui.lp(Ui.WRAP, Ui.WRAP, t = 10))
         loginMsg = Ui.text(c, "", 16f, Ui.WARN).apply { visibility = View.GONE }
         right.addView(loginMsg, Ui.lp(t = 10))
 
-        col.addView(Ui.text(c, tr("Pas encore de compte ? Créez-le sur toqueapp.org depuis un téléphone ou un ordinateur."), 15f, Ui.TEXT3),
-            Ui.lp(t = 14))
-        return Ui.scroll(c, col)
+        footer = Ui.text(c, tr("Pas encore de compte ? Créez-le sur toqueapp.org depuis un téléphone ou un ordinateur."), 15f, Ui.TEXT3)
+        col.addView(footer, Ui.lp(t = 14))
+        scroll = Ui.scroll(c, col).apply { isVerticalScrollBarEnabled = true }
+        return scroll
+    }
+
+    override fun onKeyboard(visible: Boolean) {
+        intro.visibility = if (visible) View.GONE else View.VISIBLE
+        footer.visibility = if (visible) View.GONE else View.VISIBLE
+        col.setPadding(Ui.u(24), Ui.u(if (visible) 4 else 6), Ui.u(24), Ui.u(if (visible) 8 else 24))
+        if (!visible) return
+        when {
+            email.hasFocus() -> Ui.revealInScroll(scroll, email, loginBtn)
+            password.hasFocus() -> Ui.revealInScroll(scroll, password, loginBtn)
+            otp.hasFocus() -> Ui.revealInScroll(scroll, otp, loginBtn)
+            code.hasFocus() -> Ui.revealInScroll(scroll, codeRow, codeRow)
+        }
     }
 
     private fun field(value: String, hint: String, type: Int) = EditText(c).apply {
@@ -123,9 +150,9 @@ class SiteLinkScreen(a: MainActivity) : Screen(a) {
 
     private fun withCode() {
         if (working) return
+        a.hideKeyboard()
         val v = code.text.toString().filter { it.isLetterOrDigit() }
         if (v.length != 6) { show(codeMsg, tr("Le code a 6 caractères.")); return }
-        a.hideKeyboard()
         busy(true)
         codeMsg.visibility = View.GONE
         a.app.site.linkWithCode(v) { r -> done(r, codeMsg, withCode = true) }
@@ -133,10 +160,10 @@ class SiteLinkScreen(a: MainActivity) : Screen(a) {
 
     private fun withPassword() {
         if (working) return
+        a.hideKeyboard()
         val mail = email.text.toString().trim()
         val pass = password.text.toString()
         if (mail.isEmpty() || pass.isEmpty()) { show(loginMsg, tr("Tapez votre e-mail et votre mot de passe.")); return }
-        a.hideKeyboard()
         busy(true)
         loginMsg.visibility = View.GONE
         a.app.site.linkWithPassword(mail, pass, otp.text.toString()) { r -> done(r, loginMsg, withCode = false) }
@@ -153,7 +180,7 @@ class SiteLinkScreen(a: MainActivity) : Screen(a) {
             is ToqueSite.Link.OtpRequired -> {
                 otpBox.visibility = View.VISIBLE
                 show(loginMsg, tr("Ce compte a la double authentification : tapez aussi le code."))
-                otp.requestFocus()
+                a.showKeyboard(otp) { Ui.revealInScroll(scroll, otp, loginBtn) }
             }
             // Les messages du site sont en français : ceux qu'on connaît sont traduits ici.
             is ToqueSite.Link.Failed -> show(msg, when (r.code) {

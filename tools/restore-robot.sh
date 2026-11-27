@@ -15,7 +15,7 @@ done
 IP=${IP%:5555}
 ADB=${ADB:-}
 if [ -z "$ADB" ]; then
-  for c in "${ANDROID_HOME:-}/platform-tools/adb" "$HOME/Library/Android/sdk/platform-tools/adb"; do
+  for c in "${ANDROID_HOME:-}/platform-tools/adb" "$HOME/Library/Android/sdk/platform-tools/adb" "$HOME/Android/Sdk/platform-tools/adb"; do
     [ -x "$c" ] && { ADB=$c; break; }
   done
 fi

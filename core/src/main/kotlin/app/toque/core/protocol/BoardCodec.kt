@@ -91,6 +91,62 @@ interface FrameParser {
     val discardedBytes: Long
 }
 
+/**
+ * Découpeur générique de trames de longueur fixe : réassemble les fragments, accepte les trames
+ * collées et se resynchronise après des octets corrompus. Partagé par [MccStreamParser] et
+ * [SmartStreamParser].
+ */
+open class FixedFrameParser(
+    private val frameSize: Int,
+    private val byte0: Int,
+    private val byte1: Int,
+    private val byte2: Int,
+    private val validator: (ByteArray) -> Unit,
+) : FrameParser {
+    private val buffer = ByteArray(frameSize)
+    private var count = 0
+    final override var discardedBytes = 0L
+        private set
+    final override var invalidFrames = 0L
+        private set
+    val bufferedBytes: Int get() = count
+
+    override fun reset() {
+        count = 0
+    }
+
+    private fun dropFirst() {
+        System.arraycopy(buffer, 1, buffer, 0, count - 1)
+        count--
+        discardedBytes++
+    }
+
+    override fun feed(data: ByteArray, length: Int, out: MutableList<ByteArray>): MutableList<ByteArray> {
+        for (i in 0 until length) {
+            buffer[count++] = data[i]
+            while (count > 0) {
+                if ((buffer[0].toInt() and 0xFF) != byte0) { dropFirst(); continue }
+                if (count < 2) break
+                if ((buffer[1].toInt() and 0xFF) != byte1) { invalidFrames++; dropFirst(); continue }
+                if (count < 3) break
+                if ((buffer[2].toInt() and 0xFF) != byte2) { invalidFrames++; dropFirst(); continue }
+                if (count < frameSize) break
+                val candidate = buffer.copyOf(frameSize)
+                try {
+                    validator(candidate)
+                } catch (_: MccProtocolException) {
+                    invalidFrames++
+                    dropFirst()
+                    continue
+                }
+                out.add(candidate)
+                count = 0
+            }
+        }
+        return out
+    }
+}
+
 /** Monsieur Cuisine Connect : protocole d'origine de Toque, inchangé. */
 object ConnectCodec : BoardCodec {
     override val id: String get() = "connect"

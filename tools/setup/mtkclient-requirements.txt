@@ -1,4 +1,5 @@
 # Python packages for mtkclient v2.1.4.1 (command line only), pinned with their SHA-256.
+# (macOS universal2/x86_64 and Linux manylinux x86_64/aarch64 wheels of pycryptodome[x]; musl not listed).
 # toque-setup.sh 'prepare' installs them into a private virtual environment:
 #   pip install --require-hashes --only-binary=:all: --no-deps -r mtkclient-requirements.txt
 # Left out on purpose: PySide6 (graphical interface only) and fusepy (mounting the flash as a disk
@@ -9,9 +10,13 @@ pyserial==3.5 \
     --hash=sha256:c4451db6ba391ca6ca299fb3ec7bae67a5c55dde170964c7a14ceefec02f2cf0
 pycryptodome==3.24.1 \
     --hash=sha256:558b9233ff2afb42f92115ae9b4414d08c0e567790619e878cf72947d7c38a11 \
-    --hash=sha256:a089e49fcaa978302447b2e63118b2b0f366a25e914c5d7ac8c30b3e5cc61e3a
+    --hash=sha256:a089e49fcaa978302447b2e63118b2b0f366a25e914c5d7ac8c30b3e5cc61e3a \
+    --hash=sha256:93619c3117a8f14ea1267b427e465d152a66c89c3d3c643262070c05b2855aae \
+    --hash=sha256:5cac508283b5a1126945816613748a92395fbcdc70044b2c0cf2151caac5cdc9
 pycryptodomex==3.24.1 \
     --hash=sha256:9bb353c764c144a9fc03302ef3763ad0c3e75bc7ca41f445cc98455f36da6c59 \
-    --hash=sha256:eeac2c9acbd2d9f0ca493fdf692ce8245ca37cbebee08c496025868d4b8ef70f
+    --hash=sha256:eeac2c9acbd2d9f0ca493fdf692ce8245ca37cbebee08c496025868d4b8ef70f \
+    --hash=sha256:9b94a8c647c1f80b4c82c7ac9642dda94a71abbb4efa29ad652c410ad7a39879 \
+    --hash=sha256:9a732b9f5603b153dcdc071d6b342f192981907519827f2c1e4aeac41e2b34c2
 colorama==0.4.6 \
     --hash=sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6

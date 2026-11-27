@@ -32,6 +32,8 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
     private var running = false
     private var wokeMs = 0L
     private var wasDeepSleep = false
+    @Volatile private var savedBrightness = 200
+    private val backlightExec = java.util.concurrent.Executors.newSingleThreadExecutor()
 
     val asleep: Boolean get() = view != null
 
@@ -113,6 +115,7 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
         val lidMoved = lastLid != null && lastLid != s.lidOpen
         lastWeight = s.weightG
         lastLid = s.lidOpen
+        if (asleep && wasDeepSleep) return
         if (s.busy || weightMoved || lidMoved) poke()
         else if (asleep) refresh()
     }
@@ -131,15 +134,18 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
         v.isClickable = true
         root.addView(v, Ui.flp())
         view = v
-
         wasDeepSleep = a.prefs.deepSleep
         if (wasDeepSleep) {
             a.machine.setStandby(true)
-            Thread {
-                if (java.io.File("/sys/class/leds/lcd-backlight/brightness").exists()) {
+            backlightExec.execute {
+                val f = java.io.File("/sys/class/leds/lcd-backlight/brightness")
+                if (f.exists()) {
+                    val prev = runCatching { f.readText().trim().toIntOrNull() }.getOrNull()
+                        ?: RootShell.run("cat /sys/class/leds/lcd-backlight/brightness", 2_000).out.trim().toIntOrNull()
+                    if (prev != null && prev > 0) savedBrightness = prev
                     RootShell.run("echo 0 > /sys/class/leds/lcd-backlight/brightness", 5_000)
                 }
-            }.start()
+            }
             KnobLight.start(0)
         } else {
             val b = Ui.vertical(a, Gravity.CENTER_HORIZONTAL)
@@ -157,10 +163,8 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
             v.alpha = 0f
             v.animate().alpha(1f).setDuration(800).start()
             brightness(0.02f)
-            when (a.prefs.standbyKnob) {
-                "dim" -> KnobLight.start(KnobLight.NIGHT_LEVEL)
-                "off" -> KnobLight.start(0)
-            }
+            // Anneau de la molette : ce qui est réglé pour la veille (rien si c'est la même chose qu'allumé).
+            a.prefs.ring.standby?.let { KnobLight.start(it) }
             main.postDelayed(tick, 60_000)
             if (!WallClock.known) main.postDelayed(clockTick, WallClock.UNKNOWN_TICK_MS)
         }
@@ -177,11 +181,11 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
         clock = null
         hot = null
         if (wasDeepSleep) {
-            Thread {
+            backlightExec.execute {
                 if (java.io.File("/sys/class/leds/lcd-backlight/brightness").exists()) {
-                    RootShell.run("echo 200 > /sys/class/leds/lcd-backlight/brightness", 5_000)
+                    RootShell.run("echo $savedBrightness > /sys/class/leds/lcd-backlight/brightness", 5_000)
                 }
-            }.start()
+            }
             a.machine.setStandby(false)
             wasDeepSleep = false
         }

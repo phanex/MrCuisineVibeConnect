@@ -40,15 +40,18 @@ class UpdateAlert(private val a: MainActivity) {
 
     fun onStop() {
         main.removeCallbacks(startCheck)
+        main.removeCallbacks(wakeCheck)
         main.removeCallbacks(retry)
     }
 
     /** Sortie de veille : petit délai pour que le geste qui réveille ne touche pas la fenêtre. */
     fun onWake() {
-        main.postDelayed({ check() }, 1_200)
+        main.removeCallbacks(wakeCheck)
+        main.postDelayed(wakeCheck, 1_200)
     }
 
     private val startCheck = Runnable { check() }
+    private val wakeCheck = Runnable { check() }
 
     private fun check() {
         if (!a.prefs.updateAlerts) return
@@ -161,6 +164,7 @@ object UpdateFlow {
             val fail = { message: String ->
                 if (!done) {
                     done = true
+                    Updater.onInstallError = null
                     a.closeOverlay()
                     a.machine.resumePort()
                     a.toast(message, Ui.WARN)

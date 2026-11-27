@@ -72,4 +72,21 @@ class StepIngredientsTest {
         assertEquals(listOf("ceba", "grans d'all"), names(ca, "Peleu la ceba i l'all."))
         assertEquals(listOf("Mehl"), names(listOf(Ingredient("500", "g", "Mehl"), Ingredient("1", "Prise", "Salz")), "Mehl in den Mixtopf geben."))
     }
+
+    @Test fun polish() {
+        val pl = listOf(
+            Ingredient("1", "", "cebula"), Ingredient("2", "ząbki", "czosnku"), Ingredient("200", "g", "mąki pszennej"),
+            Ingredient("500", "g", "ziemniaków"), Ingredient("100", "g", "masła"), Ingredient("1", "łyżeczka", "soli"),
+            Ingredient("2", "", "jajka"), Ingredient("500", "ml", "wody"),
+        )
+        assertEquals(listOf("cebula", "ziemniaków"), names(pl, "Obierz cebulę i ziemniaki."))
+        assertEquals(listOf("czosnku"), names(pl, "Dodaj ząbek czosnek i zmiksuj."))
+        assertEquals(listOf("mąki pszennej", "masła"), names(pl, "Wsyp mąkę i dodaj masło."))
+        assertEquals(listOf("soli", "jajka", "wody"), names(pl, "Dodaj sól, jajko i wodę."))
+        // Rien plutôt qu'un faux : « mak » n'est pas « mąka ».
+        assertEquals(emptyList<String>(), names(listOf(Ingredient("50", "g", "mąka"), Ingredient("1", "", "mak")), "Posyp makiem."))
+        assertEquals(listOf("mąka"), names(listOf(Ingredient("50", "g", "mąka"), Ingredient("1", "", "mak")), "Wsyp mąkę."))
+        // Les mots français proches ne se confondent pas (pas de mode polonais sans lettre polonaise).
+        assertEquals(emptyList<String>(), names(listOf(Ingredient("1", "", "poivron")), "Ajouter le poivre."))
+    }
 }

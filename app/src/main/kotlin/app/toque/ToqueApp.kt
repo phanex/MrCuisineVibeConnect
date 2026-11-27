@@ -79,6 +79,11 @@ open class ToqueApp : Application() {
         }
     }
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        app.toque.ui.ImageLoader.trimMemory(level)
+    }
+
     /** Tâches de fond réseau (heure). Les essais d'interface (Robolectric) n'en lancent aucune. */
     protected open fun startBackground() {
         TimeSync.start(this, prefs, log)

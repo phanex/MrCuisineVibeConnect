@@ -634,6 +634,7 @@ class HomeScreen(a: MainActivity) : Screen(a) {
             tr("Abandonner"), icon = Icon.Kind.CLOSE) {
             a.prefs.guidedRecipe = ""
             a.prefs.guidedStep = 0
+            a.app.companion?.hub?.clearSuspended()
             refresh()
         }
     }

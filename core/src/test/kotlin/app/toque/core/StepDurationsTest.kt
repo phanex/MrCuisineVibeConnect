@@ -79,6 +79,26 @@ class StepDurationsTest {
         assertEquals(120, min("Deixeu llevar 2 hores."))
     }
 
+    @Test fun polish() {
+        assertEquals(30, min("Odstawić na 30 minut."))
+        assertEquals(1, min("Gotować 1 minutę."))
+        assertEquals(2, min("Gotować 2 minuty."))
+        assertEquals(120, min("Zostawić do wyrośnięcia na 2 godziny."))
+        assertEquals(60, min("Odstawić na 1 godzinę."))
+        assertEquals(60, min("Chłodzić jedną godzinę."))
+        assertEquals(75, min("Piec 1 godz. 15 min."))
+        assertEquals(30, min("Odstawić na pół godziny."))
+        assertEquals(90, min("Piec półtorej godziny."))
+        assertEquals(90, min("Piec 1 godzinę i pół."))
+        assertEquals(20, min("Piec 20 do 25 minut."))
+        assertEquals(20, min("Piec 20–25 min."))
+        assertEquals(-90, min("Gotować 1 min 30 sek."))
+        assertNull(min("Gotować 5 min/100 °C/prędkość 1."))
+        assertNull(min("Miksować 2 minuty na prędkości 4."))
+        assertNull(min("Mieszać co 5 minut."))
+        assertNull(min("Dodać 200 g mąki i 2 jajka."))
+    }
+
     @Test fun refusesWhatIsNotAKitchenTimer() {
         // Pas de durée.
         assertNull(min("Éplucher l'oignon et couper le potimarron en morceaux."))

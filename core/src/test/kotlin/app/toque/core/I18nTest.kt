@@ -15,7 +15,7 @@ import java.io.File
 
 /**
  * Vérifie les fichiers de langue (app/src/main/assets/lang/<code>.json) par rapport aux textes
- * passés à tr()/trKey() dans le code : l'anglais doit être complet ; toute langue ne doit contenir
+ * passés à tr()/trKey() dans le code : l'anglais et le polonais doivent être complets ; toute langue ne doit contenir
  * que des textes existants, avec les mêmes paramètres (%s, %d…). Un texte manquant reste en français.
  */
 class I18nTest {
@@ -104,7 +104,7 @@ class I18nTest {
             val bad = l.texts.filter { (fr, t) -> params(fr) != params(t) }
             assertEquals("${l.code}.json : paramètres différents :\n" + bad.entries.joinToString("\n"), 0, bad.size)
             val missing = keys.keys.filter { it !in l.texts }
-            if (l.code == "en") assertEquals("en.json : textes sans traduction :\n" + missing.joinToString("\n"), 0, missing.size)
+            if (listOf("en", "pl").contains(l.code)) assertEquals("${l.code}.json : textes sans traduction :\n" + missing.joinToString("\n"), 0, missing.size)
             else if (missing.isNotEmpty()) println("${l.code}.json : ${missing.size} texte(s) restent en français")
         }
     }

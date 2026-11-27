@@ -44,8 +44,21 @@
   cooking and ferment can run as long as in the stock app (12 h at most).
 - **The Smart's Lidl recipes**: Settings › Recipes › Lidl › Sync (the first time, every recipe is read
   again).
+- **Screen rotation locked** (0.12.0): the Smart's tablet is portrait by nature, and Android could
+  turn the picture to portrait for a moment while touch stayed landscape (taps beside their target,
+  [#59](https://github.com/Wuki60/MrCuisineVibeConnect/issues/59)). In "Real machine", once Toque is
+  shown, it turns Android's automatic rotation off and fixes the rotation it is in, through root
+  (`settings put system accelerometer_rotation 0` and `user_rotation`). The stock app runs in
+  landscape too; to undo it: `adb shell settings put system accelerometer_rotation 1`.
 - **Not yet**: heating without stirring (speed 0) in manual cooking; importing the stock app's
   database; the list of the base's error codes.
+
+> **SKMS 1200 C1 (Allwinner board, Android 10): not supported yet.** Newer Smarts (the C1, firmware
+> 3090, stock app V2.22) have an Allwinner R818 board instead of the MediaTek one: the root guide does
+> not apply (the PC sees it as `VID_1F3A&PID_EFE8`, Allwinner's flashing mode), its serial port is
+> `/dev/ttyS2` and its frames differ a little. Work on it has started in Camybrith Cooking
+> ([issue #1](https://github.com/Tidusneo24150/camybrith-cooking/issues/1),
+> [pull request #4](https://github.com/Tidusneo/camybrith-cooking/pull/4)); report in #59 if you have one.
 
 ## Install
 

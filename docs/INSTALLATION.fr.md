@@ -55,7 +55,9 @@ erreur peut rendre la tablette du robot inutilisable. Lisez tout avant de commen
    et `recovery-original.img` (16 Mo chacun) : **à garder précieusement, c'est votre seule voie
    de retour.**
 
-   > **SKMC 1100 A1** (étiquette sous le robot, image système `v4.3a_2022-09-15`) : le TWRP du
+   > **SKMC 1100 A1** (étiquette sous le robot, image système `v4.3a_2022-09-15`), et un **SKMC 1200
+   > D4** ou certains **SKMC 1200 C3** qui ont la même carte `spm188a` (l'étape `-Step backup` du
+   > script dit quelle carte il voit, [#115](https://github.com/Wuki60/MrCuisineVibeConnect/issues/115)) : le TWRP du
    > guide de référence embarque un noyau de 2018 fait pour la carte du SKMC 1200, et sur ce robot
    > il démarre sans tactile. Avant l'étape 4, reconstruire TWRP autour de votre propre noyau :
    > placer les deux sauvegardes dans `C:\Toque\backup\`, puis lancer
@@ -142,7 +144,9 @@ mises à jour par Wi-Fi (`tools\install-robot.ps1 -Ip <IP du robot>`).
 3. Bol vide, couvercle fermé, **main près de l'interrupteur principal** :
    - Cuisson manuelle : 10 s, vitesse 2 → le moteur tourne puis s'arrête seul.
    - Ouvrir le couvercle pendant un essai → arrêt immédiat, « Pause : couvercle ouvert ».
-   - 30 s à 37 °C, vitesse 1 → la température affichée monte.
+   - 30 s à 37 °C, vitesse 1 → la chauffe démarre (Diagnostic : consigne 37 °C). Certaines bases
+     mesurent la température du bol par paliers (0 sous 37 °C, puis 37, 45, 50…, affiché « < 37 °C »
+     au début) : sur celles-ci, la valeur affichée ne change qu'une fois le bol à 37 °C.
    - Balance : poser un objet de poids connu, Tare.
    - Diagnostic : retirer le bol et regarder « Bol détecté ». S'il change bien, vous pouvez
      activer Réglages › Sécurité › « Exiger la détection du bol ».

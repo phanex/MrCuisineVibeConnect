@@ -66,7 +66,7 @@ object Json {
         }
 
         fun objBody(): Map<String, Any?> {
-            val m = LinkedHashMap<String, Any?>()
+            val m = LinkedHashMap<String, Any?>(8)
             i++
             ws()
             if (i < s.length && s[i] == '}') { i++; return m }
@@ -104,22 +104,44 @@ object Json {
         }
 
         fun str(): String {
-            val sb = StringBuilder()
             i++
+            val start = i
+            val len = s.length
+            // Voie rapide sans échappement (99 % des chaînes) : aucune allocation de StringBuilder.
+            while (i < len) {
+                val c = s[i]
+                if (c == '"') return s.substring(start, i++)
+                if (c == '\\') break
+                i++
+            }
+            if (i >= len) throw ParseException("chaîne non fermée", i)
+            val sb = StringBuilder(i - start + 16)
+            sb.append(s, start, i)
             while (true) {
-                if (i >= s.length) throw ParseException("chaîne non fermée", i)
+                if (i >= len) throw ParseException("chaîne non fermée", i)
                 val c = s[i++]
                 when (c) {
                     '"' -> return sb.toString()
                     '\\' -> {
-                        if (i >= s.length) throw ParseException("échappement incomplet", i)
+                        if (i >= len) throw ParseException("échappement incomplet", i)
                         when (val e = s[i++]) {
                             '"' -> sb.append('"'); '\\' -> sb.append('\\'); '/' -> sb.append('/')
                             'b' -> sb.append('\b'); 'f' -> sb.append('\u000C'); 'n' -> sb.append('\n')
                             'r' -> sb.append('\r'); 't' -> sb.append('\t')
                             'u' -> {
-                                if (i + 4 > s.length) throw ParseException("\\u incomplet", i)
-                                sb.append(s.substring(i, i + 4).toInt(16).toChar())
+                                if (i + 4 > len) throw ParseException("\\u incomplet", i)
+                                var code = 0
+                                for (k in 0 until 4) {
+                                    val ch = s[i + k]
+                                    val d = when (ch) {
+                                        in '0'..'9' -> ch - '0'
+                                        in 'a'..'f' -> ch - 'a' + 10
+                                        in 'A'..'F' -> ch - 'A' + 10
+                                        else -> throw ParseException("\\u invalide", i + k)
+                                    }
+                                    code = (code shl 4) or d
+                                }
+                                sb.append(code.toChar())
                                 i += 4
                             }
                             else -> throw ParseException("échappement \\$e invalide", i)
@@ -132,15 +154,25 @@ object Json {
 
         fun num(): Any {
             val start = i
-            if (s[i] == '-') i++
-            while (i < s.length && s[i] in '0'..'9') i++
-            var real = false
-            if (i < s.length && s[i] == '.') { real = true; i++; while (i < s.length && s[i] in '0'..'9') i++ }
-            if (i < s.length && (s[i] == 'e' || s[i] == 'E')) {
-                real = true; i++
-                if (i < s.length && (s[i] == '+' || s[i] == '-')) i++
-                while (i < s.length && s[i] in '0'..'9') i++
+            val len = s.length
+            val neg = s[i] == '-'
+            if (neg) i++
+            val digitStart = i
+            var acc = 0L
+            while (i < len && s[i] in '0'..'9') {
+                acc = acc * 10L + (s[i] - '0')
+                i++
             }
+            val digits = i - digitStart
+            var real = false
+            if (i < len && s[i] == '.') { real = true; i++; while (i < len && s[i] in '0'..'9') i++ }
+            if (i < len && (s[i] == 'e' || s[i] == 'E')) {
+                real = true; i++
+                if (i < len && (s[i] == '+' || s[i] == '-')) i++
+                while (i < len && s[i] in '0'..'9') i++
+            }
+            // Voie rapide entier sans débordement (≤ 18 chiffres) : aucune allocation de substring.
+            if (!real && digits in 1..18) return if (neg) -acc else acc
             val t = s.substring(start, i)
             return try {
                 if (real) t.toDouble() else t.toLong()
@@ -151,7 +183,7 @@ object Json {
     }
 
     fun write(v: Any?, pretty: Boolean = false): String {
-        val sb = StringBuilder()
+        val sb = StringBuilder(512)
         write(sb, v, if (pretty) 0 else -1)
         return sb.toString()
     }
@@ -167,7 +199,9 @@ object Json {
             null -> sb.append("null")
             is String -> quote(sb, v)
             is Boolean -> sb.append(v)
-            is Int, is Long, is Short, is Byte -> sb.append(v.toString())
+            is Int -> sb.append(v)
+            is Long -> sb.append(v)
+            is Short, is Byte -> sb.append(v.toInt())
             is Double -> if (v == Math.floor(v) && !v.isInfinite() && kotlin.math.abs(v) < 1e15) sb.append(v.toLong()) else sb.append(v)
             is Float -> write(sb, v.toDouble(), level)
             is Number -> sb.append(v.toString())
@@ -203,15 +237,33 @@ object Json {
 
     private fun quote(sb: StringBuilder, s: String) {
         sb.append('"')
-        for (c in s) {
-            when (c) {
-                '"' -> sb.append("\\\""); '\\' -> sb.append("\\\\"); '\n' -> sb.append("\\n")
-                '\r' -> sb.append("\\r"); '\t' -> sb.append("\\t")
-                else -> if (c < ' ') sb.append(String.format("\\u%04x", c.code)) else sb.append(c)
+        var start = 0
+        val len = s.length
+        for (i in 0 until len) {
+            val c = s[i]
+            if (c == '"' || c == '\\' || c < ' ') {
+                if (i > start) sb.append(s, start, i)
+                when (c) {
+                    '"' -> sb.append("\\\"")
+                    '\\' -> sb.append("\\\\")
+                    '\n' -> sb.append("\\n")
+                    '\r' -> sb.append("\\r")
+                    '\t' -> sb.append("\\t")
+                    else -> {
+                        val code = c.code
+                        sb.append("\\u00")
+                        sb.append(HEX[(code ushr 4) and 0xF])
+                        sb.append(HEX[code and 0xF])
+                    }
+                }
+                start = i + 1
             }
         }
+        if (start < len) sb.append(s, start, len)
         sb.append('"')
     }
+
+    private val HEX = "0123456789abcdef".toCharArray()
 }
 
 /** Accès confortables et tolérants aux données JSON importées. */

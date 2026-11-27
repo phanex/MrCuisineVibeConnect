@@ -18,7 +18,8 @@ import kotlin.math.roundToInt
  *
  * Chaque correction est rattachée à la valeur d'origine : si la recette change à la source, elle ne
  * s'applique plus et la valeur de la recette réapparaît plutôt qu'une correction mal placée.
- * Les réglages machine (temps, vitesse, température) ne sont pas modifiables.
+ * Les réglages machine (temps, vitesse, température) ne se corrigent pas ici, sauf sur les recettes
+ * qui l'acceptent (Mealie) : réglage par étape, rattaché au texte de l'étape ([steps], [OwnStepSettings]).
  */
 data class RecipeAdjustments(
     val note: String = "",
@@ -28,8 +29,10 @@ data class RecipeAdjustments(
     val weigh: Map<String, Int> = emptyMap(),
     /** Nombre de personnes voulu (0 : celui de la recette), voir [Portions]. */
     val servings: Int = 0,
+    /** Réglages du propriétaire par étape : clé [OwnStepSettings.keys] (empreinte du texte) → réglage. */
+    val steps: Map<String, OwnStepSetting> = emptyMap(),
 ) {
-    val isEmpty: Boolean get() = note.isBlank() && qty.isEmpty() && weigh.isEmpty() && servings == 0
+    val isEmpty: Boolean get() = note.isBlank() && qty.isEmpty() && weigh.isEmpty() && servings == 0 && steps.isEmpty()
 
     fun withNote(text: String): RecipeAdjustments = copy(note = text.trim())
 
@@ -53,12 +56,47 @@ data class RecipeAdjustments(
     fun withServings(people: Int, base: Int): RecipeAdjustments =
         copy(servings = if (people == base || people !in Portions.range(base)) 0 else people)
 
-    fun encode(): String = Json.write(linkedMapOf("note" to note, "qty" to qty, "weigh" to weigh, "servings" to servings))
+    /**
+     * Le réglage [machine] (null : aucun) pour l'étape [index] de [recipe], la recette de la source.
+     * Refusé (exception) s'il ne passe pas [OwnStepSettings.problem] : l'appelant le vérifie d'abord
+     * pour montrer le refus ; rien ne peut enregistrer un réglage sans cette vérification.
+     */
+    fun withStep(recipe: Recipe, index: Int, machine: StepMachine?, by: SettingAuthor = SettingAuthor.ROBOT): RecipeAdjustments {
+        val p = OwnStepSettings.problem(recipe, index, machine)
+        require(p == null) { p?.message.orEmpty() }
+        val key = OwnStepSettings.keys(recipe)[index]
+        return copy(steps = steps + (key to OwnStepSetting(machine, by)))
+    }
+
+    /** L'étape [index] de [recipe] revient au réglage de la recette. */
+    fun withoutStep(recipe: Recipe, index: Int): RecipeAdjustments {
+        val key = OwnStepSettings.keys(recipe).getOrNull(index) ?: return this
+        return if (key in steps) copy(steps = steps - key) else this
+    }
+
+    /**
+     * Après une synchro de [recipe] : les réglages d'étapes dont le texte a changé (ou qui ont disparu)
+     * ne pourront plus jamais s'appliquer, ils sont retirés. Les autres restent, déplacés ou non.
+     */
+    fun keepingStepsOf(recipe: Recipe): RecipeAdjustments {
+        if (steps.isEmpty() || !OwnStepSettings.appliesTo(recipe)) return this
+        val keys = OwnStepSettings.keys(recipe).toHashSet()
+        val kept = steps.filterKeys { it in keys }
+        return if (kept.size == steps.size) this else copy(steps = kept)
+    }
+
+    fun encode(): String {
+        val m = linkedMapOf<String, Any?>("note" to note, "qty" to qty, "weigh" to weigh, "servings" to servings)
+        // Absent sans réglage : les adaptations d'avant s'écrivent comme avant.
+        if (steps.isNotEmpty()) m["steps"] = steps.mapValues { it.value.toMap() }
+        return Json.write(m)
+    }
 
     /**
      * Report sur [target], la même recette venue de l'autre source (même titre), quand celle-ci est
      * retirée du catalogue. La note suit si [target] n'en a pas ; une quantité seulement si l'ingrédient
-     * y est écrit de la même façon ; les pesées d'étape jamais (les étapes ne se correspondent pas).
+     * y est écrit de la même façon ; les pesées et les réglages d'étape jamais (les étapes ne se
+     * correspondent pas).
      * [existing] : ce que [target] a déjà, qui reste prioritaire.
      */
     fun carriedTo(target: Recipe, existing: RecipeAdjustments = RecipeAdjustments()): RecipeAdjustments {
@@ -95,7 +133,10 @@ data class RecipeAdjustments(
             val weigh = LinkedHashMap<String, Int>()
             for (k in weighMap.keys) weighMap.int(k)?.takeIf { it in 1..MAX_GRAMS }?.let { weigh[k] = it }
             val people = (m.int("servings") ?: 0).coerceIn(0, 99)
-            return RecipeAdjustments(m.str("note")?.trim().orEmpty(), qty, weigh, people)
+            // Une entrée illisible (clé ou réglage) est ignorée, les autres restent.
+            val steps = LinkedHashMap<String, OwnStepSetting>()
+            for ((k, v) in m["steps"].obj()) if (OwnStepSettings.isKey(k)) OwnStepSetting.fromMap(v)?.let { steps[k] = it }
+            return RecipeAdjustments(m.str("note")?.trim().orEmpty(), qty, weigh, people, steps)
         }
     }
 }
@@ -121,7 +162,7 @@ object QuantityLinks {
     private val GRAMS = Regex("$NUMBER(?=\\s*g(?![\\p{L}]))")
 
     fun norm(s: String): String {
-        val d = Normalizer.normalize(s.lowercase().replace('’', '\'').replace("œ", "oe"), Normalizer.Form.NFD)
+        val d = Normalizer.normalize(s.lowercase().replace('’', '\'').replace("œ", "oe").replace('ł', 'l'), Normalizer.Form.NFD)
         return d.replace(Regex("\\p{Mn}+"), "").replace(Regex("[^a-z0-9]+"), " ").trim()
     }
 
@@ -284,9 +325,13 @@ fun Recipe.adjusted(a: RecipeAdjustments): Recipe {
     return if (a.servings in Portions.range(servings)) corrected.forServings(a.servings) else corrected
 }
 
-/** Les corrections de quantités seules, pour la recette à son nombre de personnes. */
+/**
+ * Les corrections seules (réglages d'étapes du propriétaire, quantités), pour la recette à son nombre
+ * de personnes. Les réglages d'étapes d'abord : ils se reconnaissent au texte de la source, avant que
+ * les quantités corrigées ne le réécrivent.
+ */
 fun Recipe.corrected(a: RecipeAdjustments): Recipe {
-    val base = withSplitQuantities()
+    val base = withOwnSettings(a.steps).withSplitQuantities()
     if (a.qty.isEmpty() && a.weigh.isEmpty()) return base
     val flat = base.allIngredients
     val ratio = HashMap<Int, Double>()

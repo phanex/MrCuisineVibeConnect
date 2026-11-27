@@ -261,6 +261,44 @@ class ControllerTest {
         assertTrue("redémarrage trop tôt : $firstStart trames", firstStart >= 5)
     }
 
+    @Test fun boardWithoutRpmWaitsBeforeRestarting() {
+        // SKMC 1100 A1 / carte spm188a : régime toujours à 0, et (pire cas) bit moteur effacé dès le STOP.
+        val b = Bench()
+        b.board.reportsRpm = false
+        b.board.motorBitDropsOnStop = true
+        b.ready()
+        b.c.startJob(Programs.manual(8, 0, Direction.CLOCKWISE, 60_000))
+        b.step(3_000)
+        b.c.stop()
+        b.c.clearFinished()
+        val mark = b.tx.size
+        assertTrue(b.c.startJob(Programs.manual(8, 0, Direction.CLOCKWISE, 10_000)).ok)
+        b.step(5_000)
+        val after = b.tx.subList(mark, b.tx.size)
+        val firstStart = after.indexOfFirst { it[1] == Operation.STANDARD.wire }
+        assertTrue(firstStart > 0)
+        assertTrue(after.take(firstStart).all { it[1] == Operation.STOP.wire })
+        val waitedMs = (firstStart + 1) * 100L
+        assertTrue("redémarrage après $waitedMs ms", waitedMs >= 2_000)
+    }
+
+    @Test fun turboRightAfterStoppingWaitsOnABoardWithoutRpm() {
+        val b = Bench()
+        b.board.reportsRpm = false
+        b.board.motorBitDropsOnStop = true
+        b.ready()
+        b.c.startJob(Programs.manual(3, 0, Direction.CLOCKWISE, 60_000))
+        b.step(2_000)
+        b.c.stop()
+        b.step(300)
+        b.c.clearFinished()
+        val early = b.c.turboPress()
+        assertFalse(early.ok)
+        assertTrue(early.has("moving"))
+        b.step(2_000)
+        assertTrue(b.c.turboPress().ok)
+    }
+
     @Test fun kneadChangesDirectionOnlyAfterConfirmedStop() {
         val b = Bench().ready()
         assertTrue(b.c.startJob(Programs.knead(45_000)).ok)
@@ -381,8 +419,16 @@ class ControllerTest {
 
     @Test fun turboRules() {
         val b = Bench().ready()
+        assertEquals(0L, b.c.snapshot().turboRemainingMs)
         assertTrue(b.c.turboPress().ok)
-        b.step(5_000)
+        // Ce qu'il reste de l'appui se lit dans l'état : de 3 s à 0, pour le décompte affiché.
+        assertEquals(Limits.MAX_MS_TURBO_PRESS, b.c.snapshot().turboRemainingMs)
+        b.step(1_000)
+        assertTrue(b.c.snapshot().turboActive)
+        assertEquals(2_000L, b.c.snapshot().turboRemainingMs)
+        b.step(4_000)
+        assertFalse(b.c.snapshot().turboActive)
+        assertEquals(0L, b.c.snapshot().turboRemainingMs)
         val turbo = b.tx.count { it[1] == Operation.TURBO.wire }
         assertTrue("turbo limité à 3 s : $turbo", turbo in 28..31)
         assertTrue(b.events.any { it.type == EventType.TURBO_END })

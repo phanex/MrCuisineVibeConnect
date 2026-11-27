@@ -42,6 +42,9 @@ class MealieTest {
         override fun mealieIds() = recipes.keys.toSet()
         override fun save(recipes: List<Recipe>) { for (r in recipes) this.recipes[r.id] = r }
         override fun removeMealieExcept(keep: Set<String>) { recipes.keys.retainAll(keep) }
+        /** Dernière liste complète annoncée (null : aucune). */
+        var listed: Set<String>? = null
+        override fun listed(keep: Set<String>) { listed = keep }
     }
 
     companion object {
@@ -196,6 +199,8 @@ class MealieTest {
         assertEquals(1, next.removed)
         assertEquals(setOf("mealie-$A"), store.mealieIds())
         assertEquals(setOf(A), store.index.keys)
+        // Liste complète : le robot apprend toutes les recettes du serveur (réglages d'étapes devenus inutiles).
+        assertEquals(setOf("mealie-$A"), store.listed)
         assertEquals(listOf("/api/recipes?", "/api/recipes/veloute"), t.calls.map { it.url.removePrefix(BASE).substringBefore('?') + if ('?' in it.url) "?" else "" })
     }
 
@@ -210,6 +215,8 @@ class MealieTest {
         assertTrue(r.ok)
         assertEquals(0, r.removed)
         assertTrue("mealie-$B" in store.mealieIds())
+        // Liste coupée : rien n'est annoncé, aucun réglage d'étape ne part.
+        assertNull(store.listed)
 
         // Jeton révoqué : message clair, recettes gardées.
         t.replies["/api/recipes"] = { ToqueSite.Reply(401, """{"detail":"Unauthorized"}""") }

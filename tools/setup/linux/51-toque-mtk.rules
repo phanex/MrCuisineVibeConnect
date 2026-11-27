@@ -1,0 +1,7 @@
+# Toque: lets a normal user talk to the Monsieur Cuisine Connect (MediaTek MT6580, vendor 0e8d) in
+# download mode (preloader 0e8d:2000 / BROM 0e8d:0003) and keeps ModemManager away from it.
+# Install (one time):
+#   sudo cp tools/setup/linux/51-toque-mtk.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+SUBSYSTEM=="usb", ATTR{idVendor}=="0e8d", MODE="0660", TAG+="uaccess", ENV{ID_MM_DEVICE_IGNORE}="1", ENV{ID_MM_PORT_IGNORE}="1"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0e8d", MODE="0660", TAG+="uaccess", ENV{ID_MM_DEVICE_IGNORE}="1", ENV{ID_MM_PORT_IGNORE}="1"

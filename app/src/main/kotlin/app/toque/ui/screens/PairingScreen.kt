@@ -18,8 +18,6 @@ import app.toque.ui.MainActivity
 import app.toque.ui.QrView
 import app.toque.ui.Screen
 import app.toque.ui.Ui
-import java.text.SimpleDateFormat
-import java.util.Date
 
 /**
  * Appairer un téléphone (Toque Compagnon) : QR code et code à six chiffres, valables 2 minutes,
@@ -50,7 +48,6 @@ class PairingScreen(a: MainActivity) : Screen(a) {
     private var knownIds: Set<String> = emptySet()
     private var ticks = 0
     private var unsub: (() -> Unit)? = null
-    private val dateFormat = SimpleDateFormat(tr("d MMMM"), I18n.locale)
 
     private val tick = object : Runnable {
         override fun run() {
@@ -306,50 +303,7 @@ class PairingScreen(a: MainActivity) : Screen(a) {
         return String.format(java.util.Locale.ROOT, "%d:%02d", s / 60, s % 60)
     }
 
-    private fun renderPhones() {
-        phonesList.removeAllViews()
-        val list = companion?.hub?.pairing?.list?.sortedBy { it.number } ?: emptyList()
-        if (list.isEmpty()) {
-            phonesList.addView(Ui.text(c, tr("Aucun téléphone appairé pour l'instant."), 17f, Ui.TEXT3), Ui.lp(t = 14))
-            return
-        }
-        list.forEachIndexed { i, p ->
-            if (i > 0) phonesList.addView(Ui.divider(c), Ui.lp(Ui.MATCH, maxOf(1, Ui.u(1)), t = 12))
-            phonesList.addView(phoneRow(p), Ui.lp(t = 12))
-        }
-    }
-
-    private fun phoneRow(p: Phone): View {
-        val row = Ui.horizontal(c)
-        row.addView(Icon(c, Icon.Kind.PHONE, Ui.ACCENT_INK), LinearLayout.LayoutParams(Ui.u(26), Ui.u(26)).apply { rightMargin = Ui.u(14) })
-        val col = Ui.vertical(c)
-        col.addView(Ui.ellipsize(Ui.text(c, p.name, 18f, Ui.TEXT, Ui.MEDIUM)))
-        col.addView(Ui.ellipsize(Ui.text(c, seen(p), 15f, Ui.TEXT2)), Ui.lp(t = 2))
-        row.addView(col, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
-        row.addView(Ui.button(c, tr("Retirer"), Ui.Style.GHOST, height = 46, textSize = 16f) { removePhone(p) }, Ui.lp(Ui.WRAP, Ui.WRAP, l = 14))
-        return row
-    }
-
-    private fun seen(p: Phone): String {
-        val paired = tr("Appairé le %s", dateFormat.format(Date(p.pairedAt)))
-        val ago = System.currentTimeMillis() - p.lastSeenAt
-        val seen = when {
-            ago < 2 * MINUTE -> tr("vu à l'instant")
-            ago < HOUR -> tr("vu il y a %d min", (ago / MINUTE).toInt())
-            ago < DAY -> tr("vu il y a %d h", (ago / HOUR).toInt())
-            ago < 2 * DAY -> tr("vu hier")
-            else -> tr("vu il y a %d jours", (ago / DAY).toInt())
-        }
-        return "$paired · $seen"
-    }
-
-    private fun removePhone(p: Phone) {
-        a.confirm(tr("Retirer %s", p.name),
-            tr("Ce téléphone ne pourra plus suivre ni piloter le robot. Pour le retrouver, il faudra l'appairer à nouveau."),
-            tr("Retirer"), icon = Icon.Kind.PHONE) {
-            companion?.hub?.pairing?.remove(p.id)
-        }
-    }
+    private fun renderPhones() = PairedPhones.fill(a, phonesList, tr("Aucun téléphone appairé pour l'instant."))
 
     companion object {
         /** Côté du carré du QR code, en unités Toque (la carte de gauche fait 380 de large). */
@@ -358,8 +312,5 @@ class PairingScreen(a: MainActivity) : Screen(a) {
         const val APP_URL = "https://github.com/Wuki60/ToqueCompagnon/releases/latest"
         /** Petit QR de [APP_URL] : version 4 au niveau L, 41 modules avec la marge, 3 pixels chacun sur le Connect. */
         private const val APP_QR_SIZE = 124
-        private const val MINUTE = 60_000L
-        private const val HOUR = 60 * MINUTE
-        private const val DAY = 24 * HOUR
     }
 }

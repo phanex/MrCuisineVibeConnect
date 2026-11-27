@@ -54,7 +54,9 @@ Menu names below are those of the English interface (*Settings › Language and 
    **Read Back**, then switch the robot on. You get `boot-original.img` and
    `recovery-original.img` (16 MB each): **keep them safe, they are your only way back.**
 
-   > **SKMC 1100 A1** (label under the robot, system image `v4.3a_2022-09-15`): the TWRP of the
+   > **SKMC 1100 A1** (label under the robot, system image `v4.3a_2022-09-15`), and an **SKMC 1200
+   > D4** or some **SKMC 1200 C3** with the same `spm188a` board (the script's `-Step backup` names the
+   > board it sees, [#115](https://github.com/Wuki60/MrCuisineVibeConnect/issues/115)): the TWRP of the
    > reference guide carries a 2018 kernel built for the SKMC 1200's board, and on this robot it
    > starts without touch. Before step 4, rebuild TWRP around your own kernel: put the two backups
    > in `C:\Toque\backup\`, then run
@@ -140,7 +142,9 @@ disconnect the USB cable and perform all subsequent steps and updates over Wi-Fi
 3. Empty bowl, lid closed, **hand near the main switch**:
    - Manual cooking: 10 s, speed 2 → the motor runs, then stops on its own.
    - Open the lid during a run → immediate stop, "Paused: lid open".
-   - 30 s at 37 °C, speed 1 → the displayed temperature rises.
+   - 30 s at 37 °C, speed 1 → the heater starts (Diagnostics: target 37 °C). Some bases report the
+     bowl temperature in steps (0 below 37 °C, then 37, 45, 50…, shown as "< 37 °C" at first): on
+     those, the displayed value only changes once the bowl reaches 37 °C.
    - Scale: put an object of known weight on it, Tare.
    - Diagnostics: remove the bowl and watch "Bowl detected". If it changes correctly, you can
      enable Settings › Safety › Require bowl detection.

@@ -214,7 +214,7 @@ class TimerAlarm(private val a: MainActivity, private val root: FrameLayout) {
         if (layer == null) build()
         titleView?.text = if (ringing.size == 1) tr("Minuteur terminé") else tr("%d minuteurs terminés", ringing.size)
         names?.text = ringing.joinToString("\n") { it.label }
-        spare(a.machineBarSpace())
+        spare(a.keyboardMargin + a.machineBarSpace())
     }
 
     /** Laisse la barre machine (et son bouton Stop) hors du voile. */
@@ -233,6 +233,7 @@ class TimerAlarm(private val a: MainActivity, private val root: FrameLayout) {
     }
 
     private fun build() {
+        a.hideKeyboard()
         val l = FrameLayout(a)
         l.setBackgroundColor(Ui.SCRIM)
         l.isClickable = true

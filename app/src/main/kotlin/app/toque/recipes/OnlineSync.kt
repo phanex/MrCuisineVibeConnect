@@ -255,18 +255,23 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
         if (bounds.outWidth <= 0) throw IOException(tr("image illisible"))
         var sample = 1
         while (bounds.outWidth / (sample * 2) >= MAX_WIDTH) sample *= 2
-        var bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
-            ?: throw IOException(tr("image illisible"))
-        if (bmp.width > MAX_WIDTH) {
-            val scaled = Bitmap.createScaledBitmap(bmp, MAX_WIDTH, bmp.height * MAX_WIDTH / bmp.width, true)
-            if (scaled !== bmp) bmp.recycle()
-            bmp = scaled
+        var bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = Bitmap.Config.RGB_565
+        }) ?: throw IOException(tr("image illisible"))
+        try {
+            if (bmp.width > MAX_WIDTH) {
+                val scaled = Bitmap.createScaledBitmap(bmp, MAX_WIDTH, bmp.height * MAX_WIDTH / bmp.width, true)
+                if (scaled !== bmp) bmp.recycle()
+                bmp = scaled
+            }
+            val name = url.substringAfterLast('/').substringBefore('?')
+            val tmp = File(repo.imagesDir, "$name.part")
+            FileOutputStream(tmp).use { bmp.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+            if (tmp.renameTo(File(repo.imagesDir, name))) repo.photoSaved(name) else tmp.delete()
+        } finally {
+            if (!bmp.isRecycled) bmp.recycle()
         }
-        val name = url.substringAfterLast('/').substringBefore('?')
-        val tmp = File(repo.imagesDir, "$name.part")
-        FileOutputStream(tmp).use { bmp.compress(Bitmap.CompressFormat.JPEG, 85, it) }
-        bmp.recycle()
-        if (tmp.renameTo(File(repo.imagesDir, name))) repo.photoSaved(name) else tmp.delete()
     }
 
     private fun get(url: String, language: String): String =
@@ -278,6 +283,7 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
         while (true) {
             attempt++
             val c = URL(url).openConnection() as HttpURLConnection
+            var keepAlive = false
             try {
                 c.connectTimeout = 20_000
                 c.readTimeout = 30_000
@@ -289,8 +295,9 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
                     continue
                 }
                 if (code != 200) throw IOException(tr("réponse %d du serveur", code))
+                val initial = c.contentLength.let { if (it in 4096..maxBytes) it else 16 * 1024 }
                 c.inputStream.use { input ->
-                    val out = ByteArrayOutputStream()
+                    val out = ByteArrayOutputStream(initial)
                     val buf = ByteArray(16 * 1024)
                     while (true) {
                         val n = input.read(buf)
@@ -298,10 +305,11 @@ class OnlineSync(private val context: Context, private val prefs: Prefs, private
                         out.write(buf, 0, n)
                         if (out.size() > maxBytes) throw IOException(tr("réponse trop grande"))
                     }
+                    keepAlive = true
                     return out.toByteArray()
                 }
             } finally {
-                c.disconnect()
+                if (!keepAlive) c.disconnect()
             }
         }
     }
