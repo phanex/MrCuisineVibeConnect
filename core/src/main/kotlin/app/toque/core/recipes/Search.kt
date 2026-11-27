@@ -125,18 +125,34 @@ object TextNorm {
     /** Distance de Damerau-Levenshtein (transpositions adjacentes) bornée par [max]. */
     fun distance(a: String, b: String, max: Int): Int {
         if (kotlin.math.abs(a.length - b.length) > max) return max + 1
+        val m = b.length
+        return distance(a, b, max, IntArray(m + 1), IntArray(m + 1), IntArray(m + 1))
+    }
+
+    /** Variante sans allocation : réutilise trois tampons [buf0], [buf1], [buf2] de taille ≥ b.length + 1. */
+    internal fun distance(a: String, b: String, max: Int, buf0: IntArray, buf1: IntArray, buf2: IntArray): Int {
+        if (kotlin.math.abs(a.length - b.length) > max) return max + 1
         val n = a.length
         val m = b.length
-        var prev2 = IntArray(m + 1)
-        var prev = IntArray(m + 1) { it }
-        var cur = IntArray(m + 1)
+        var prev2 = buf0
+        var prev = buf1
+        var cur = buf2
+        for (j in 0..m) prev[j] = j
         for (i in 1..n) {
             cur[0] = i
-            var rowMin = cur[0]
+            var rowMin = i
+            val ai = a[i - 1]
             for (j in 1..m) {
-                val cost = if (a[i - 1] == b[j - 1]) 0 else 1
-                var v = minOf(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
-                if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]) v = minOf(v, prev2[j - 2] + 1)
+                val cost = if (ai == b[j - 1]) 0 else 1
+                var v = prev[j] + 1
+                val ins = cur[j - 1] + 1
+                if (ins < v) v = ins
+                val sub = prev[j - 1] + cost
+                if (sub < v) v = sub
+                if (i > 1 && j > 1 && ai == b[j - 2] && a[i - 2] == b[j - 1]) {
+                    val tr = prev2[j - 2] + 1
+                    if (tr < v) v = tr
+                }
                 cur[j] = v
                 if (v < rowMin) rowMin = v
             }
@@ -272,11 +288,15 @@ class SearchIndex private constructor(parts: Parts) {
     /** terme -> (n° de recette × 16 + poids), n° croissants */
     private val postings: HashMap<String, IntArray> = parts.postings
     private val vocabulary: Array<String> = parts.vocabulary
+    /** Vocabulaire regroupé par longueur de mot : accélère la recherche floue sans balayer tout le dictionnaire. */
+    private val byLen: Array<Array<String>> = bucketByLength(parts.vocabulary)
     private val byId: HashMap<String, Int> = parts.byId
     /** Ingrédients et étapes compris ; sinon titres, catégories et étiquettes seulement. */
     val full: Boolean = parts.full
 
     val entries: List<Entry> = docs.filterNotNull()
+    /** Entrées pré-triées par [Entry.normTitle] : évite un tri O(N log N) à chaque recherche vide. */
+    private val entriesByTitle: List<Entry> by lazy { entries.sortedBy { it.normTitle } }
 
     constructor(recipes: List<Recipe>) : this(build(recipes.map { SearchWords.of(it) }, true))
 
@@ -309,21 +329,38 @@ class SearchIndex private constructor(parts: Parts) {
         /** Index des recettes déjà découpées ; [full] faux : mots des titres, catégories et étiquettes seulement. */
         fun of(recipes: List<IndexedRecipe>, full: Boolean): SearchIndex = SearchIndex(build(recipes, full))
 
+        private fun bucketByLength(vocab: Array<String>): Array<Array<String>> {
+            var maxLen = 0
+            for (w in vocab) if (w.length > maxLen) maxLen = w.length
+            val counts = IntArray(maxLen + 1)
+            for (w in vocab) counts[w.length]++
+            val buckets = Array(maxLen + 1) { len -> arrayOfNulls<String>(counts[len]) }
+            val pos = IntArray(maxLen + 1)
+            for (w in vocab) {
+                val l = w.length
+                buckets[l][pos[l]++] = w
+            }
+            @Suppress("UNCHECKED_CAST")
+            return buckets as Array<Array<String>>
+        }
+
         private fun build(recipes: List<IndexedRecipe>, full: Boolean): Parts {
             val docs = arrayOfNulls<Entry>(recipes.size)
             val byId = HashMap<String, Int>(recipes.size * 2)
             val lists = HashMap<String, Ints>()
+            var curDoc = 0
+            val add: (String, Int) -> Unit = { t, w ->
+                var l = lists[t]
+                if (l == null) {
+                    l = Ints()
+                    lists[t] = l
+                }
+                l.add((curDoc shl 4) or w)
+            }
             for ((doc, r) in recipes.withIndex()) {
+                curDoc = doc
                 docs[doc] = r.entry
                 byId[r.entry.id] = doc
-                val add = { t: String, w: Int ->
-                    var l = lists[t]
-                    if (l == null) {
-                        l = Ints()
-                        lists[t] = l
-                    }
-                    l.add((doc shl 4) or w)
-                }
                 SearchWords.forEach(r.head, add)
                 if (full) SearchWords.forEach(r.body, add)
             }
@@ -396,12 +433,21 @@ class SearchIndex private constructor(parts: Parts) {
         if (token.length >= 2) for (t in prefixMatches(token)) if (t != token) c[t] = maxOf(c[t] ?: 0.0, 0.75)
         if (token.length >= 4) {
             val max = if (token.length >= 8) 2 else 1
-            for (t in vocabulary) {
-                if (c.containsKey(t)) continue
-                if (kotlin.math.abs(t.length - token.length) > max) continue
-                if (t[0] != token[0] && token.length < 6) continue
-                val d = TextNorm.distance(token, t, max)
-                if (d <= max) c[t] = if (d == 1) 0.55 else 0.35
+            val minLen = maxOf(1, token.length - max)
+            val maxLen = minOf(byLen.size - 1, token.length + max)
+            val cap = maxLen + 1
+            val b0 = IntArray(cap)
+            val b1 = IntArray(cap)
+            val b2 = IntArray(cap)
+            val checkFirst = token.length < 6
+            val firstChar = token[0]
+            for (len in minLen..maxLen) {
+                for (t in byLen[len]) {
+                    if (checkFirst && t[0] != firstChar) continue
+                    if (c.containsKey(t)) continue
+                    val d = TextNorm.distance(token, t, max, b0, b1, b2)
+                    if (d <= max) c[t] = if (d == 1) 0.55 else 0.35
+                }
             }
         }
         return c
@@ -416,12 +462,25 @@ class SearchIndex private constructor(parts: Parts) {
     }
 
     fun search(query: String, filter: RecipeFilter = RecipeFilter(), limit: Int = 0): List<Hit> {
-        val tokens = TextNorm.tokens(query).distinct()
+        val normQuery = TextNorm.normalize(query)
+        val tokens = if (normQuery.isEmpty()) emptyList() else TextNorm.tokens(query).distinct()
         if (tokens.isEmpty()) {
-            val list = entries.filter { accepts(it, filter) }
-                .sortedWith(compareByDescending<Entry> { it.favorite }.thenBy { it.normTitle })
-            val limited = if (limit > 0) list.take(limit) else list
-            return limited.map { Hit(it, 0.0, 0) }
+            val sorted = entriesByTitle
+            val cap = if (limit > 0) minOf(limit, sorted.size) else sorted.size
+            val out = ArrayList<Hit>(cap)
+            for (e in sorted) {
+                if (!e.favorite || !accepts(e, filter)) continue
+                out += Hit(e, 0.0, 0)
+                if (limit > 0 && out.size >= limit) return out
+            }
+            if (!filter.favoritesOnly) {
+                for (e in sorted) {
+                    if (e.favorite || !accepts(e, filter)) continue
+                    out += Hit(e, 0.0, 0)
+                    if (limit > 0 && out.size >= limit) return out
+                }
+            }
+            return out
         }
         val n = docs.size
         val totals = DoubleArray(n)
@@ -442,7 +501,6 @@ class SearchIndex private constructor(parts: Parts) {
                 counts[doc]++
             }
         }
-        val normQuery = TextNorm.normalize(query)
         val hits = ArrayList<Hit>()
         for (doc in 0 until n) {
             if (counts[doc] == 0) continue

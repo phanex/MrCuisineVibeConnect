@@ -380,16 +380,21 @@ object McOnline {
         }
     }
 
+    private val HTML_BREAKS = Regex("(?i)<br\\s*/?>|</p>|</li>")
+    private val HTML_TAGS = Regex("<[^>]+>")
+    private val MULTI_SPACE = Regex("[ \\t\u00a0]{2,}")
+    private val MULTI_NEWLINE = Regex("\n{3,}")
+
     /** Texte brut à partir d'un éventuel HTML léger. */
     fun plain(html: String?): String? {
         if (html.isNullOrBlank()) return null
         val t = html
-            .replace(Regex("(?i)<br\\s*/?>|</p>|</li>"), "\n")
-            .replace(Regex("<[^>]+>"), "")
+            .replace(HTML_BREAKS, "\n")
+            .replace(HTML_TAGS, "")
             .replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
             .replace("&quot;", "\"").replace("&#39;", "'").replace("&rsquo;", "’")
-            .lines().joinToString("\n") { it.replace(Regex("[ \\t\u00a0]{2,}"), " ").trim() }
-            .replace(Regex("\n{3,}"), "\n\n")
+            .lines().joinToString("\n") { MULTI_SPACE.replace(it, " ").trim() }
+            .replace(MULTI_NEWLINE, "\n\n")
             .trim()
         return t.ifEmpty { null }
     }

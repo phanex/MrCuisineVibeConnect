@@ -8,8 +8,9 @@ import app.toque.core.ring.RingLeds
 import java.util.concurrent.Executors
 
 /**
- * Anneau de la molette : code couleur (voir [RingColour]) et lumière pendant la veille (une
- * veilleuse blanche, faible et fixe, ou éteinte), tous deux tenus par un seul [KnobRing].
+ * Anneau de la molette : code couleur (voir [RingColour]), luminosité et couleur réglées par
+ * l'utilisateur (allumé et pendant la veille, voir [app.toque.core.ring.RingLook]), tous tenus par un
+ * seul [KnobRing].
  *
  * L'anneau a trois LED, vues par Android sous /sys/class/leds : « red » (rouge), « green » (vert)
  * et « blue », qui allume en fait du blanc (pas de LED bleue). L'intensité va de 1 à 79 (puis
@@ -23,13 +24,15 @@ import java.util.concurrent.Executors
 object KnobLight {
     private const val LEDS = "/sys/class/leds"
     private const val SAVED = "/data/local/tmp/toque-knob-light.saved"
-    const val NIGHT_LEVEL = 3
 
     /** Journal de l'appli (posé par l'activité). */
     @Volatile var log: (String) -> Unit = {}
 
     private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "toque-molette").apply { isDaemon = true } }
     private val ring = KnobRing(RootLeds) { m -> log(m) }
+    /** Couleur tenue sur l'anneau le temps d'un réglage ([hold]) ; null : aucune. Lue et écrite sur le fil principal. */
+    var held: Rgb? = null
+        private set
     @Volatile private var dimmed = false
     /** Dernière demande du code couleur transmise ([UNSET] : aucune ; null : code couleur coupé). */
     private var requested: Any? = UNSET
@@ -42,23 +45,45 @@ object KnobLight {
         worker.execute { ring.show(colour) }
     }
 
-    /** [level] : intensité du blanc pendant la veille ([NIGHT_LEVEL] en veilleuse, 0 pour éteindre). */
-    fun start(level: Int) {
+    /** Anneau allumé réglé par l'utilisateur ([colour]), ou null : le blanc propre au robot. */
+    fun idle(colour: Rgb?) {
+        worker.execute { ring.idle(colour) }
+    }
+
+    /**
+     * [colour] tenue sur l'anneau tant qu'un réglage dure (la veille telle qu'elle sera, ou une couleur
+     * vue au plus fort) ; null : fin, l'anneau reprend ce qu'il doit montrer. L'anneau passe directement
+     * d'une couleur tenue à la suivante.
+     */
+    fun hold(colour: Rgb?) {
+        if (colour == held) return
+        held = colour
+        worker.execute { ring.preview(colour) }
+    }
+
+    /** Veille de l'écran : l'anneau montre [night] (tout à 0 : éteint) jusqu'à [stop]. */
+    fun start(night: Rgb) {
         if (dimmed) return
         dimmed = true
-        worker.execute { ring.standby(level) }
+        worker.execute { ring.standby(night) }
     }
 
     fun stop() {
         if (!dimmed) return
         dimmed = false
-        worker.execute { ring.wake() }
+        // Un réglage était en cours quand la veille est venue : sa couleur revient avec l'écran.
+        val h = held
+        worker.execute {
+            ring.wake()
+            if (h != null) ring.preview(h)
+        }
     }
 
     /** Toque rend l'écran (appli d'origine, Toque masqué) : l'anneau reprend le blanc du robot. */
     fun release() {
         requested = UNSET
         dimmed = false
+        held = null
         worker.execute { ring.release() }
     }
 

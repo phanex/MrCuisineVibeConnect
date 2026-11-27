@@ -95,7 +95,8 @@ class StartCommand(
  * Ce que l'appli fournit au compagnon. Les méthodes sont appelées depuis les fils du serveur et
  * doivent rendre la main en moins de [CompanionHub.HOST_TIMEOUT_MS].
  *
- * Seules les commandes (pause, resume, stop, adjust, tare, start, clear, setServings, setFavorite, stopRecipe) passent par le fil principal
+ * Seules les commandes (pause, resume, stop, adjust, tare, start, clear, setServings, setFavorite, stopRecipe,
+ * writeRecipe, writeOwnStep) passent par le fil principal
  * d'Android (voir [HostCalls.command]). catalog, recipe et image s'exécutent sur le fil du serveur,
  * HORS du fil principal (lecture de la base de recettes, des fichiers d'images).
  *
@@ -241,6 +242,34 @@ interface CompanionHost {
      * est refusé, 400 « machine », comme avant).
      */
     val writesMachineSteps: Boolean get() = false
+
+    /**
+     * L'hôte prend le réglage du propriétaire d'une étape d'une recette reçue (Mealie) tapé sur un téléphone
+     * ([ownSteps], [writeOwnStep]) : `can.ownSettings`, et les fiches de ces recettes le disent
+     * (RecipeDetail.ownSettings). Il s'engage alors à l'enregistrer comme venu d'un téléphone
+     * (SettingAuthor.PHONE : à vérifier sur le robot, jamais enchaîné tant qu'il ne l'est pas) et à oublier, dans
+     * le même bloc, toute vérification ou adaptation gardée au rang de l'étape (CookScreen.forgetConfirmations
+     * sur le robot). Par défaut : non.
+     */
+    val takesOwnSteps: Boolean get() = false
+
+    /**
+     * La recette [id] telle que le propriétaire en règle les étapes ([OwnStepsRead] : la recette de la source,
+     * telle qu'affichée, et ses réglages), ou null si elle est inconnue (ou que le robot choisi ne sait pas la
+     * faire, comme [recipe]) ; lue sur le fil du serveur. Par défaut : null.
+     */
+    fun ownSteps(id: String): OwnStepsRead? = null
+
+    /**
+     * Sur le fil principal, d'un bloc : lire la recette [id] ([ownSteps], null si absente), appeler [decide], et
+     * si sa réponse porte un changement ([OwnStepWrite.changed]), l'enregistrer comme la page de la recette du
+     * robot (RecipeRepo.clearStepSetting, ou RecipeRepo.setStepSetting avec SettingAuthor.PHONE, qui revérifie et
+     * peut encore refuser : [OwnStepWrite.failed]), oublier les vérifications gardées à ce rang ; puis rendre la
+     * réponse avec la recette relue ([OwnStepWrite.done]). Un bloc qui n'a pas pu commencer à temps n'est jamais
+     * exécuté (« timeout »). Par défaut : refusé.
+     */
+    fun writeOwnStep(id: String, decide: (read: OwnStepsRead?) -> OwnStepWrite): OwnStepWrite =
+        OwnStepWrite(error = EditError(409, "unsupported", tr("Le robot ne prend pas votre réglage depuis le téléphone")))
 }
 
 /** Réponse de [CompanionHost.setServings] : la recette adaptée et son nombre de personnes d'origine, ou [refusal]. */

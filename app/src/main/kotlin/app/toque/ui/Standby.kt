@@ -134,10 +134,8 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
         v.alpha = 0f
         v.animate().alpha(1f).setDuration(800).start()
         brightness(0.02f)
-        when (a.prefs.standbyKnob) {
-            "dim" -> KnobLight.start(KnobLight.NIGHT_LEVEL)
-            "off" -> KnobLight.start(0)
-        }
+        // Anneau de la molette : ce qui est réglé pour la veille (rien si c'est la même chose qu'allumé).
+        a.prefs.ring.standby?.let { KnobLight.start(it) }
         main.postDelayed(tick, 60_000)
         if (!WallClock.known) main.postDelayed(clockTick, WallClock.UNKNOWN_TICK_MS)
     }

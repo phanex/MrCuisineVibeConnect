@@ -91,6 +91,10 @@ class SimBoard(private val clock: Clock) {
     @Volatile var bowlPresent = true
     @Volatile var contentWeightG = 0
     @Volatile var silent = false
+    /** false : la base laisse le régime mesuré à 0 (SKMC 1100 A1 / carte spm188a, issue #10). */
+    @Volatile var reportsRpm = true
+    /** true : le bit « moteur en marche » tombe dès la trame STOP, lame encore en rotation (pire cas). */
+    @Volatile var motorBitDropsOnStop = false
 
     private val rpmForLevel = intArrayOf(0, 300, 800, 1200, 2400, 4800, 7800, 10800, 13800, 16800, 19500)
 
@@ -135,7 +139,8 @@ class SimBoard(private val clock: Clock) {
 
     private fun response(): ByteArray {
         val r = ByteArray(Mcc.RX_SIZE)
-        val motor = rpm > 0.5 || (op != Operation.STOP && speedLevel > 0 && !lidOpen && errorCode == 0)
+        val commanded = op != Operation.STOP && speedLevel > 0 && !lidOpen && errorCode == 0
+        val motor = if (motorBitDropsOnStop) commanded else rpm > 0.5 || commanded
         val heat = heating()
         val mode = when {
             motor && heat -> 1
@@ -154,7 +159,7 @@ class SimBoard(private val clock: Clock) {
         val ext = when (op) { Operation.STEAM -> 3; Operation.TOAST -> 4; Operation.KNEAD -> 5; else -> 0 }
         r[0] = 0x55; r[1] = 27; r[2] = 0xB1.toByte()
         r[3] = status.toByte(); r[4] = ext.toByte(); r[5] = errorCode.toByte(); r[6] = speedLevel.toByte()
-        putWord(r, 7, rpmForLevel[speedLevel]); putWord(r, 9, rpm.toInt())
+        putWord(r, 7, rpmForLevel[speedLevel]); putWord(r, 9, if (reportsRpm) rpm.toInt() else 0)
         r[11] = tempLevel.toByte(); putWord(r, 12, Mcc.celsiusForLevel(tempLevel)); putWord(r, 14, temp.toInt())
         r[16] = (weight shr 24).toByte(); r[17] = (weight shr 16).toByte(); r[18] = (weight shr 8).toByte(); r[19] = weight.toByte()
         putWord(r, 20, 5016)

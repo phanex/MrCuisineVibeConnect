@@ -143,7 +143,7 @@ class MachineController(
     var listener: ((MachineEvent) -> Unit)? = null
 
     /** Format des trames de la carte : fourni par la liaison à son ouverture ([onTransportUp]). */
-    var codec: BoardCodec = ConnectCodec
+    @Volatile var codec: BoardCodec = ConnectCodec
         private set
     private var parser: FrameParser = codec.newRxParser()
     private val frameBuffer = ArrayList<ByteArray>(4)
@@ -185,54 +185,42 @@ class MachineController(
         coldConfirmedEpoch == coldEpoch && now - coldConfirmedAtMs in 0..Limits.COLD_CONFIRM_MS
     private var tarePending = false
 
-    // Retour du bol sur le socle (voir [ControllerConfig.bowlAutoZero]).
+    private val bowl = BowlScaleTracker(
+        config = { config },
+        isBusyOrFaulted = { busy || fault != null },
+        requestTare = { requestTare() },
+        emit = { type, msg, value -> emit(type, msg, value) },
+    )
+
     /** Bol mémorisé, appris pendant cette session ou lu dans la configuration. */
-    var emptyBowlG: Int = config.emptyBowlG
-        private set
-    private var bowlRaw: Boolean? = null
-    private var bowlRawSinceMs = 0L
-    /** État du bol après anti-rebond ; null = inconnu (début de liaison). */
-    private var bowlIn: Boolean? = null
-    private var stableSinceMs: Long? = null
-    /** Poids lu socle vide, dans le repère du zéro actuel de la base ; null = inconnu. */
-    private var baseRefG: Int? = null
-    /** Bol replacé à cet instant, masse encore à évaluer. */
-    private var bowlReturnedAtMs: Long? = null
-    private var lastReturnMassG: Int? = null
-    private var learnUntilMs = Long.MIN_VALUE / 4
-    private var bowlHintShown = false
-    private val recentWeights = ArrayDeque<Pair<Long, Int>>()
-    private var scaleStableComputed = false
+    val emptyBowlG: Int get() = bowl.emptyBowlG
 
     /** Fin du dernier pétrissage (Malaxer) : l'appli d'origine fait attendre 30 min avant le suivant. */
     private var kneadEndedAtMs: Long? = null
 
-    private var lastWire: Setting = Setting.STOP
+    @Volatile private var lastWire: Setting = Setting.STOP
     private var stopSinceMs: Long? = null
     private var rampLevel = 0
     private var rampAtMs = 0L
     private var lastLidOpen = false
     /** Dernier échantillon où la carte indiquait un moteur en marche. */
     private var lastMotionAtMs = Long.MIN_VALUE / 4
-
-    /**
-     * Valeur du bit « bol » quand le bol est en place, relevée couvercle fermé : le couvercle ne se
-     * verrouille que sur le bol. Elle dépend du robot (sur beaucoup, le bit se lit à l'envers), d'où
-     * l'intérêt de la constater plutôt que de la supposer. Inconnue tant que le couvercle n'a jamais été vu
-     * fermé ; l'appli la retient ensuite d'un démarrage à l'autre (ControllerConfig.bowlBitSeated).
-     */
-    private var bowlBitSeated: Boolean? = config.bowlBitSeated
-
-    /** Valeur du bit « bol » depuis que le couvercle est fermé, et depuis quand (null : couvercle ouvert). */
-    private var closedBowlBit: Boolean? = null
-    private var closedBowlBitSinceMs = 0L
+    /** La base a déjà mesuré un régime lame non nul : sinon, le bit moteur est le seul signe d'arrêt. */
+    private var rpmMeasured = false
 
     var txFrames = 0L
         private set
     var rxFrames = 0L
         private set
-    var lastTxHex = ""
-        private set
+    private var lastTxBytes: ByteArray? = null
+    private var lastTxHexCached = ""
+    val lastTxHex: String
+        get() {
+            val b = lastTxBytes ?: return lastTxHexCached
+            lastTxHexCached = Mcc.hex(b)
+            lastTxBytes = null
+            return lastTxHexCached
+        }
 
     private class Barrier(val afterSeq: Long, val sinceMs: Long)
 
@@ -288,32 +276,12 @@ class MachineController(
         }
         val now = clock.nowMs()
         if (t.motorOn || t.actualRpm > 0) lastMotionAtMs = now
+        if (t.actualRpm > 0) rpmMeasured = true
         seq++
         rxFrames++
         latest = t
         latestAtMs = now
-        // Le bit n'est retenu comme « bol en place » qu'une fois stable, couvercle fermé : au moment où le
-        // couvercle s'ouvre ou se referme, les deux capteurs ne basculent pas forcément dans la même trame.
-        if (t.lidOpen) closedBowlBit = null
-        else if (closedBowlBit != t.bowlNtcDetected) {
-            closedBowlBit = t.bowlNtcDetected
-            closedBowlBitSinceMs = now
-        } else if (now - closedBowlBitSinceMs >= config.bowlSenseMs) bowlBitSeated = closedBowlBit
-
-        recentWeights.addLast(now to t.weight)
-        while (recentWeights.isNotEmpty() && now - recentWeights.first().first > 600L) {
-            recentWeights.removeFirst()
-        }
-        scaleStableComputed = if (recentWeights.size >= 3) {
-            var minW = Int.MAX_VALUE
-            var maxW = Int.MIN_VALUE
-            for (w in recentWeights) {
-                if (w.second < minW) minW = w.second
-                if (w.second > maxW) maxW = w.second
-            }
-            (maxW - minW) <= 5
-        } else false
-        updateBowlScale(t, now)
+        bowl.onSample(t, now)
 
         when (link) {
             LinkState.OFFLINE, LinkState.LOST -> {
@@ -351,70 +319,6 @@ class MachineController(
                 if (fault?.code != FaultCode.UNEXPECTED_HEAT)
                     raiseFault(FaultCode.UNEXPECTED_HEAT, tr("La chauffe reste active alors qu'elle devrait être coupée. Coupez l'interrupteur principal."))
             }
-        }
-    }
-
-    /**
-     * Suit le bol et la balance : socle vide (référence), puis retour du bol. Masse posée =
-     * poids lu − poids du socle vide, indépendante des tares faites entre-temps.
-     */
-    private fun updateBowlScale(t: Telemetry, now: Long) {
-        val raw = bowlPresent(t)
-        if (raw != bowlRaw) {
-            bowlRaw = raw
-            bowlRawSinceMs = now
-        }
-        if (now - bowlRawSinceMs >= BowlScale.DEBOUNCE_MS && raw != bowlIn) {
-            val was = bowlIn
-            bowlIn = raw
-            if (!raw) {
-                bowlReturnedAtMs = null
-                learnUntilMs = Long.MIN_VALUE / 4
-            } else if (was == false) {
-                bowlReturnedAtMs = now
-                lastReturnMassG = null
-            }
-        }
-        if (t.scaleState != "normal" || !scaleStableComputed) {
-            stableSinceMs = null
-            return
-        }
-        val since = stableSinceMs ?: now.also { stableSinceMs = it }
-        if (now - since < BowlScale.SETTLE_MS || bowlRaw != bowlIn) return
-        if (bowlIn == false) {
-            baseRefG = t.weight
-            return
-        }
-        val returned = bowlReturnedAtMs ?: return
-        if (now - returned > BowlScale.RETURN_WINDOW_MS) {
-            bowlReturnedAtMs = null
-            return
-        }
-        val base = baseRefG ?: return
-        val mass = t.weight - base
-        val last = lastReturnMassG
-        if (last != null && abs(mass - last) <= BowlScale.TOLERANCE_G) return
-        lastReturnMassG = mass
-        learnUntilMs = now + BowlScale.LEARN_WINDOW_MS
-        if (config.bowlAutoZero) onBowlReturned(mass)
-    }
-
-    private fun onBowlReturned(massG: Int) {
-        val empty = emptyBowlG
-        when {
-            empty <= 0 -> if (!bowlHintShown) {
-                bowlHintShown = true
-                emit(EventType.SCALE_INFO, tr("Bol replacé. S'il est vide, appuyez sur Tare : Toque retiendra son poids et remettra ensuite la balance à zéro à chaque retour du bol vide."))
-            }
-            abs(massG - empty) <= BowlScale.TOLERANCE_G -> if (!busy && fault == null) {
-                requestTare()
-                bowlReturnedAtMs = null
-                learnUntilMs = Long.MIN_VALUE / 4
-                emit(EventType.SCALE_ZEROED, tr("Bol vide replacé : balance remise à zéro"))
-            }
-            massG > empty + BowlScale.TOLERANCE_G ->
-                emit(EventType.SCALE_INFO, tr("Bol replacé avec environ %d g de contenu : balance laissée telle quelle", massG - empty))
-            else -> Unit // plus léger que le bol mémorisé (couvercle pas encore posé…) : on attend
         }
     }
 
@@ -475,8 +379,7 @@ class MachineController(
         if (tare || !wire.isRest || !codec.tareOnlyAtRest) tarePending = false
         if (tare) {
             // Le zéro de la base va passer au poids actuel : la référence socle vide suit.
-            val w = latest?.weight
-            baseRefG = if (w == null) null else baseRefG?.minus(w)
+            bowl.onTareSent(latest?.weight)
         }
         val j = job
         val durationS = if (wire.isRest || j == null) 0
@@ -491,7 +394,7 @@ class MachineController(
             codec.stopFrame(lastWire.direction)
         }
         txFrames++
-        lastTxHex = Mcc.hex(frame)
+        lastTxBytes = frame
         return frame
     }
 
@@ -542,14 +445,9 @@ class MachineController(
 
     // ------------------------------------------------------------------ commandes
 
-    /** Bol présent d'après la base, en tenant compte de l'inversion réglée pour ce robot. */
-    private fun bowlPresent(t: Telemetry): Boolean = t.bowlNtcDetected != config.invertBowl
+    private fun bowlPresent(t: Telemetry): Boolean = bowl.bowlPresent(t)
 
-    /** Bol retiré, et pas seulement couvercle ouvert : le bit « bol » n'a plus sa valeur « en place ». */
-    private fun bowlRemoved(t: Telemetry): Boolean {
-        val seated = bowlBitSeated ?: return false
-        return t.lidOpen && t.bowlNtcDetected != seated
-    }
+    private fun bowlRemoved(t: Telemetry): Boolean = bowl.bowlRemoved(t)
 
     private fun fresh(now: Long): Boolean = latest != null && now - latestAtMs <= config.freshMs
 
@@ -690,9 +588,9 @@ class MachineController(
         if (j != null && !j.ended) return Verdict.refuse("busy", tr("Arrêtez d'abord le programme en cours"))
         val v = ArrayList(baseChecks(now))
         val t = latest
-        // Le Smart ne mesure pas le régime : on attend aussi stopSettleMs après le dernier écho
+        // Base sans mesure du régime (Smart, SKMC 1100 A1) : on attend aussi stopSettleMs() après le dernier écho
         // « moteur en marche » (ex. arrêt d'un programme en sens inverse puis Turbo).
-        if (v.isEmpty() && ((t != null && !t.motorStopped) || now - lastMotionAtMs < codec.stopSettleMs || !lastWire.isRest))
+        if (v.isEmpty() && ((t != null && !t.motorStopped) || now - lastMotionAtMs < stopSettleMs() || !lastWire.isRest))
             v += Violation("moving", tr("Attendez l'arrêt complet du moteur"))
         // Température non mesurée (Smart) : Turbo seulement après confirmation « contenu froid » ;
         // une température réellement mesurée au-dessus de 60 °C l'interdit dans tous les cas.
@@ -737,33 +635,18 @@ class MachineController(
      * posée devient le bol vide de référence (désactivé pour les tares automatiques des recettes).
      */
     fun tare(learn: Boolean = true) {
-        val t = latest
-        val base = baseRefG
-        if (learn && config.bowlAutoZero && bowlIn == true && t != null && base != null && t.scaleState == "normal" &&
-            clock.nowMs() <= learnUntilMs && !busy) {
-            val mass = t.weight - base
-            // Rien d'ajouté depuis le retour du bol : c'est bien le bol tel qu'il a été replacé.
-            val unchanged = lastReturnMassG?.let { abs(mass - it) <= BowlScale.TOLERANCE_G } == true
-            if (unchanged && mass in BowlScale.MIN_EMPTY_G..BowlScale.MAX_EMPTY_G) {
-                emptyBowlG = mass
-                learnUntilMs = Long.MIN_VALUE / 4
-                emit(EventType.BOWL_LEARNED, tr("Poids du bol vide mémorisé : %d g", mass), mass)
-            }
-        }
+        if (learn) bowl.onManualTare(latest, clock.nowMs(), busy)
         requestTare()
     }
 
     /** Oublie le bol vide appris (réglages). */
     fun forgetEmptyBowl() {
-        emptyBowlG = 0
-        bowlHintShown = false
+        bowl.forgetEmptyBowl()
     }
 
     private fun requestTare() {
         tarePending = true
-        recentWeights.clear()
-        scaleStableComputed = false
-        stableSinceMs = null
+        bowl.onTareRequested()
     }
 
     fun acknowledgeFault(): Verdict {
@@ -794,7 +677,7 @@ class MachineController(
 
     private fun barrierMet(b: Barrier, now: Long): Boolean {
         val t = latest ?: return false
-        return seq > b.afterSeq && fresh(now) && t.motorStopped && now - lastMotionAtMs >= codec.stopSettleMs
+        return seq > b.afterSeq && fresh(now) && t.motorStopped && now - lastMotionAtMs >= stopSettleMs()
     }
 
     private fun updateJob(now: Long) {
@@ -906,10 +789,19 @@ class MachineController(
         return seq > j.phaseSeq && fresh(now) && t.aboveTargetTemperature && t.targetTemperatureLevel == level
     }
 
-    /** Lame arrêtée depuis au moins [BoardCodec.stopSettleMs], d'après un échantillon récent. */
+    /**
+     * Délai minimal après le dernier écho « moteur en marche ». Une base qui ne mesure pas le régime
+     * (Smart, et certaines bases du Connect : SKMC 1100 A1 / carte spm188a, issue #10) peut faire
+     * tomber le bit moteur alors que la lame ralentit encore : on attend alors au moins
+     * [NO_RPM_STOP_SETTLE_MS] avant un redémarrage, un changement de sens ou un Turbo.
+     */
+    private fun stopSettleMs(): Long =
+        if (rpmMeasured) codec.stopSettleMs else maxOf(codec.stopSettleMs, NO_RPM_STOP_SETTLE_MS)
+
+    /** Lame arrêtée depuis au moins [stopSettleMs], d'après un échantillon récent. */
     private fun settled(now: Long): Boolean {
         val t = latest ?: return false
-        return fresh(now) && t.motorStopped && now - lastMotionAtMs >= codec.stopSettleMs
+        return fresh(now) && t.motorStopped && now - lastMotionAtMs >= stopSettleMs()
     }
 
     /** Fin d'un travail : un pétrissage de plus de 30 s fait attendre 30 min avant le suivant. */
@@ -985,17 +877,10 @@ class MachineController(
         link = state
         invalidateCold()
         if (state != LinkState.ARMING) armingCount = 0
-        if (state != LinkState.READY) {
-            recentWeights.clear()
-            scaleStableComputed = false
-        }
+        if (state != LinkState.READY) bowl.clearStability()
         if (state == LinkState.OFFLINE || state == LinkState.LOST) {
             // La base peut refaire son zéro en revenant : les références de la balance ne valent plus.
-            baseRefG = null
-            bowlIn = null
-            bowlRaw = null
-            bowlReturnedAtMs = null
-            stableSinceMs = null
+            bowl.onLinkDown()
         }
         emit(EventType.LINK_CHANGED, state.label)
     }
@@ -1015,6 +900,8 @@ class MachineController(
         const val KNEAD_COOLDOWN = "knead_cooldown"
         /** Un pétrissage compte pour l'attente de 30 min s'il a duré au moins ceci. */
         const val KNEAD_COUNTS_MS = 30_000L
+        /** Attente après arrêt quand la base n'a jamais mesuré de régime lame (comme le Smart). */
+        const val NO_RPM_STOP_SETTLE_MS = 2_000L
     }
 
     fun snapshot(): Snapshot {
@@ -1044,13 +931,13 @@ class MachineController(
             rpm = t?.actualRpm ?: 0,
             speedLevel = t?.shownSpeedLevel ?: 0,
             weightG = t?.weight ?: 0,
-            scaleStable = scaleStableComputed,
+            scaleStable = bowl.scaleStableComputed,
             scaleState = t?.androidScaleState ?: "",
             lidOpen = t?.lidOpen ?: false,
             bowlDetected = t?.let { bowlPresent(it) } ?: false,
             bowlRemoved = t?.let { bowlRemoved(it) } ?: false,
-            bowlSenseKnown = bowlBitSeated != null,
-            bowlSenseInverted = bowlBitSeated == false,
+            bowlSenseKnown = bowl.bowlBitSeated != null,
+            bowlSenseInverted = bowl.bowlBitSeated == false,
             motorOn = t?.motorOn ?: false,
             heaterOn = t?.heaterOn ?: false,
             boardErrorCode = if (t?.errorDetected == true) t.errorCode else 0,
@@ -1077,6 +964,7 @@ class MachineController(
             hotBlendConfirmed = j?.spec?.hotBlendConfirmed ?: false,
             jobFerment = j?.spec?.ferment ?: false,
             turboActive = turboStartedAt != null,
+            turboRemainingMs = turboStartedAt?.let { (Limits.MAX_MS_TURBO_PRESS - (now - it)).coerceIn(0, Limits.MAX_MS_TURBO_PRESS) } ?: 0,
             wireOperation = lastWire.operation.name,
             wireSpeed = lastWire.speed,
             wireTempLevel = lastWire.temperatureLevel,

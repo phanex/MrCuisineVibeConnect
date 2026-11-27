@@ -245,13 +245,7 @@ object RecipeCodec {
         },
         "steps" to r.steps.map { s ->
             val m = linkedMapOf<String, Any?>("text" to s.text)
-            s.machine?.let { mc ->
-                m["machine"] = linkedMapOf(
-                    "program" to mc.program.key, "seconds" to mc.seconds, "speed" to mc.speed,
-                    "tempC" to mc.tempC, "reverse" to mc.reverse,
-                    "accessory" to mc.accessory.name.lowercase(), "pulses" to mc.pulses,
-                )
-            }
+            s.machine?.let { mc -> m["machine"] = machineMap(mc) }
             s.weigh?.let { w -> m["weigh"] = linkedMapOf("label" to w.label, "grams" to w.grams) }
             if (s.needsReview) m["needsReview"] = true
             if (s.reviewAlone) m["reviewAlone"] = true
@@ -313,7 +307,15 @@ object RecipeCodec {
         )
     }
 
-    private fun parseMachine(m: Map<String, Any?>): StepMachine? {
+    /** Un réglage d'étape au format du fichier (aussi pour les réglages du propriétaire, voir [OwnStepSettings]). */
+    fun machineMap(mc: StepMachine): Map<String, Any?> = linkedMapOf(
+        "program" to mc.program.key, "seconds" to mc.seconds, "speed" to mc.speed,
+        "tempC" to mc.tempC, "reverse" to mc.reverse,
+        "accessory" to mc.accessory.name.lowercase(), "pulses" to mc.pulses,
+    )
+
+    /** Un réglage lu au format de [machineMap] ; null si le programme est inconnu. */
+    fun parseMachine(m: Map<String, Any?>): StepMachine? {
         val program = StepProgram.of(m.str("program")) ?: return null
         val acc = Accessory.values().firstOrNull { it.name.equals(m.str("accessory"), true) } ?: Accessory.BLADE
         return StepMachine(

@@ -254,7 +254,9 @@ class KnobScreen(a: MainActivity) : Screen(a) {
     }
 
     override fun onHide() {
+        capture = null
         a.knobListener = null
+        refresh()
     }
 
     override fun onKnob(delta: Int): Boolean {

@@ -365,6 +365,12 @@ class MealieSync(private val client: MealieClient, private val store: Store, pri
         fun save(recipes: List<Recipe>)
         /** Retire les recettes Mealie absentes de [keep] (identifiants Toque). */
         fun removeMealieExcept(keep: Set<String>)
+        /**
+         * Liste complète du serveur relié reçue : [keep] (identifiants Toque) sont toutes ses recettes. Ce qui
+         * reste au robot pour une autre recette Mealie (réglages d'étapes du propriétaire gardés en déliant,
+         * puis serveur changé ou recette supprimée) ne pourra plus servir.
+         */
+        fun listed(keep: Set<String>) {}
     }
 
     class Result(val ok: Boolean, val added: Int, val updated: Int, val removed: Int, val message: String)
@@ -425,6 +431,7 @@ class MealieSync(private val client: MealieClient, private val store: Store, pri
                 val keep = listed.keys.mapTo(HashSet()) { MealieRecipes.toqueId(it) }
                 removed = present.count { it !in keep }
                 if (removed > 0) store.removeMealieExcept(keep)
+                store.listed(keep)
                 index.keys.retainAll(listed.keys)
                 store.index = HashMap(index)
             }

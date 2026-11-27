@@ -40,6 +40,8 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
         var temp: TextView? = null
         lateinit var card: LinearLayout
         lateinit var start: View
+        lateinit var minusIcon: Icon
+        lateinit var plusIcon: Icon
     }
 
     private fun smart(f: Feature, icon: Icon.Kind, text: String, p: SmartProgram, default: Int, step: Int,
@@ -77,23 +79,50 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
             Programs.smartNettoyageLong(Feature.LONG_CLEAN.label)
         },
     )
-    private val progs = all.filter { RobotProfiles.active.capabilities.has(it.feature) }
+    private val progs = all.filter { RobotProfiles.active.capabilities.has(it.feature) }.let { shown ->
+        // Réglages › Cuisson › Programmes affichés (#130) ; le nettoyage reste là quand on l'ouvre pour lui.
+        val hidden = a.prefs.hiddenPrograms
+        shown.filter { it.feature.name !in hidden || (openOnCleaning && it.feature == Feature.CLEANING) }.ifEmpty { shown }
+    }
     private val cleaning = progs.indexOfFirst { it.feature == Feature.CLEANING }
     private var selected = if (openOnCleaning && cleaning >= 0) cleaning else 0
+    private var focusedIndex = selected
+    private var editing = false
+    private var lastStartMs = 0L
     private lateinit var turbo: HoldButton
+
+    companion object {
+        /** Programmes de l'écran, dans son ordre, pour le robot choisi (Réglages › Cuisson). */
+        private val ORDER = listOf(
+            Feature.KNEAD, Feature.STEAM, Feature.TOAST, Feature.YOGURT, Feature.CLEANING, Feature.MIXER,
+            Feature.SMOOTHIE, Feature.EGGS, Feature.SOUS_VIDE, Feature.SLOW_COOK, Feature.FERMENT, Feature.RICE,
+            Feature.KETTLE, Feature.PREWASH, Feature.LONG_CLEAN,
+        )
+
+        fun features(): List<Feature> = ORDER.filter { RobotProfiles.active.capabilities.has(it) }
+    }
 
     override fun build(): View {
         val root = Ui.vertical(c)
         root.setPadding(Ui.u(24), Ui.u(8), Ui.u(24), Ui.u(20))
-        // 4 cartes par ligne. Le Connect en a 4 (toute la hauteur) ; le Smart plus, en lignes qui défilent.
+        // 4 cartes par ligne. Jusqu'à 4 programmes, une ligne sur toute la hauteur ; au-delà (le Connect depuis
+        // le yaourt, le Smart), des lignes qui défilent.
         val many = progs.size > 4
         val rows = Ui.vertical(c)
         var row = Ui.horizontal(c, Gravity.TOP)
-        // Une ligne avec un réglage de température (sous-vide, mijoter, fermenter) est plus haute.
-        fun rowHeight(first: Int) = if (progs.subList(first, minOf(first + 4, progs.size)).any { it.maxC > it.minC }) 456 else 400
+        // La largeur d'une ligne (l'écran moins les marges), pour mesurer ses cartes avant l'affichage.
+        val rowWidth = c.resources.displayMetrics.widthPixels - Ui.u(48)
+        // Hauteur d'une ligne : celle de sa carte la plus haute, 400 au moins. Une carte grandit avec un réglage
+        // de température (sous-vide, mijoter, fermenter), avec le bouton « Recette Lidl » du nettoyage, ou avec
+        // un texte plus long dans une autre langue : à hauteur fixe, son bouton « Démarrer » était coupé.
+        fun rowHeight(line: LinearLayout): Int {
+            line.measure(View.MeasureSpec.makeMeasureSpec(rowWidth, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+            return maxOf(Ui.u(400), line.measuredHeight)
+        }
         for ((i, p) in progs.withIndex()) {
             if (i > 0 && i % 4 == 0) {
-                rows.addView(row, Ui.lp(Ui.MATCH, Ui.u(rowHeight(i - 4)), b = 16))
+                rows.addView(row, Ui.lp(Ui.MATCH, rowHeight(row), b = 16))
                 row = Ui.horizontal(c, Gravity.TOP)
             }
             val card = Ui.vertical(c)
@@ -102,18 +131,25 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
             val badge = FrameLayout(c)
             badge.background = Ui.round(Ui.ACCENT_DIM, 28f)
             badge.addView(Icon(c, p.icon, Ui.ACCENT_INK), Ui.flp(Ui.u(32), Ui.u(32), Gravity.CENTER))
-            card.addView(badge, LinearLayout.LayoutParams(Ui.u(56), Ui.u(56)))
+            val head = Ui.horizontal(c, Gravity.CENTER_VERTICAL)
+            head.addView(badge, LinearLayout.LayoutParams(Ui.u(56), Ui.u(56)))
+            if (i == cleaning) rinseRecipe()?.let { r ->
+                // La recette de rinçage du catalogue Lidl, quand elle est synchronisée : à droite de la pastille,
+                // pour ne pas allonger la carte (sous le texte, elle poussait « Démarrer » hors de la carte).
+                head.addView(View(c), LinearLayout.LayoutParams(0, 1, 1f))
+                // Sans icône : le nom doit tenir à côté de la pastille dans toutes les langues.
+                head.addView(Ui.button(c, tr("Recette Lidl"), Ui.Style.GHOST, height = 44, textSize = 14f) {
+                    a.app.recipes.get(r)?.let { a.push(RecipeScreen(a, it)) }
+                }.apply { setPadding(Ui.u(14), 0, Ui.u(14), 0) }, Ui.lp(Ui.WRAP, Ui.WRAP, l = 8))
+            }
+            card.addView(head, Ui.lp())
             card.addView(Ui.ellipsize(Ui.text(c, p.name, 26f, Ui.TEXT, Ui.MEDIUM)), Ui.lp(t = 14))
             card.addView(Ui.text(c, p.text, 16f, Ui.TEXT2).apply { setLineSpacing(0f, 1.15f) }, Ui.lp(t = 6))
-            if (i == cleaning && cleaning >= 0) rinseRecipe()?.let { r ->
-                // La recette de rinçage du catalogue Lidl, quand elle est synchronisée.
-                card.addView(Ui.button(c, tr("Recette Lidl"), Ui.Style.GHOST, Icon.Kind.BOOK, height = 46, textSize = 16f) {
-                    a.app.recipes.get(r)?.let { a.push(RecipeScreen(a, it)) }
-                }, Ui.lp(Ui.WRAP, Ui.WRAP, t = 8))
-            }
             card.addView(Ui.spacer(c, weight = 1f), LinearLayout.LayoutParams(1, 0, 1f))
             val dur = Ui.horizontal(c)
-            dur.addView(Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.MINUS, height = 56) { selected = i; bump(p, -1) }, Ui.lp(Ui.u(56), Ui.WRAP))
+            val minusBtn = Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.MINUS, height = 56) { selected = i; focusedIndex = i; editing = true; bump(p, -1) }
+            p.minusIcon = minusBtn.getChildAt(0) as Icon
+            dur.addView(minusBtn, Ui.lp(Ui.u(56), Ui.WRAP))
             // Le nombre en grand sur une ligne, l'unité en dessous : les cartes sont étroites à 4 par ligne.
             val gauge = Ui.vertical(c, Gravity.CENTER_HORIZONTAL)
             p.value = Ui.fitText(c, 38f, 24f, Ui.TEXT, Ui.LIGHT).apply { gravity = Gravity.CENTER }
@@ -121,16 +157,18 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
             p.unit = Ui.text(c, "", 14f, Ui.TEXT2).apply { gravity = Gravity.CENTER }
             gauge.addView(p.unit, Ui.lp(Ui.MATCH, Ui.WRAP, t = 1))
             dur.addView(gauge, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
-            dur.addView(Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.PLUS, height = 56) { selected = i; bump(p, 1) }, Ui.lp(Ui.u(56), Ui.WRAP))
+            val plusBtn = Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.PLUS, height = 56) { selected = i; focusedIndex = i; editing = true; bump(p, 1) }
+            p.plusIcon = plusBtn.getChildAt(0) as Icon
+            dur.addView(plusBtn, Ui.lp(Ui.u(56), Ui.WRAP))
             card.addView(dur, Ui.lp(t = 10))
             if (p.maxC > p.minC) {
                 // Température exacte (sous-vide, mijoter, fermenter), dans les bornes de l'appli d'origine.
                 val t = Ui.horizontal(c, Gravity.CENTER_VERTICAL)
-                t.addView(Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.MINUS, height = 48) { selected = i; bumpTemp(p, -1) }
+                t.addView(Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.MINUS, height = 48) { selected = i; focusedIndex = i; editing = true; bumpTemp(p, -1) }
                     .apply { setPadding(0, 0, 0, 0) }, Ui.lp(Ui.u(48), Ui.WRAP))
                 p.temp = Ui.text(c, "", 20f, Ui.TEXT).apply { gravity = Gravity.CENTER }
                 t.addView(p.temp, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
-                t.addView(Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.PLUS, height = 48) { selected = i; bumpTemp(p, 1) }
+                t.addView(Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.PLUS, height = 48) { selected = i; focusedIndex = i; editing = true; bumpTemp(p, 1) }
                     .apply { setPadding(0, 0, 0, 0) }, Ui.lp(Ui.u(48), Ui.WRAP))
                 card.addView(t, Ui.lp(t = 8))
             }
@@ -140,15 +178,25 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
             }
             card.addView(p.start, Ui.lp(t = 14))
             card.isClickable = true
-            card.setOnClickListener { selected = i; refresh() }
+            card.setOnClickListener { selected = i; focusedIndex = i; editing = true; refresh() }
             row.addView(card, LinearLayout.LayoutParams(0, Ui.MATCH, 1f).apply { if (i % 4 != 3 && (many || i < progs.size - 1)) rightMargin = Ui.u(16) })
         }
         // Dernière ligne incomplète : des places vides gardent la largeur des cartes.
         if (many && progs.size % 4 != 0) for (k in progs.size % 4 until 4)
             row.addView(View(c), LinearLayout.LayoutParams(0, Ui.MATCH, 1f).apply { if (k < 3) rightMargin = Ui.u(16) })
         if (many) {
-            rows.addView(row, Ui.lp(Ui.MATCH, Ui.u(rowHeight(progs.size - 1 - (progs.size - 1) % 4))))
-            root.addView(Ui.scroll(c, rows), LinearLayout.LayoutParams(Ui.MATCH, 0, 1f))
+            rows.addView(row, Ui.lp(Ui.MATCH, rowHeight(row)))
+            val scroll = Ui.scroll(c, rows)
+            root.addView(scroll, LinearLayout.LayoutParams(Ui.MATCH, 0, 1f))
+            // Ouvert sur un programme d'une ligne plus bas (le nettoyage, en fin de recette) : sa ligne est amenée
+            // à l'écran. Sinon la molette lancerait un programme qu'on ne voit pas.
+            if (selected >= 4) scroll.addOnLayoutChangeListener(object : View.OnLayoutChangeListener {
+                override fun onLayoutChange(v: View, l: Int, t: Int, r: Int, b: Int, ol: Int, ot: Int, or: Int, ob: Int) {
+                    if (b <= t) return
+                    v.removeOnLayoutChangeListener(this)
+                    scroll.scrollTo(0, rows.getChildAt(selected / 4).top)
+                }
+            })
         } else {
             root.addView(row, LinearLayout.LayoutParams(Ui.MATCH, 0, 1f))
         }
@@ -189,7 +237,21 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
             }
             p.unit.text = if (s < 60) "s" else if (s >= 3600) "h" else "min"
             p.temp?.text = "${p.celsius} °C"
-            p.card.background = Ui.round(Ui.SURFACE, 26f, if (i == selected) Ui.ACCENT_INK else Ui.STROKE, if (i == selected) 2.5f else 1f)
+            val isFocused = (i == focusedIndex)
+            val isSelected = (i == selected)
+            val isEditing = isSelected && editing
+            val (strokeColor, strokeWidth) = when {
+                isEditing -> Ui.ACCENT_INK to 2.5f
+                isFocused -> Ui.TEXT3 to 2.5f
+                isSelected -> Ui.ACCENT_INK to 1.5f
+                else -> Ui.STROKE to 1f
+            }
+            p.card.background = Ui.round(if (isEditing) Ui.SURFACE2 else Ui.SURFACE, 26f, strokeColor, strokeWidth)
+            p.value.setTextColor(if (isEditing) Ui.ACCENT_INK else Ui.TEXT)
+            p.unit.setTextColor(if (isEditing) Ui.ACCENT_INK else Ui.TEXT2)
+            val btnFg = if (isEditing) Ui.ACCENT_INK else Ui.TEXT
+            p.minusIcon.color = btnFg
+            p.plusIcon.color = btnFg
         }
     }
 
@@ -200,12 +262,62 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
     }
 
     override fun onKnob(delta: Int): Boolean {
-        bump(progs[selected], delta)
+        if (editing) {
+            bump(progs[selected], delta)
+        } else {
+            val next = (focusedIndex + delta).coerceIn(0, progs.size - 1)
+            if (next != focusedIndex) {
+                focusedIndex = next
+                refresh()
+            }
+        }
         return true
     }
 
+    private fun launchSelected() {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastStartMs < 600L) return
+        lastStartMs = now
+        editing = false
+        val p = progs[selected]
+        a.startJob(p.make(p.seconds * 1000L, p.celsius))
+        refresh()
+    }
+
     override fun onKnobPress(): Boolean {
-        if (!a.snapshot.busy) progs[selected].let { a.startJob(it.make(it.seconds * 1000L, it.celsius)) }
+        val s = a.snapshot
+        if (s.busy) {
+            a.machine.pause { a.refusal(it) }
+            editing = false
+            refresh()
+            return true
+        }
+        if (editing) {
+            launchSelected()
+        } else {
+            selected = focusedIndex
+            editing = true
+            refresh()
+        }
+        return true
+    }
+
+    fun onKnobDoubleClick(): Boolean {
+        if (!a.snapshot.busy) {
+            selected = focusedIndex
+            launchSelected()
+            return true
+        }
+        return false
+    }
+
+    fun onKnobLongPress(): Boolean {
+        if (editing) {
+            editing = false
+            refresh()
+            return true
+        }
+        a.back()
         return true
     }
 }

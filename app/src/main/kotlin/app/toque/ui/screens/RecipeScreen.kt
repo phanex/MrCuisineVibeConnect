@@ -1,12 +1,10 @@
 package app.toque.ui.screens
 
-import android.content.Context
 import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.inputmethod.EditorInfo
-import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -19,6 +17,8 @@ import app.toque.core.i18n.tr
 import app.toque.core.recipes.McOnline
 import app.toque.core.recipes.QuantityLinks
 import app.toque.core.recipes.Ingredient
+import app.toque.core.recipes.OwnStepSetting
+import app.toque.core.recipes.OwnStepSettings
 import app.toque.core.recipes.Portions
 import app.toque.core.recipes.Recipe
 import app.toque.core.recipes.RecipeAdjustments
@@ -297,9 +297,45 @@ class RecipeScreen(a: MainActivity, val recipe: Recipe) : Screen(a) {
         return row
     }
 
+    /** La recette accepte un réglage du propriétaire par étape (Mealie) : une étape touchée l'ouvre. */
+    private val ownSettings = OwnStepSettings.appliesTo(recipe)
+
     private fun renderSteps() {
         stepsList.removeAllViews()
-        for ((i, s) in shown.steps.withIndex()) stepsList.addView(stepRow(i, s), Ui.lp(t = 12))
+        if (ownSettings && shown.steps.isNotEmpty())
+            stepsList.addView(Ui.text(c, tr("Touchez une étape pour lui donner votre réglage du robot, sans copier la recette."), 16f, Ui.TEXT2)
+                .apply { setLineSpacing(0f, 1.12f) }, Ui.lp(t = 4))
+        val owned = OwnStepSettings.owned(recipe, adjustments)
+        for ((i, s) in shown.steps.withIndex()) stepsList.addView(stepRow(i, s, owned[i]), Ui.lp(t = if (ownSettings) 6 else 12))
+    }
+
+    /**
+     * Réglage du robot de l'étape [i], gardé à côté de la recette (elle reste une seule recette, mise à jour
+     * par la synchro). Le réglage passe par la règle des étapes perso ; tapé ici, il n'est plus « à vérifier ».
+     */
+    private fun editStepSetting(i: Int) {
+        val s = shown.steps.getOrNull(i) ?: return
+        val own = OwnStepSettings.owned(recipe, adjustments)[i]
+        val mine = own != null
+        val reset: (() -> Unit)? = if (!mine) null else ({
+            save(adjustments.withoutStep(recipe, i))
+            a.toast(tr("Étape %d : réglage de la recette", i + 1))
+        })
+        a.push(StepEditScreen(a, s, i + 1, isNew = false, settingOnly = true, onReset = reset) { result ->
+            val m = result?.machine
+            val src = recipe.steps.getOrNull(i)
+            // OK sans rien changer à une étape sans réglage à vérifier : rien à garder.
+            if (!mine && src != null && m == src.machine && !src.needsReview) return@StepEditScreen
+            val problem = OwnStepSettings.problem(recipe, i, m)
+            if (problem != null) {
+                a.toast(problem.detail, Ui.WARN)
+                return@StepEditScreen
+            }
+            save(adjustments.withStep(recipe, i, m))
+            // Réglage venu d'un téléphone, gardé tel quel d'un appui sur OK : c'est la vérification sur le robot.
+            a.toast(if (own != null && !own.trusted && own.machine == m) tr("Étape %d : réglage du téléphone vérifié", i + 1)
+                else tr("Étape %d : mon réglage enregistré", i + 1), Ui.OK)
+        })
     }
 
     private fun quantity(qty: String, unit: String): String = listOf(qty.trim(), unit.trim()).filter { it.isNotEmpty() }.joinToString(" ")
@@ -447,19 +483,15 @@ class RecipeScreen(a: MainActivity, val recipe: Recipe) : Screen(a) {
      */
     private fun editor(title: String, detail: String, value: String, hint: String, lines: Int = 1, number: Boolean = false,
                        reset: String?, onDone: (String?) -> Boolean) {
-        val card = Ui.card(c, 28f, Ui.SURFACE2)
-        card.setPadding(Ui.u(32), Ui.u(26), Ui.u(32), Ui.u(24))
-        card.addView(Ui.text(c, title, 24f, Ui.TEXT, Ui.MEDIUM))
-        if (detail.isNotBlank()) card.addView(Ui.text(c, detail, 17f, Ui.TEXT2).apply { setLineSpacing(0f, 1.15f) }, Ui.lp(t = 8))
         val input = EditText(c).apply {
             setText(value)
             setSelection(text.length)
             this.hint = hint
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.uf(22f))
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.uf(20f))
             setTextColor(Ui.TEXT)
             setHintTextColor(Ui.TEXT3)
             background = Ui.round(Ui.SURFACE, 16f, Ui.STROKE, 1f)
-            setPadding(Ui.u(16), Ui.u(12), Ui.u(16), Ui.u(12))
+            setPadding(Ui.u(16), Ui.u(10), Ui.u(16), Ui.u(10))
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or (if (lines == 1) EditorInfo.IME_ACTION_DONE else 0)
             if (lines == 1) {
                 setSingleLine()
@@ -478,37 +510,25 @@ class RecipeScreen(a: MainActivity, val recipe: Recipe) : Screen(a) {
                 gravity = Gravity.TOP
             }
         }
-        card.addView(input, Ui.lp(t = 16, b = 20))
-        val imm = c.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         fun finish(text: String?) {
-            if (!onDone(text)) return
-            imm.hideSoftInputFromWindow(input.windowToken, 0)
-            a.closeOverlay()
+            if (onDone(text)) a.closeOverlay()
         }
         input.setOnEditorActionListener { _, action, _ ->
             if (action == EditorInfo.IME_ACTION_DONE) { finish(input.text.toString()); true } else false
         }
         val row = Ui.horizontal(c, Gravity.END or Gravity.CENTER_VERTICAL)
         if (reset != null) {
-            row.addView(Ui.button(c, reset, Ui.Style.GHOST, height = 56, textSize = 17f) { finish(null) })
+            row.addView(Ui.button(c, reset, Ui.Style.GHOST, height = 50, textSize = 17f) { finish(null) })
             row.addView(Ui.spacer(c, weight = 1f), LinearLayout.LayoutParams(0, 1, 1f))
         }
-        row.addView(Ui.button(c, tr("Annuler"), Ui.Style.GHOST, height = 56, textSize = 17f) {
-            imm.hideSoftInputFromWindow(input.windowToken, 0)
-            a.closeOverlay()
-        })
+        row.addView(Ui.button(c, tr("Annuler"), Ui.Style.GHOST, height = 50, textSize = 17f) { a.closeOverlay() })
         row.addView(Ui.spacer(c, w = 12))
-        row.addView(Ui.button(c, tr("Enregistrer"), Ui.Style.PRIMARY, Icon.Kind.CHECK, height = 56, textSize = 17f) { finish(input.text.toString()) })
-        card.addView(row)
-        a.showOverlay(card, 680, dismissOnScrim = false)
-        // En haut de l'écran : le clavier occupe la moitié basse.
-        (card.layoutParams as FrameLayout.LayoutParams).apply {
-            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            topMargin = Ui.u(14)
+        row.addView(Ui.button(c, tr("Enregistrer"), Ui.Style.PRIMARY, Icon.Kind.CHECK, height = 50, textSize = 17f) { finish(input.text.toString()) })
+        Ui.showInputOverlay(a, title, input) {
+            if (detail.isNotBlank()) addView(Ui.text(c, detail, 16f, Ui.TEXT2).apply { setLineSpacing(0f, 1.12f) }, Ui.lp(t = 4))
+            addView(input, Ui.lp(t = 8, b = 10))
+            addView(row)
         }
-        card.requestLayout()
-        input.requestFocus()
-        input.post { imm.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT) }
     }
 
     // ------------------------------------------------------------------ avis
@@ -586,7 +606,11 @@ class RecipeScreen(a: MainActivity, val recipe: Recipe) : Screen(a) {
     private fun section(t: String): TextView =
         Ui.text(c, t.uppercase(), 15f, Ui.TEXT2, Ui.MEDIUM).apply { letterSpacing = 0.08f; setPadding(0, Ui.u(10), 0, 0) }
 
-    private fun stepRow(i: Int, s: Step): View {
+    /**
+     * [own] : le réglage du propriétaire de l'étape, ou null. Tapé sur le robot : « Mon réglage » ; venu d'un
+     * téléphone : « Du téléphone : à vérifier », jusqu'à ce qu'il soit vérifié ici (OK sur l'étape) ou à la cuisson.
+     */
+    private fun stepRow(i: Int, s: Step, own: OwnStepSetting? = null): View {
         val row = Ui.horizontal(c, Gravity.TOP)
         val num = Ui.text(c, "${i + 1}", 17f, Ui.ACCENT_INK, Ui.MEDIUM).apply { gravity = Gravity.CENTER }
         num.background = Ui.round(Ui.ACCENT_DIM, 18f)
@@ -603,10 +627,27 @@ class RecipeScreen(a: MainActivity, val recipe: Recipe) : Screen(a) {
         s.machine?.let { m ->
             val ok = m.valid
             chips.addView(Ui.chip(c, m.summary, if (ok) Icon.Kind.POT else Icon.Kind.WARNING,
-                if (ok) Ui.ACCENT_INK else Ui.WARN, if (ok) Ui.ACCENT_DIM else 0x33FFC14D, 15f))
+                if (ok) Ui.ACCENT_INK else Ui.WARN, if (ok) Ui.ACCENT_DIM else 0x33FFC14D, 15f), Ui.lp(Ui.WRAP, Ui.WRAP, r = 8))
+        }
+        if (own != null && !own.trusted && s.machine != null) {
+            chips.addView(Ui.chip(c, tr("Du téléphone : à vérifier"), Icon.Kind.PHONE, Ui.WARN, 0x33FFC14D, 15f))
+        } else if (own != null) {
+            chips.addView(Ui.chip(c, if (s.machine == null) tr("Mon réglage : sans le robot") else tr("Mon réglage"), Icon.Kind.EDIT,
+                Ui.ACCENT_INK, Ui.SURFACE2, 15f))
+        } else if (ownSettings && s.machine != null && s.needsReview) {
+            // Réglage lu dans le texte : le propriétaire voit lesquels il n'a pas encore faits siens.
+            chips.addView(Ui.chip(c, tr("À vérifier"), null, Ui.TEXT2, Ui.SURFACE2, 15f))
         }
         if (chips.childCount > 0) col.addView(chips, Ui.lp(t = 8))
         row.addView(col, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
+        if (ownSettings) {
+            row.minimumHeight = Ui.u(52)
+            row.setPadding(Ui.u(6), Ui.u(6), Ui.u(6), Ui.u(6))
+            row.background = Ui.pressable(Ui.round(0, 14f), 14f)
+            row.isClickable = true
+            row.contentDescription = tr("Mon réglage pour l'étape %d", i + 1)
+            row.setOnClickListener { editStepSetting(i) }
+        }
         return row
     }
 

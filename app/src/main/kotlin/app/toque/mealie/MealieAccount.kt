@@ -53,6 +53,9 @@ class MealieAccount(private val app: ToqueApp) {
         // Délié pendant la synchro : plus rien n'est enregistré.
         override fun save(recipes: List<Recipe>) { if (recipes.isNotEmpty() && prefs.mealieLinked) repo.upsertAll(recipes, rebuild = false) }
         override fun removeMealieExcept(keep: Set<String>) = repo.removeMealieExcept(keep)
+        // Liste complète du serveur relié : les réglages d'étapes gardés pour des recettes qui n'y sont pas
+        // (supprimées de Mealie, ou d'un serveur relié avant) ne pourront plus servir.
+        override fun listed(keep: Set<String>) { if (prefs.mealieLinked) repo.forgetStepSettingsExcept(keep) { MealieRecipes.isMealie(it) } }
     }
 
     /** Prévient (sur le fil de l'interface) quand le serveur relié ou la synchro changent. */
@@ -97,7 +100,11 @@ class MealieAccount(private val app: ToqueApp) {
         }
     }
 
-    /** Délie : le jeton du robot est retiré de Mealie (si joignable), les recettes Mealie et leurs photos partent du robot. */
+    /**
+     * Délie : le jeton du robot est retiré de Mealie (si joignable), les recettes Mealie et leurs photos partent du robot.
+     * Les notes et les réglages d'étapes du propriétaire restent : relié de nouveau au même serveur, ils reviennent
+     * avec les recettes ; relié à un autre, la première liste complète retire les réglages devenus inutiles.
+     */
     fun unlink() {
         val base = prefs.mealieUrl
         val token = prefs.mealieToken

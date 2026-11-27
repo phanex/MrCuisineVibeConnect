@@ -1,6 +1,7 @@
 package app.toque.core
 
 import app.toque.core.companion.MemoryStore
+import app.toque.core.companion.PhoneWire
 import app.toque.core.companion.PairingManager
 import app.toque.core.companion.PairingPayload
 import org.junit.Assert.assertEquals
@@ -116,6 +117,45 @@ class CompanionPairingTest {
         val broken = manager()
         assertTrue(broken.list.isEmpty())
         assertEquals(12, broken.robotId.length)
+    }
+
+    @Test fun aPhoneCanBeRenamedOnTheRobot() {
+        val m = manager()
+        var changes = 0
+        m.onPhonesChanged { changes++ }
+        val first = m.pairWithCode(m.open().code).phone!!
+        val second = m.pairWithCode(m.open().code).phone!!
+        assertEquals("Téléphone 1", first.name)
+        assertEquals(2, changes)
+
+        // Un nom donné sur le robot : celui de la liste, du journal et de ce que le téléphone reçoit.
+        assertTrue(m.rename(first.id, "  Cuisine\tde   Léa\n"))
+        assertEquals(3, changes)
+        val renamed = m.list.first { it.id == first.id }
+        assertEquals("Cuisine de Léa", renamed.name)
+        assertEquals("Cuisine de Léa", renamed.label)
+        assertEquals(1, renamed.number)
+        assertEquals("Cuisine de Léa", PhoneWire.of(renamed).name)
+        assertEquals("l'autre téléphone garde le sien", "Téléphone 2", m.list.first { it.id == second.id }.name)
+        // Le même nom une seconde fois : rien ne change, personne n'est prévenu.
+        assertTrue(m.rename(first.id, "Cuisine de Léa"))
+        assertEquals(3, changes)
+        // Trop long : coupé à 24 caractères, sans espace au bout.
+        assertTrue(m.rename(second.id, "Le téléphone de la cuisine du haut"))
+        assertEquals("Le téléphone de la cuisi", m.list.first { it.id == second.id }.name)
+        assertEquals(PairingManager.MAX_LABEL, 24)
+        assertEquals("un deux", PairingManager.cleanLabel("un   \r\n deux"))
+
+        // Gardé après un redémarrage ; le jeton du téléphone marche toujours.
+        val again = manager(seed = 9)
+        assertEquals(listOf("Cuisine de Léa", "Le téléphone de la cuisi"), again.list.sortedBy { it.number }.map { it.name })
+        // Un nom vidé rend « Téléphone N » ; un téléphone inconnu n'est pas renommé.
+        assertTrue(again.rename(first.id, "   "))
+        assertEquals("Téléphone 1", again.list.first { it.id == first.id }.name)
+        assertEquals("", again.list.first { it.id == first.id }.label)
+        assertFalse(again.rename("inconnu", "Nom"))
+        // Le nom ne tient pas à l'ordre : le numéro libre suivant reste 3.
+        assertEquals(3, again.pairWithCode(again.open().code).phone!!.number)
     }
 
     @Test fun limitsTheNumberOfPhones() {

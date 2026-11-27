@@ -14,7 +14,11 @@ object RootShell {
         val ok: Boolean get() = code == 0
     }
 
-    private fun drain(input: InputStream): Thread {
+    private class Drainer(val thread: Thread, val buffer: ByteArrayOutputStream) {
+        fun text(): String = synchronized(buffer) { buffer.toString("UTF-8") }
+    }
+
+    private fun drain(input: InputStream): Drainer {
         val buffer = ByteArrayOutputStream()
         val t = Thread {
             try {
@@ -29,11 +33,8 @@ object RootShell {
         }
         t.isDaemon = true
         t.start()
-        drained[t] = buffer
-        return t
+        return Drainer(t, buffer)
     }
-
-    private val drained = java.util.WeakHashMap<Thread, ByteArrayOutputStream>()
 
     fun run(command: String, timeoutMs: Long = 10_000): Result {
         val p = try {
@@ -59,16 +60,11 @@ object RootShell {
         if (waiter.isAlive) {
             p.destroy()
             waiter.interrupt()
-            return Result(-2, text(to), "délai dépassé")
+            return Result(-2, to.text(), "délai dépassé")
         }
-        to.join(500)
-        te.join(500)
-        return Result(code, text(to), text(te))
-    }
-
-    private fun text(t: Thread): String {
-        val b = drained[t] ?: return ""
-        synchronized(b) { return b.toString("UTF-8") }
+        to.thread.join(500)
+        te.thread.join(500)
+        return Result(code, to.text(), te.text())
     }
 
     fun available(): Boolean = run("id -u", 8_000).out.trim() == "0"
@@ -252,10 +248,18 @@ class RootSerialTransport(
     internal fun shellOctal(bytes: ByteArray): String =
         bytes.joinToString("") { "\\" + Integer.toOctalString(it.toInt() and 0xFF).padStart(3, '0') }
 
+    private val writeLock = java.util.concurrent.locks.ReentrantLock()
+
     override fun write(frame: ByteArray) {
         val p = process ?: throw IOException(tr("port fermé"))
-        p.outputStream.write(frame)
-        p.outputStream.flush()
+        if (!writeLock.tryLock(100, java.util.concurrent.TimeUnit.MILLISECONDS))
+            throw IOException("port occupé")
+        try {
+            p.outputStream.write(frame)
+            p.outputStream.flush()
+        } finally {
+            writeLock.unlock()
+        }
     }
 
     override fun read(buffer: ByteArray): Int {

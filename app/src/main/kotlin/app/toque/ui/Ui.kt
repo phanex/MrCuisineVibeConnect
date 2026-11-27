@@ -3,6 +3,7 @@ package app.toque.ui
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.Outline
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
@@ -13,10 +14,15 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewOutlineProvider
+import android.view.ViewTreeObserver
+import android.view.animation.DecelerateInterpolator
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import app.toque.core.i18n.tr
 import app.toque.core.look.ColourWheel
 
 /**
@@ -65,6 +71,10 @@ object Ui {
         0xFF3A2416.toInt(), 0xFF16302A.toInt(), 0xFF2B2140.toInt(), 0xFF3B1E26.toInt(),
         0xFF1C2B3E.toInt(), 0xFF35301A.toInt(), 0xFF1E3320.toInt(), 0xFF3A2A1C.toInt(),
     )
+    private var placeholderPairs = makePlaceholderPairs(placeholders)
+
+    private fun makePlaceholderPairs(palette: IntArray): Array<IntArray> =
+        Array(palette.size) { i -> intArrayOf(palette[i], palette[(i + 3) % palette.size]) }
 
     /**
      * Couleurs d'état : information, réussi, avertissement, danger. Claires sur le thème sombre ;
@@ -186,6 +196,7 @@ object Ui {
             ON_COOL = 0xFF04131C.toInt()
             ON_WARN = 0xFF1A1405.toInt()
         }
+        placeholderPairs = makePlaceholderPairs(placeholders)
         ACCENT_INK = inkOf(ACCENT)
     }
 
@@ -233,24 +244,50 @@ object Ui {
     /** Espaces insécables à l'intérieur des guillemets : un retour à la ligne ne sépare plus « du mot qui suit, ni » de celui qui précède. */
     fun guillemets(s: String): String = s.replace("« ", "« ").replace(" »", " »")
 
+    /** Ne modifie le texte d'un TextView que s'il a réellement changé (évite des passes de mise en page à chaque tick). */
+    fun setText(tv: TextView, s: CharSequence) {
+        if (tv.text.toString() != s.toString()) tv.text = s
+    }
+
     /** Texte d'une seule ligne, rapetissé de [size] jusqu'à [min] pour tenir dans sa largeur (jamais de retour à la ligne). */
     fun fitText(c: Context, size: Float, min: Float, color: Int = TEXT, face: Typeface = REGULAR): TextView =
         object : TextView(c) {
+            private val measurePaint = android.graphics.Paint()
+            private var lastMeasuredText = ""
+            private var lastMeasuredAvail = -1
+
             override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
                 val avail = View.MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight
                 if (View.MeasureSpec.getMode(widthMeasureSpec) != View.MeasureSpec.UNSPECIFIED && avail > 0) {
-                    val p = android.graphics.Paint(paint)
-                    var px = uf(size)
-                    p.textSize = px
                     val s = text.toString()
-                    while (px > uf(min) && p.measureText(s) > avail) { px -= 1f; p.textSize = px }
-                    if (px != textSize) setTextSize(TypedValue.COMPLEX_UNIT_PX, px)
+                    if (s != lastMeasuredText || avail != lastMeasuredAvail) {
+                        lastMeasuredText = s
+                        lastMeasuredAvail = avail
+                        val maxPx = uf(size)
+                        val minPx = uf(min)
+                        measurePaint.set(paint)
+                        measurePaint.textSize = maxPx
+                        val px = if (measurePaint.measureText(s) <= avail || maxPx <= minPx) {
+                            maxPx
+                        } else {
+                            var lo = minPx
+                            var hi = maxPx
+                            repeat(10) {
+                                val mid = (lo + hi) * 0.5f
+                                measurePaint.textSize = mid
+                                if (measurePaint.measureText(s) <= avail) lo = mid else hi = mid
+                            }
+                            lo
+                        }
+                        if (px != textSize) setTextSize(TypedValue.COMPLEX_UNIT_PX, px)
+                    }
                 }
                 super.onMeasure(widthMeasureSpec, heightMeasureSpec)
             }
 
             override fun onTextChanged(text: CharSequence?, start: Int, lengthBefore: Int, lengthAfter: Int) {
                 super.onTextChanged(text, start, lengthBefore, lengthAfter)
+                lastMeasuredAvail = -1
                 requestLayout()
             }
         }.apply {
@@ -347,6 +384,119 @@ object Ui {
         b.alpha = if (enabled) 1f else 0.35f
     }
 
+    /**
+     * Carte modale de saisie avec en-tête (titre + bouton « Masquer le clavier »), enveloppe défilable
+     * aux coins arrondis et ouverture du clavier sur [input]. Elle s'ouvre en haut de l'écran, là où le
+     * clavier la laisse : elle ne bouge donc pas quand il arrive, et son bouton garde sa place d'avance.
+     * Le clavier refermé, elle glisse au milieu de l'écran ; elle remonte dès qu'on touche son champ.
+     */
+    fun showInputOverlay(a: MainActivity, title: String, input: EditText, body: LinearLayout.() -> Unit) {
+        val card = vertical(a)
+        card.setPadding(u(26), u(16), u(26), u(16))
+        val head = horizontal(a)
+        head.addView(text(a, title, 22f, TEXT, MEDIUM), LinearLayout.LayoutParams(0, WRAP, 1f).apply { rightMargin = u(12) })
+        val hideBtn = FrameLayout(a).apply {
+            addView(Icon(a, Icon.Kind.KEYBOARD_HIDE, TEXT), flp(u(24), u(24), Gravity.CENTER))
+            background = pressable(round(SURFACE3, 14f, STROKE, 1f), 14f)
+            contentDescription = tr("Masquer le clavier")
+            isClickable = true
+            visibility = View.INVISIBLE
+            setOnClickListener { a.hideKeyboard() }
+        }
+        head.addView(hideBtn, LinearLayout.LayoutParams(u(52), u(52)))
+        card.addView(head)
+        card.body()
+        val box = FrameLayout(a).apply {
+            background = round(SURFACE2, 28f)
+            clipToOutline = true
+            outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) =
+                    outline.setRoundRect(0, 0, view.width, view.height, uf(28f))
+            }
+            addView(ScrollView(a).apply {
+                isVerticalScrollBarEnabled = true
+                overScrollMode = View.OVER_SCROLL_NEVER
+                addView(card)
+            }, flp(MATCH, WRAP))
+        }
+        a.showOverlay(box, 680, dismissOnScrim = false, spareMachineBar = true)
+        (box.layoutParams as FrameLayout.LayoutParams).apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            topMargin = u(14)
+        }
+        box.requestLayout()
+        // La carte est placée une fois pour toutes en haut ; au milieu de l'écran, elle n'est que décalée.
+        // Un glissement ne refait donc aucune mise en page, et il part dès qu'on sait où va le clavier
+        // (le champ touché, le clavier masqué) sans attendre qu'Android annonce son arrivée ou son départ.
+        var up = true
+        fun settle() {
+            val target = if (up) 0f else ((a.overlayRoom() - box.height) / 2f - u(14)).coerceAtLeast(0f)
+            box.animate().translationY(target).setDuration(CARD_SLIDE_MS).setInterpolator(cardSlide).start()
+        }
+        fun move(toTop: Boolean) {
+            if (up == toTop) return
+            up = toTop
+            settle()
+        }
+        box.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            if (!up && bottom - top != oldBottom - oldTop) settle()
+        }
+        input.setOnFocusChangeListener { _, has -> if (has) move(true) }
+        a.overlayOnKeyboard = {
+            hideBtn.visibility = if (it) View.VISIBLE else View.INVISIBLE
+            move(it)
+        }
+        a.showKeyboard(input) { if (a.keyboardHeight > 0) hideBtn.visibility = View.VISIBLE }
+    }
+
+    /** Durée du glissement d'une carte de saisie entre le haut de l'écran et son milieu. */
+    const val CARD_SLIDE_MS = 180L
+    private val cardSlide = DecelerateInterpolator()
+
+    private fun yIn(ancestor: View, v: View): Int {
+        var y = v.top
+        var p = v.parent as? View
+        while (p != null && p !== ancestor) {
+            y += p.top
+            p = p.parent as? View
+        }
+        return y
+    }
+
+    /**
+     * Fait défiler [scroll] pour garder [keepTop] et le bas de [revealBottom] visibles au-dessus du clavier
+     * sans jamais tronquer [keepTop].
+     */
+    fun revealInScroll(scroll: ScrollView, keepTop: View, revealBottom: View, bottomPad: Int = 8) {
+        fun apply() {
+            if (!scroll.isAttachedToWindow) return
+            val content = scroll.getChildAt(0) ?: return
+            val top = yIn(content, keepTop)
+            val targetBottom = yIn(content, revealBottom) + revealBottom.height + u(bottomPad)
+            val maxScroll = (top - u(8)).coerceAtLeast(0)
+            scroll.scrollTo(0, minOf((targetBottom - scroll.height).coerceAtLeast(0), maxScroll))
+        }
+        val vto = scroll.viewTreeObserver
+        if (scroll.isAttachedToWindow && scroll.rootView.isLayoutRequested && vto.isAlive) {
+            val l = object : ViewTreeObserver.OnGlobalLayoutListener, View.OnAttachStateChangeListener {
+                override fun onGlobalLayout() {
+                    cleanup()
+                    scroll.post { apply() }
+                }
+                override fun onViewAttachedToWindow(v: View) {}
+                override fun onViewDetachedFromWindow(v: View) = cleanup()
+                private fun cleanup() {
+                    if (vto.isAlive) vto.removeOnGlobalLayoutListener(this)
+                    scroll.removeOnAttachStateChangeListener(this)
+                }
+            }
+            vto.addOnGlobalLayoutListener(l)
+            scroll.addOnAttachStateChangeListener(l)
+        } else {
+            scroll.post { apply() }
+        }
+    }
+
     /** Pastille d'information (icône + texte). */
     fun chip(c: Context, label: String, icon: Icon.Kind? = null, color: Int = TEXT2, bg: Int = SURFACE2, size: Float = 16f): LinearLayout {
         val row = horizontal(c, Gravity.CENTER_VERTICAL)
@@ -367,6 +517,35 @@ object Ui {
         t.isClickable = true
         t.setOnClickListener { onClick() }
         return t
+    }
+
+    /**
+     * Ligne de réglage à interrupteur : [label] à gauche, à droite une piste arrondie dont la pastille
+     * est à gauche (non) ou à droite (oui). Toute la ligne se touche.
+     */
+    fun switchRow(c: Context, label: String, initial: Boolean, onChange: (Boolean) -> Unit): LinearLayout {
+        val row = horizontal(c)
+        row.addView(text(c, label, 18f, TEXT), LinearLayout.LayoutParams(0, WRAP, 1f))
+        var state = initial
+        val sw = FrameLayout(c)
+        val knob = View(c)
+        sw.addView(knob, flp(u(34), u(34), Gravity.CENTER_VERTICAL))
+        sw.setPadding(u(5), 0, u(5), 0)
+        fun paint() {
+            sw.background = round(if (state) ACCENT else SURFACE3, 22f, if (state) ACCENT else STROKE, 1f)
+            knob.background = round(if (state) ON_ACCENT else TEXT2, 17f)
+            (knob.layoutParams as FrameLayout.LayoutParams).gravity =
+                Gravity.CENTER_VERTICAL or (if (state) Gravity.END else Gravity.START)
+            knob.requestLayout()
+            sw.contentDescription = if (state) tr("Oui") else tr("Non")
+        }
+        paint()
+        val flip = { _: View -> state = !state; paint(); onChange(state) }
+        sw.setOnClickListener(flip)
+        row.setOnClickListener(flip)
+        row.minimumHeight = u(52)
+        row.addView(sw, LinearLayout.LayoutParams(u(76), u(44)).apply { leftMargin = u(14) })
+        return row
     }
 
     fun card(c: Context, radius: Float = 24f, color: Int = SURFACE): LinearLayout = vertical(c).apply {
@@ -394,17 +573,34 @@ object Ui {
         else -> COOL
     }
 
+    /** Indice d'une couleur de repli stable pour une vignette de recette sans photo. */
+    fun placeholderBucket(seed: String): Int = (seed.hashCode() and 0x7FFFFFFF) % placeholderPairs.size
+
+    fun placeholderPair(bucket: Int): IntArray = placeholderPairs[bucket]
+
     /** Couleur de repli stable pour une vignette de recette sans photo. */
-    fun placeholderColors(seed: String): IntArray {
-        val i = Math.abs(seed.hashCode()) % placeholders.size
-        val a = placeholders[i]
-        val b = placeholders[(i + 3) % placeholders.size]
-        return intArrayOf(a, b)
-    }
+    fun placeholderColors(seed: String): IntArray = placeholderPairs[placeholderBucket(seed)]
 
     fun initials(title: String): String {
-        val words = title.split(' ', '-', '\'').filter { it.length > 2 }
-        return words.take(2).joinToString("") { it.first().uppercaseChar().toString() }.ifEmpty { title.take(1).uppercase() }
+        var c1 = '\u0000'
+        var c2 = '\u0000'
+        var i = 0
+        val n = title.length
+        while (i < n) {
+            while (i < n && (title[i] == ' ' || title[i] == '-' || title[i] == '\'')) i++
+            val start = i
+            while (i < n && title[i] != ' ' && title[i] != '-' && title[i] != '\'') i++
+            if (i - start > 2) {
+                val ch = title[start].uppercaseChar()
+                if (c1 == '\u0000') c1 = ch else { c2 = ch; break }
+            }
+        }
+        return when {
+            c2 != '\u0000' -> "$c1$c2"
+            c1 != '\u0000' -> c1.toString()
+            n > 0 -> title[0].uppercaseChar().toString()
+            else -> ""
+        }
     }
 
     /** Fond de l'appli : dégradé selon le thème. */

@@ -148,14 +148,48 @@ data class PhoneWire(
     val lastSeenAt: Long = 0,
     /** « qr » ou « code ». */
     val method: String = "",
+    /**
+     * Nom donné à ce téléphone (sur le robot ou par POST /api/phones/me), sans le « Téléphone N » par
+     * défaut : vide quand il n'en a pas, et chez un robot plus ancien. [name] reste le nom à afficher ;
+     * celui-ci sert à préremplir le champ « Renommer » du téléphone.
+     */
+    val label: String = "",
+    /** Ce téléphone est en lecture seule (voir [Phone.readOnly]) : écrit seulement quand il l'est. */
+    val readOnly: Boolean = false,
 ) {
-    fun toMap(): Map<String, Any?> = linkedMapOf("id" to id, "number" to number, "name" to name,
-        "pairedAt" to pairedAt, "lastSeenAt" to lastSeenAt, "method" to method)
+    /** [label] et [readOnly] ne sont écrits que s'ils existent : un téléphone sans nom garde exactement son JSON d'avant. */
+    fun toMap(): Map<String, Any?> = linkedMapOf<String, Any?>("id" to id, "number" to number, "name" to name,
+        "pairedAt" to pairedAt, "lastSeenAt" to lastSeenAt, "method" to method).apply {
+        if (label.isNotEmpty()) put("label", label)
+        if (readOnly) put("readOnly", true)
+    }
 
     companion object {
-        fun of(p: Phone) = PhoneWire(p.id, p.number, p.name, p.pairedAt, p.lastSeenAt, p.method)
+        fun of(p: Phone) = PhoneWire(p.id, p.number, p.name, p.pairedAt, p.lastSeenAt, p.method, p.label, p.readOnly)
         fun fromMap(m: Map<String, Any?>) = PhoneWire(W.s(m, "id"), W.i(m, "number"), W.s(m, "name"),
-            W.l(m, "pairedAt"), W.l(m, "lastSeenAt"), W.s(m, "method"))
+            W.l(m, "pairedAt"), W.l(m, "lastSeenAt"), W.s(m, "method"), W.s(m, "label"), m["readOnly"] == true)
+    }
+}
+
+/**
+ * Corps de POST /api/phones/me : le nom que ce téléphone se donne. Le robot le nettoie comme son propre
+ * champ ([PairingManager.cleanLabel] : une ligne, [PairingManager.MAX_LABEL] caractères) ; vide : il
+ * reprend « Téléphone N ».
+ */
+data class RenamePhoneRequest(val name: String = "") {
+    fun toMap(): Map<String, Any?> = linkedMapOf("name" to name)
+
+    companion object {
+        /** Texte reçu au plus long (avant nettoyage) : au-delà, la requête est refusée plutôt que tronquée en silence. */
+        const val MAX_RAW = 200
+
+        /** Lecture stricte : un seul champ, « name », une chaîne d'au plus [MAX_RAW] caractères ; sinon IllegalArgumentException. */
+        fun fromMap(m: Map<String, Any?>): RenamePhoneRequest {
+            if (m.keys != setOf("name")) throw IllegalArgumentException("name")
+            val n = m["name"] as? String ?: throw IllegalArgumentException("name")
+            if (n.length > MAX_RAW) throw IllegalArgumentException("name")
+            return RenamePhoneRequest(n)
+        }
     }
 }
 
@@ -208,6 +242,17 @@ data class MachineWire(
      * sur le Connect. À lire avec [hasSample]. Écrit seulement quand il est faux : absent = vrai.
      */
     val tempKnown: Boolean = true,
+    /**
+     * [weightG] est une vraie pesée : base prête, balance en état normal, moteur et Turbo arrêtés (lame en
+     * marche, la base du Connect envoie 0). Écrit seulement quand il est faux : absent = vrai (ou robot plus ancien).
+     */
+    val weightValid: Boolean = true,
+    /**
+     * Toque demande à la base de chauffer en ce moment (le programme en cours a une température). À préférer
+     * à [heaterOn], que la base dit aussi pendant des programmes qui ne chauffent pas. Toujours écrit
+     * (absent : robot plus ancien, se fier à [heaterOn]).
+     */
+    val heating: Boolean = false,
 ) {
     fun toMap(): Map<String, Any?> = linkedMapOf<String, Any?>("link" to link, "linkLabel" to linkLabel, "ready" to ready,
         "faultCode" to faultCode, "faultMessage" to faultMessage, "hasSample" to hasSample, "tempC" to tempC,
@@ -215,6 +260,8 @@ data class MachineWire(
         "lidOpen" to lidOpen, "bowlDetected" to bowlDetected, "bowlRemoved" to bowlRemoved,
         "motorOn" to motorOn, "heaterOn" to heaterOn, "turbo" to turbo).apply {
         if (!tempKnown) put("tempKnown", false)
+        if (!weightValid) put("weightValid", false)
+        put("heating", heating)
     }
 
     companion object {
@@ -222,7 +269,7 @@ data class MachineWire(
             W.b(m, "ready"), W.s(m, "faultCode"), W.s(m, "faultMessage"), W.b(m, "hasSample"), W.i(m, "tempC"),
             W.i(m, "targetTempC"), W.b(m, "hot"), W.i(m, "weightG"), W.b(m, "scaleStable"), W.b(m, "lidOpen"),
             W.b(m, "bowlDetected"), W.b(m, "bowlRemoved"), W.b(m, "motorOn"), W.b(m, "heaterOn"), W.b(m, "turbo"),
-            m["tempKnown"] as? Boolean ?: true)
+            m["tempKnown"] as? Boolean ?: true, m["weightValid"] as? Boolean ?: true, W.b(m, "heating"))
     }
 }
 
@@ -299,10 +346,12 @@ data class JobWire(
 
 /** Une commande permise ou non, avec la raison affichable d'un refus. */
 data class Permission(val allowed: Boolean, val code: String = "", val reason: String = "") {
-    fun toMap(): Map<String, Any?> = linkedMapOf("allowed" to allowed, "code" to code, "reason" to reason)
+    fun toMap(): Map<String, Any?> = if (allowed && code.isEmpty() && reason.isEmpty()) YES_MAP
+    else linkedMapOf("allowed" to allowed, "code" to code, "reason" to reason)
 
     companion object {
         val YES = Permission(true)
+        private val YES_MAP: Map<String, Any?> = linkedMapOf("allowed" to true, "code" to "", "reason" to "")
         fun no(code: String, reason: String) = Permission(false, code, reason)
         fun fromMap(m: Map<String, Any?>) = Permission(W.b(m, "allowed"), W.s(m, "code"), W.s(m, "reason"))
     }
@@ -346,18 +395,32 @@ data class Permissions(
      * Absent chez un robot plus ancien : refusé (le téléphone ne propose rien).
      */
     val setAppearance: Permission = Permission(false),
+    /**
+     * Ce téléphone peut changer son propre nom (POST /api/phones/me) : permis par un robot qui le sait
+     * faire. Absent chez un robot plus ancien : refusé (le téléphone ne propose pas « Renommer »).
+     */
+    val renamePhone: Permission = Permission(false),
+    /**
+     * Donner à une étape d'une recette reçue (Mealie aujourd'hui, [RecipeDetail.ownSettings]) son réglage du
+     * robot, sans copier la recette (GET /api/recipes/{id}/steps, POST et DELETE /api/recipes/{id}/steps/{rang}) :
+     * permis par un robot qui le sait faire ; le réglage reste à vérifier sur le robot. Absent chez un robot
+     * plus ancien : refusé (le téléphone ne propose rien de nouveau).
+     */
+    val ownSettings: Permission = Permission(false),
 ) {
     fun toMap(): Map<String, Any?> = linkedMapOf("pause" to pause.toMap(), "resume" to resume.toMap(),
         "stop" to stop.toMap(), "adjust" to adjust.toMap(), "tare" to tare.toMap(),
         "sendRecipe" to sendRecipe.toMap(), "removeWaiting" to removeWaiting.toMap(), "start" to start.toMap(),
         "clear" to clear.toMap(), "favorite" to favorite.toMap(), "stopRecipe" to stopRecipe.toMap(),
-        "editRecipes" to editRecipes.toMap(), "setAppearance" to setAppearance.toMap())
+        "editRecipes" to editRecipes.toMap(), "setAppearance" to setAppearance.toMap(), "renamePhone" to renamePhone.toMap(),
+        "ownSettings" to ownSettings.toMap())
 
     companion object {
         fun fromMap(m: Map<String, Any?>): Permissions {
             fun p(k: String) = W.o(m, k)?.let { Permission.fromMap(it) } ?: Permission(false)
             return Permissions(p("pause"), p("resume"), p("stop"), p("adjust"), p("tare"), p("sendRecipe"), p("removeWaiting"),
-                p("start"), p("clear"), p("favorite"), p("stopRecipe"), p("editRecipes"), p("setAppearance"))
+                p("start"), p("clear"), p("favorite"), p("stopRecipe"), p("editRecipes"), p("setAppearance"),
+                p("renamePhone"), p("ownSettings"))
         }
     }
 }
@@ -399,14 +462,29 @@ data class StepWire(
     val needsReview: Boolean = false,
     /** Contenu chaud et vitesse ≥ 4 : la confirmation se fait sur le robot. */
     val hotBlendOnRobot: Boolean = false,
+    /**
+     * Fiche d'une recette qui prend les réglages du propriétaire ([RecipeDetail.ownSettings]) : l'empreinte du
+     * texte de l'étape dans la recette de la source ([app.toque.core.recipes.OwnStepSettings.keys]), à renvoyer
+     * avec un réglage pour dire de quelle étape il s'agit. Vide ailleurs (et chez un robot plus ancien).
+     */
+    val key: String = "",
+    /**
+     * L'étape porte le réglage du propriétaire : « robot » (tapé sur le robot) ou « phone » (venu d'un
+     * téléphone, à vérifier sur le robot : [needsReview]) ; vide sinon.
+     */
+    val own: String = "",
 ) {
+    /** [key] et [own] ne sont écrits que s'ils existent : les autres étapes gardent exactement leur JSON. */
     fun toMap(): Map<String, Any?> = linkedMapOf("index" to index, "text" to text, "machine" to machine?.toMap(),
-        "weigh" to weigh?.toMap(), "needsReview" to needsReview, "hotBlendOnRobot" to hotBlendOnRobot)
+        "weigh" to weigh?.toMap(), "needsReview" to needsReview, "hotBlendOnRobot" to hotBlendOnRobot).apply {
+        if (key.isNotEmpty()) put("key", key)
+        if (own.isNotEmpty()) put("own", own)
+    }
 
     companion object {
         fun fromMap(m: Map<String, Any?>) = StepWire(W.i(m, "index"), W.s(m, "text"),
             W.o(m, "machine")?.let { MachineStepWire.fromMap(it) }, W.o(m, "weigh")?.let { WeighWire.fromMap(it) },
-            W.b(m, "needsReview"), W.b(m, "hotBlendOnRobot"))
+            W.b(m, "needsReview"), W.b(m, "hotBlendOnRobot"), W.s(m, "key"), W.s(m, "own"))
     }
 }
 
@@ -559,11 +637,15 @@ data class LimitsWire(
     /** Chauffe lame à l'arrêt (vitesse 0) possible sur ce robot (pas le Smart) ; absent chez un robot plus ancien : oui. */
     val heatNoStir: Boolean = true,
 ) {
-    fun toMap(): Map<String, Any?> = linkedMapOf("temperaturesC" to temperaturesC, "maxSpeed" to maxSpeed,
-        "maxSpeedHeated" to maxSpeedHeated, "maxSpeedReverse" to maxSpeedReverse, "whiskMaxSpeed" to whiskMaxSpeed,
-        "maxTempNoStirC" to maxTempNoStirC, "hotC" to hotC, "minMs" to minMs, "maxMs" to maxMs,
-        "maxMsHighSpeed" to maxMsHighSpeed, "pauseMaxMs" to pauseMaxMs, "manualMinMs" to manualMinMs,
-        "highSpeedAbove" to highSpeedAbove, "heatNoStir" to heatNoStir)
+    private val cachedMap: Map<String, Any?> by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        linkedMapOf("temperaturesC" to temperaturesC, "maxSpeed" to maxSpeed,
+            "maxSpeedHeated" to maxSpeedHeated, "maxSpeedReverse" to maxSpeedReverse, "whiskMaxSpeed" to whiskMaxSpeed,
+            "maxTempNoStirC" to maxTempNoStirC, "hotC" to hotC, "minMs" to minMs, "maxMs" to maxMs,
+            "maxMsHighSpeed" to maxMsHighSpeed, "pauseMaxMs" to pauseMaxMs, "manualMinMs" to manualMinMs,
+            "highSpeedAbove" to highSpeedAbove, "heatNoStir" to heatNoStir)
+    }
+
+    fun toMap(): Map<String, Any?> = cachedMap
 
     /** Bornes de saisie d'une cuisson manuelle ; un champ absent ou nul (robot plus ancien) garde la valeur de Toque. */
     fun manual(): ManualLimits {
@@ -604,11 +686,19 @@ data class StateWire(
     /** Numéro de la dernière ligne du journal (voir GET /api/journal?after=). */
     val journalSeq: Long = 0,
     val limits: LimitsWire = LimitsWire(),
+    /**
+     * Recette guidée quittée sur le robot sans être finie ni arrêtée (« Reprendre » sur son accueil), même
+     * forme que [session] ; aussi après un redémarrage de Toque. null quand il n'y en a pas, et pendant
+     * une session (elle la remplace). Écrit seulement quand elle existe.
+     */
+    val suspendedSession: SessionWire? = null,
 ) {
-    fun toMap(): Map<String, Any?> = linkedMapOf("protocol" to protocol, "revision" to revision,
+    fun toMap(): Map<String, Any?> = linkedMapOf<String, Any?>("protocol" to protocol, "revision" to revision,
         "serverTime" to serverTime, "robot" to robot.toMap(), "me" to me.toMap(), "machine" to machine.toMap(),
         "job" to job?.toMap(), "can" to can.toMap(), "session" to session?.toMap(), "waiting" to waiting?.toMap(),
-        "last" to last?.toMap(), "journalSeq" to journalSeq, "limits" to limits.toMap())
+        "last" to last?.toMap(), "journalSeq" to journalSeq, "limits" to limits.toMap()).apply {
+        if (suspendedSession != null) put("suspendedSession", suspendedSession.toMap())
+    }
 
     companion object {
         fun fromMap(m: Map<String, Any?>) = StateWire(W.i(m, "protocol"), W.l(m, "revision"), W.l(m, "serverTime"),
@@ -616,7 +706,8 @@ data class StateWire(
             MachineWire.fromMap(W.o(m, "machine") ?: emptyMap()), W.o(m, "job")?.let { JobWire.fromMap(it) },
             Permissions.fromMap(W.o(m, "can") ?: emptyMap()), W.o(m, "session")?.let { SessionWire.fromMap(it) },
             W.o(m, "waiting")?.let { WaitingWire.fromMap(it) }, W.o(m, "last")?.let { ActivityWire.fromMap(it) },
-            W.l(m, "journalSeq"), LimitsWire.fromMap(W.o(m, "limits") ?: emptyMap()))
+            W.l(m, "journalSeq"), LimitsWire.fromMap(W.o(m, "limits") ?: emptyMap()),
+            W.o(m, "suspendedSession")?.let { SessionWire.fromMap(it) })
     }
 }
 
@@ -729,23 +820,48 @@ data class RecipeDetail(
      * interface) : le téléphone recalcule les quantités comme lui. Vide chez un robot plus ancien.
      */
     val language: String = "",
+    /**
+     * D'où vient la recette : [SOURCE_IMPORTED] (Lidl), [SOURCE_USER], [SOURCE_COMMUNITY] ou [SOURCE_MEALIE]
+     * (le nom de [app.toque.core.recipes.RecipeSource] en minuscules). Vide chez un robot plus ancien : le
+     * téléphone s'en tient alors à [user]. Une valeur inconnue (robot plus récent) se lit comme une recette Lidl.
+     */
+    val source: String = "",
+    /**
+     * Le propriétaire peut donner à une étape son réglage du robot depuis le téléphone, sans copier la recette
+     * (une recette Mealie, chez un robot qui le sait faire) : chaque étape porte alors sa [StepWire.key] et, s'il
+     * y en a un, l'auteur de ce réglage ([StepWire.own]). Écrit seulement s'il est vrai : faux chez un robot plus ancien.
+     */
+    val ownSettings: Boolean = false,
 ) {
+    /** Recette d'un serveur Mealie, en lecture seule sur le robot (« Depuis Mealie »). */
+    val mealie: Boolean get() = source == SOURCE_MEALIE
+    /** Recette de la communauté toqueapp.org. */
+    val community: Boolean get() = source == SOURCE_COMMUNITY
+
     fun toMap(): Map<String, Any?> = linkedMapOf("id" to id, "title" to title, "category" to category,
         "servings" to servings, "servingUnit" to servingUnit, "prepMinutes" to prepMinutes,
         "totalMinutes" to totalMinutes, "difficulty" to difficulty, "favorite" to favorite, "user" to user,
         "author" to author, "rating" to rating, "ratingCount" to ratingCount, "hasImage" to hasImage,
         "ingredients" to ingredients.map { it.toMap() }, "steps" to steps.map { it.toMap() },
         "baseServings" to baseServings, "minServings" to minServings, "maxServings" to maxServings,
-        "totalGrams" to totalGrams, "bowlTooFull" to bowlTooFull, "language" to language)
+        "totalGrams" to totalGrams, "bowlTooFull" to bowlTooFull, "language" to language).apply {
+        if (source.isNotEmpty()) put("source", source)
+        if (ownSettings) put("ownSettings", true)
+    }
 
     companion object {
+        const val SOURCE_IMPORTED = "imported"
+        const val SOURCE_USER = "user"
+        const val SOURCE_COMMUNITY = "community"
+        const val SOURCE_MEALIE = "mealie"
+
         fun fromMap(m: Map<String, Any?>) = RecipeDetail(W.s(m, "id"), W.s(m, "title"), W.s(m, "category"),
             W.i(m, "servings"), W.s(m, "servingUnit"), W.i(m, "prepMinutes"), W.i(m, "totalMinutes"),
             W.i(m, "difficulty").coerceAtLeast(1), W.b(m, "favorite"), W.b(m, "user"), W.s(m, "author"),
             W.d(m, "rating"), W.i(m, "ratingCount"), W.b(m, "hasImage"),
             W.objs(m, "ingredients").map { IngredientGroupWire.fromMap(it) }, W.objs(m, "steps").map { StepWire.fromMap(it) },
             W.i(m, "baseServings"), W.i(m, "minServings"), W.i(m, "maxServings"), W.i(m, "totalGrams"), W.b(m, "bowlTooFull"),
-            W.s(m, "language"))
+            W.s(m, "language"), W.s(m, "source"), m["ownSettings"] == true)
     }
 }
 

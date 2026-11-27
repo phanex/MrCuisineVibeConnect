@@ -9,6 +9,7 @@ import android.graphics.RectF
 import android.graphics.drawable.InsetDrawable
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
@@ -16,6 +17,7 @@ import android.widget.LinearLayout
 import app.toque.Prefs
 import app.toque.core.i18n.tr
 import app.toque.core.machine.JobState
+import app.toque.core.machine.Limits
 import app.toque.core.machine.LinkState
 import app.toque.core.machine.MachineEvent
 import app.toque.core.machine.Snapshot
@@ -32,6 +34,8 @@ abstract class Screen(val a: MainActivity) {
     open fun onHide() {}
     open fun onSnapshot(s: Snapshot) {}
     open fun onEvent(e: MachineEvent) {}
+    /** Le clavier virtuel s'ouvre ou se referme. */
+    open fun onKeyboard(visible: Boolean) {}
     /** L'écran joue lui-même le son de fin de ce programme (fin de recette) : pas de bip habituel. */
     open fun ownsFinishSound(e: MachineEvent): Boolean = false
     open fun onKnob(delta: Int): Boolean = false
@@ -72,6 +76,20 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
     private val bowl = barChip(tr("Bol retiré"), Icon.Kind.POT, Ui.WARN, 0x33FFC14D)
     private val link = barChip("", Icon.Kind.LINK, Ui.TEXT2)
     private val clock = barChip("", Icon.Kind.CLOCK, Ui.TEXT)
+    private val hideKeyboard = barChip(tr("Masquer le clavier"), Icon.Kind.KEYBOARD_HIDE, Ui.ACCENT_INK, Ui.ACCENT_DIM).apply {
+        val r = ITEM / 2f
+        val vInset = Ui.u((TOUCH - ITEM) / 2)
+        background = InsetDrawable(Ui.pressable(Ui.round(Ui.ACCENT_DIM, r, Ui.ACCENT_INK, 1.5f), r), 0, vInset, 0, vInset)
+        setPadding(Ui.u(16), 0, Ui.u(18), 0)
+        contentDescription = tr("Masquer le clavier")
+        isClickable = true
+        visibility = View.GONE
+        setOnClickListener { a.hideKeyboard() }
+    }
+    private val hideKeyboardLabel = Ui.chipText(hideKeyboard)
+    private var keyboardOpen = false
+    private var barCrowded = false
+    private var linkAlert = false
     private val home = Icon(a, Icon.Kind.HOME, Ui.TEXT)
     /** Minuteur de cuisine : bouton rond au repos, pastille orange (temps restant, nombre) quand il en tourne. */
     private val timerButton = Icon(a, Icon.Kind.TIMER, Ui.TEXT)
@@ -128,6 +146,7 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
         addView(temp, chipParams(10))
         addView(link, chipParams(10))
         addView(clock, chipParams(8))
+        addView(hideKeyboard, LayoutParams(Ui.WRAP, Ui.u(TOUCH)).apply { rightMargin = Ui.u(8) })
         roundButton(home) { a.home() }
         addView(home, LayoutParams(Ui.u(TOUCH), Ui.u(TOUCH)))
         lid.visibility = View.GONE
@@ -201,6 +220,7 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
         val first = running.firstOrNull()
         timerButton.visibility = if (first == null) View.VISIBLE else View.GONE
         timerChip.visibility = if (first == null) View.GONE else View.VISIBLE
+        refreshKeyboardBar()
         if (first == null) return
         val text = Ui.clock(first.remaining(t.now()))
         if (timerText.text.toString() != text) timerText.text = text
@@ -221,22 +241,51 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
         home.visibility = if (canGoBack) View.VISIBLE else View.GONE
     }
 
+    /** Affiche le bouton « Masquer le clavier » et libère la place occupée par la liaison et l'heure. */
+    fun setKeyboardVisible(visible: Boolean) {
+        if (keyboardOpen == visible) return
+        keyboardOpen = visible
+        refreshKeyboardBar()
+    }
+
+    private fun refreshKeyboardBar() {
+        hideKeyboard.visibility = if (keyboardOpen) View.VISIBLE else View.GONE
+        clock.visibility = if (keyboardOpen) View.GONE else View.VISIBLE
+        link.visibility = if (!keyboardOpen || linkAlert) View.VISIBLE else View.GONE
+        if (!keyboardOpen) return
+        // Plusieurs alertes ouvertes en même temps : la pastille garde sa seule icône pour ne jamais pousser Accueil hors de 1024 px.
+        val alerts = (if (lid.visibility == View.VISIBLE) 1 else 0) +
+            (if (bowl.visibility == View.VISIBLE) 1 else 0) +
+            (if (timerChip.visibility == View.VISIBLE) 1 else 0)
+        val crowded = linkAlert || alerts >= 2
+        if (crowded == barCrowded) return
+        barCrowded = crowded
+        hideKeyboardLabel.visibility = if (crowded) View.GONE else View.VISIBLE
+        hideKeyboard.setPadding(Ui.u(if (crowded) 14 else 16), 0, Ui.u(if (crowded) 14 else 18), 0)
+        (hideKeyboard.getChildAt(0).layoutParams as LayoutParams).rightMargin = Ui.u(if (crowded) 0 else 6)
+    }
+
     fun update(s: Snapshot) {
-        lid.visibility = if (s.hasSample && s.lidOpen) View.VISIBLE else View.GONE
+        val lidVis = if (s.hasSample && s.lidOpen) View.VISIBLE else View.GONE
+        if (lid.visibility != lidVis) lid.visibility = lidVis
         // Bol retiré : pour la base le couvercle est « ouvert », mais ce n'est pas lui qu'il faut fermer.
-        Ui.chipText(lid).text = if (s.bowlRemoved) tr("Bol retiré") else tr("Couvercle ouvert")
+        Ui.setText(Ui.chipText(lid), if (s.bowlRemoved) tr("Bol retiré") else tr("Couvercle ouvert"))
         (lid.getChildAt(0) as Icon).set(if (s.bowlRemoved) Icon.Kind.POT else Icon.Kind.LID)
         // Capteur du bol seul (couvercle vu fermé) : seulement si la détection du bol est exigée, la personne
         // a alors vérifié que le capteur est fiable (sens réglé). Jamais deux fois « Bol retiré ».
-        bowl.visibility = if (s.hasSample && a.prefs.requireBowl && !s.bowlDetected && !s.bowlRemoved) View.VISIBLE else View.GONE
+        val bowlVis = if (s.hasSample && a.prefs.requireBowl && !s.bowlDetected && !s.bowlRemoved) View.VISIBLE else View.GONE
+        if (bowl.visibility != bowlVis) bowl.visibility = bowlVis
         if (s.hasSample) {
-            temp.visibility = View.VISIBLE
-            Ui.chipText(temp).text = "${s.actualTempC} °C"
+            if (temp.visibility != View.VISIBLE) temp.visibility = View.VISIBLE
+            val tv = Ui.chipText(temp)
+            Ui.setText(tv, s.bowlTempText(app.toque.core.robot.RobotProfiles.active.capabilities))
             val col = if (s.actualTempC >= 40) Ui.tempColor(s.actualTempC) else Ui.TEXT2
-            Ui.chipText(temp).setTextColor(col)
+            if (tv.currentTextColor != col) tv.setTextColor(col)
             tempIcon.color = col
-        } else temp.visibility = View.GONE
+        } else if (temp.visibility != View.GONE) temp.visibility = View.GONE
         showHot(s.hot)
+        linkAlert = s.hasFault || s.link == LinkState.LOST
+        refreshKeyboardBar()
         val mode = a.prefs.mode
         val simulated = mode != Prefs.Mode.HARDWARE
         val (label, color) = when {
@@ -253,8 +302,9 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
             s.link == LinkState.LOST -> tr("Liaison perdue") to Ui.DANGER
             else -> tr("Base absente") to Ui.TEXT3
         }
-        Ui.chipText(link).text = label
-        Ui.chipText(link).setTextColor(color)
+        val ltv = Ui.chipText(link)
+        Ui.setText(ltv, label)
+        if (ltv.currentTextColor != color) ltv.setTextColor(color)
         (link.getChildAt(0) as Icon).color = color
     }
 
@@ -275,10 +325,17 @@ class TopBar(private val a: MainActivity) : LinearLayout(a) {
 class ProgressLine(c: Context) : View(c) {
     var progress = 0f
         set(v) {
-            field = v.coerceIn(0f, 1f)
+            val c = v.coerceIn(0f, 1f)
+            if (c == field) return
+            field = c
             invalidate()
         }
     var color = Ui.ACCENT
+        set(v) {
+            if (v == field) return
+            field = v
+            invalidate()
+        }
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val r = RectF()
 
@@ -317,6 +374,19 @@ class MachineBar(private val a: MainActivity) : FrameLayout(a) {
     private val okBtn: LinearLayout
     private val faultText = Ui.text(a, "", 19f, Ui.TEXT, Ui.MEDIUM)
     private var last: Snapshot? = null
+    /** Fin de l'appui Turbo en cours (horloge [SystemClock.uptimeMillis]), 0 hors Turbo. */
+    private var turboEndsAt = 0L
+    /** Secondes affichées pendant le Turbo (-1 : rien) : le texte ne change qu'avec elles, pas à chaque image. */
+    private var turboShownS = -1
+    /** Entre deux états reçus de la base, le décompte du Turbo avance à chaque image : sa barre se vide sans à-coups. */
+    private val turboFrame = object : Runnable {
+        override fun run() {
+            if (turboEndsAt == 0L) return
+            val left = (turboEndsAt - SystemClock.uptimeMillis()).coerceAtLeast(0)
+            showTurbo(left)
+            if (left > 0) postOnAnimation(this)
+        }
+    }
 
     init {
         // Transparente autour de la carte : le dégradé du fond passe derrière, comme pour la barre du haut.
@@ -324,6 +394,8 @@ class MachineBar(private val a: MainActivity) : FrameLayout(a) {
         // Programme
         jobRow.background = Ui.round(Ui.SURFACE, RADIUS, Ui.STROKE, 1f)
         jobRow.setPadding(Ui.u(TEXT_INSET), Ui.u(INSET), Ui.u(INSET), Ui.u(INSET))
+        // La hauteur de ses boutons, même quand aucun n'est affiché (Turbo).
+        jobRow.minimumHeight = Ui.u(BUTTON + 2 * INSET)
         val left = Ui.vertical(a)
         left.addView(label)
         left.addView(state, Ui.lp(t = 4))
@@ -381,21 +453,27 @@ class MachineBar(private val a: MainActivity) : FrameLayout(a) {
         visibility = if (shownFor(s)) View.VISIBLE else View.GONE
         faultRow.visibility = if (s.hasFault) View.VISIBLE else View.GONE
         jobRow.visibility = if (!s.hasFault && showJob) View.VISIBLE else View.GONE
+        if (s.hasFault || !s.turboActive) stopTurboCountdown()
         if (s.hasFault) {
-            faultText.text = s.faultMessage
+            Ui.setText(faultText, s.faultMessage)
             return
         }
         if (!showJob) return
         if (s.turboActive) {
-            label.text = "Turbo"
-            state.text = tr("Relâchez pour arrêter")
-            time.text = "●"
-            progress.progress = 0f
+            Ui.setText(label, "Turbo")
+            Ui.setText(state, tr("Relâchez pour arrêter"))
+            state.setTextColor(Ui.TEXT2)
+            progress.color = Ui.WARN
+            // Le temps qu'il reste à l'appui (3 s au plus), et la barre qui se vide avec lui.
+            turboEndsAt = SystemClock.uptimeMillis() + s.turboRemainingMs
+            showTurbo(s.turboRemainingMs)
+            removeCallbacks(turboFrame)
+            postOnAnimation(turboFrame)
             setButtons(running = false, ended = false, turbo = true)
             return
         }
-        label.text = s.jobLabel
-        state.text = when (st) {
+        Ui.setText(label, s.jobLabel)
+        Ui.setText(state, when (st) {
             JobState.STARTING -> if (s.elapsedMs == 0L) tr("Démarrage…") else tr("Reprise…")
             JobState.RUNNING -> if (s.waitingStop) tr("Changement de sens…") else if (s.phaseCount > 1) tr("En cours · phase %d/%d", s.phaseIndex + 1, s.phaseCount) else tr("En cours")
             JobState.STOPPING -> tr("Arrêt du moteur…")
@@ -407,31 +485,58 @@ class MachineBar(private val a: MainActivity) : FrameLayout(a) {
             JobState.FINISHED -> tr("Terminé")
             JobState.ABORTED -> s.endReason
             null -> ""
-        }
-        state.setTextColor(when (st) {
+        })
+        val stCol = when (st) {
             JobState.PAUSED -> Ui.WARN
             JobState.FINISHED -> Ui.OK
             JobState.ABORTED -> Ui.DANGER
             else -> Ui.TEXT2
-        })
-        time.text = if (st == JobState.FINISHED) "00:00" else Ui.clock(s.remainingMs)
+        }
+        if (state.currentTextColor != stCol) state.setTextColor(stCol)
+        Ui.setText(time, if (st == JobState.FINISHED) "00:00" else Ui.clock(s.remainingMs))
         progress.progress = if (s.totalMs > 0) s.elapsedMs.toFloat() / s.totalMs else 0f
         progress.color = if (s.jobTempLevel > 0) Ui.ACCENT else Ui.COOL
-        Ui.chipText(speedChip).text = when {
+        Ui.setText(Ui.chipText(speedChip), when {
             s.jobKind == "STEAM" -> tr("Vapeur")
             s.jobKind == "MANUAL" && s.jobSpeed == 0 -> tr("Sans mélange")
             else -> tr("Vitesse %d", s.jobSpeed)
-        }
-        tempChip.visibility = if (s.jobTempLevel > 0) View.VISIBLE else View.GONE
+        })
+        val tempVis = if (s.jobTempLevel > 0) View.VISIBLE else View.GONE
+        if (tempChip.visibility != tempVis) tempChip.visibility = tempVis
         // °C exacts du programme (40 °C et programmes du Smart compris), pas le niveau de Toque juste en dessous.
-        Ui.chipText(tempChip).text = "${s.jobTempC} °C"
-        dirChip.visibility = if (s.jobReverse && s.jobKind == "MANUAL") View.VISIBLE else View.GONE
+        Ui.setText(Ui.chipText(tempChip), "${s.jobTempC} °C")
+        val dirVis = if (s.jobReverse && s.jobKind == "MANUAL") View.VISIBLE else View.GONE
+        if (dirChip.visibility != dirVis) dirChip.visibility = dirVis
         val ended = st == JobState.FINISHED || st == JobState.ABORTED
         setButtons(running = st != JobState.PAUSED, ended = ended, turbo = false)
     }
 
+    /** Décompte du Turbo : les secondes entières qui restent (3, 2, 1) et la barre, pleine au départ, qui se vide. */
+    private fun showTurbo(leftMs: Long) {
+        val seconds = ((leftMs + 999) / 1000).toInt()
+        if (seconds != turboShownS) {
+            turboShownS = seconds
+            time.text = tr("%d s", seconds)
+        }
+        progress.progress = leftMs.toFloat() / Limits.MAX_MS_TURBO_PRESS
+    }
+
+    private fun stopTurboCountdown() {
+        turboShownS = -1
+        if (turboEndsAt == 0L) return
+        turboEndsAt = 0L
+        removeCallbacks(turboFrame)
+    }
+
+    override fun onDetachedFromWindow() {
+        stopTurboCountdown()
+        super.onDetachedFromWindow()
+    }
+
     private fun setButtons(running: Boolean, ended: Boolean, turbo: Boolean) {
         pauseBtn.visibility = if (ended || turbo) View.GONE else View.VISIBLE
+        // Turbo : le bouton Stop reste, un second moyen d'arrêter (en plus du relâchement et de la durée
+        // maximale d'un appui, Limits.MAX_MS_TURBO_PRESS).
         stopBtn.visibility = if (ended) View.GONE else View.VISIBLE
         okBtn.visibility = if (ended) View.VISIBLE else View.GONE
         (pauseBtn.getChildAt(0) as Icon).set(if (running) Icon.Kind.PAUSE else Icon.Kind.PLAY)

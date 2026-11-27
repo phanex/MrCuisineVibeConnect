@@ -298,11 +298,13 @@ object OriginalDbMapper {
         return Result(out, skipped, notes, maxUpdated)
     }
 
+    private val DIGITS = Regex("\\d+")
+
     /** Durées stockées en minutes, secondes ou texte « 45 min » selon les versions. */
     private fun minutes(v: Any?): Int {
         val n = when (v) {
             is Number -> v.toLong()
-            is String -> Regex("\\d+").find(v)?.value?.toLongOrNull() ?: 0L
+            is String -> DIGITS.find(v)?.value?.toLongOrNull() ?: 0L
             else -> 0L
         }
         return (if (n > 600) n / 60 else n).toInt().coerceIn(0, 24 * 60)

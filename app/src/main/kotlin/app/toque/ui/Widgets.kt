@@ -110,12 +110,16 @@ class TempRing(c: Context) : View(c) {
     var actual = 0
     var target = 0
     var rpmLevel = 0
+    private var actualLabel = "0°"
+    private var targetLabel = tr("mesuré")
     private val arc = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
     private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
     private val r = RectF()
 
     fun set(actual: Int, target: Int, rpmLevel: Int) {
         if (actual == this.actual && target == this.target && rpmLevel == this.rpmLevel) return
+        if (actual != this.actual) actualLabel = "$actual°"
+        if (target != this.target) targetLabel = if (target > 0) tr("consigne %d °C", target) else tr("mesuré")
         this.actual = actual
         this.target = target
         this.rpmLevel = rpmLevel
@@ -147,11 +151,11 @@ class TempRing(c: Context) : View(c) {
         text.typeface = Ui.THIN
         text.color = Ui.TEXT
         text.textSize = size * 0.30f
-        canvas.drawText("$actual°", cx + size * 0.03f, cy + size * 0.08f, text)
+        canvas.drawText(actualLabel, cx + size * 0.03f, cy + size * 0.08f, text)
         text.typeface = Ui.REGULAR
         text.color = Ui.TEXT2
         text.textSize = size * 0.075f
-        canvas.drawText(if (target > 0) tr("consigne %d °C", target) else tr("mesuré"), cx, cy + size * 0.22f, text)
+        canvas.drawText(targetLabel, cx, cy + size * 0.22f, text)
         // barres de vitesse réelle
         val bw = size * 0.035f
         val gap = size * 0.018f
@@ -173,6 +177,7 @@ class TempRing(c: Context) : View(c) {
 /** Bouton « maintenir pour Turbo ». */
 class HoldButton(c: Context, label: String, private val onDown: () -> Unit, private val onUp: () -> Unit) : LinearLayout(c) {
     private val text: TextView
+    private val icon = Icon(c, Icon.Kind.BOLT, Ui.WARN)
 
     init {
         orientation = HORIZONTAL
@@ -180,7 +185,7 @@ class HoldButton(c: Context, label: String, private val onDown: () -> Unit, priv
         setPadding(Ui.u(22), 0, Ui.u(22), 0)
         minimumHeight = Ui.u(64)
         background = Ui.round(Ui.SURFACE3, 32f)
-        addView(Icon(c, Icon.Kind.BOLT, Ui.WARN), LayoutParams(Ui.u(26), Ui.u(26)).apply { rightMargin = Ui.u(10) })
+        addView(icon, LayoutParams(Ui.u(26), Ui.u(26)).apply { rightMargin = Ui.u(10) })
         text = Ui.text(c, label, 20f, Ui.TEXT, Ui.MEDIUM)
         addView(text)
         isClickable = true
@@ -192,11 +197,14 @@ class HoldButton(c: Context, label: String, private val onDown: () -> Unit, priv
             MotionEvent.ACTION_DOWN -> {
                 background = Ui.round(Ui.WARN, 32f)
                 text.setTextColor(Ui.ON_WARN)
+                // L'éclair est de la couleur du bouton allumé : il passe en blanc, sinon il disparaît.
+                icon.color = android.graphics.Color.WHITE
                 onDown()
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 background = Ui.round(Ui.SURFACE3, 32f)
                 text.setTextColor(Ui.TEXT)
+                icon.color = Ui.WARN
                 onUp()
             }
         }

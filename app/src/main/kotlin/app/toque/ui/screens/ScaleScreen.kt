@@ -30,6 +30,11 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
     companion object {
         val history = mutableListOf<WeightEntry>()
         private const val MAX_HISTORY = 50
+
+        fun recordHistory(entry: WeightEntry) {
+            history.add(entry)
+            while (history.size > MAX_HISTORY) history.removeAt(0)
+        }
     }
 
     private lateinit var value: TextView
@@ -102,7 +107,7 @@ class ScaleScreen(a: MainActivity, private val forcedIngredient: String? = null)
                 lastAutoLoggedWeight = w
                 val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
                 val ing = currentIngredient()
-                history.add(WeightEntry(time, w, ing))
+                recordHistory(WeightEntry(time, w, ing))
                 renderHistory()
                 a.weighRecordedSound()
             }

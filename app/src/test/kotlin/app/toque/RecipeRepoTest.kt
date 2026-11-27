@@ -4,12 +4,14 @@ import android.app.Application
 import android.content.ContentValues
 import android.database.sqlite.SQLiteDatabase
 import android.os.Looper
+import app.toque.core.mealie.MealieRecipes
 import app.toque.core.recipes.Ingredient
 import app.toque.core.recipes.IngredientGroup
 import app.toque.core.recipes.Recipe
 import app.toque.core.recipes.RecipeAdjustments
 import app.toque.core.recipes.RecipeCodec
 import app.toque.core.recipes.RecipeFilter
+import app.toque.core.recipes.RecipeRules
 import app.toque.core.recipes.RecipeSource
 import app.toque.core.recipes.SearchIndex
 import app.toque.core.recipes.Step
@@ -307,6 +309,77 @@ class RecipeRepoTest {
         waitFor("liste") { again.loaded }
         assertEquals(listOf("toqueapp-12"), ids(again.index.search("", community)))
         assertTrue(again.isFavorite("toqueapp-12"))
+    }
+
+    /**
+     * Réglage du propriétaire pour une étape d'une recette Mealie : gardé à côté de la recette, il
+     * survit à une synchro tant que le texte de l'étape ne change pas (même déplacée), et au redémarrage.
+     */
+    @Test fun mealieStepSettingsSurviveASyncAndARestart() {
+        val repo = newRepo()
+        repo.load()
+        waitFor("liste") { repo.loaded }
+        val id = "mealie-11111111-2222-4333-8444-555555555555"
+        val cook = Step("Cuire 20 min/100 °C/vitesse 1.", StepMachine(StepProgram.MANUAL, 1200, 1, 100), needsReview = true)
+        val r = Recipe(id, "Soupe des essais", source = RecipeSource.MEALIE, steps = listOf(
+            Step("Couper les légumes."), cook,
+            Step("Mixer 30 s/vitesse 8.", StepMachine(StepProgram.MANUAL, 30, 8, 0), needsReview = true)))
+        repo.upsertAll(listOf(r))
+        val mine = StepMachine(StepProgram.MANUAL, 1500, 1, 100)
+        assertNull(repo.setStepSetting(id, 1, mine))
+        assertNull(repo.setStepSetting(id, 2, StepMachine(StepProgram.MANUAL, 45, 7, 0)))
+        // La règle des étapes perso refuse (vitesse 8 en chauffe) : rien n'est enregistré.
+        assertEquals(RecipeRules.STEP_MACHINE, repo.setStepSetting(id, 0, StepMachine(StepProgram.MANUAL, 60, 8, 100))?.code)
+        assertNotNull(repo.setStepSetting("r1", 0, mine))
+        repo.getAdjusted(id)!!.steps.let { s ->
+            assertNull(s[0].machine)
+            assertEquals(mine, s[1].machine)
+            assertFalse(s[1].needsReview)
+        }
+        // La même recette reçue de nouveau : les réglages restent.
+        repo.upsertAll(listOf(r.copy()))
+        assertEquals(2, repo.adjustmentsOf(id).steps.size)
+        assertEquals(mine, repo.getAdjusted(id)!!.steps[1].machine)
+        // Reçue avec les étapes déplacées et la dernière réécrite : le réglage suit son texte, l'autre tombe.
+        val rewritten = Step("Mixer 40 s/vitesse 8.", StepMachine(StepProgram.MANUAL, 40, 8, 0), needsReview = true)
+        repo.upsertAll(listOf(r.copy(steps = listOf(cook, Step("Couper les légumes."), rewritten))))
+        assertEquals(1, repo.adjustmentsOf(id).steps.size)
+        repo.getAdjusted(id)!!.steps.let { s ->
+            assertEquals(mine, s[0].machine)
+            assertFalse(s[0].needsReview)
+            assertEquals(rewritten, s[2])
+        }
+        // Redémarrage : relu de la base.
+        closeAll()
+        val again = newRepo()
+        again.load()
+        waitFor("liste") { again.loaded }
+        assertEquals(mine, again.getAdjusted(id)!!.steps[0].machine)
+        assertNull(again.setStepSetting(id, 1, null))
+        // Délié : la recette part, les réglages restent pour un retour au même serveur…
+        again.removeMealieExcept(emptySet())
+        assertNull(again.get(id))
+        assertEquals(2, again.adjustmentsOf(id).steps.size)
+        again.upsertAll(listOf(r.copy(steps = listOf(cook, Step("Couper les légumes."), rewritten))))
+        assertEquals(mine, again.getAdjusted(id)!!.steps[0].machine)
+        assertNull(again.getAdjusted(id)!!.steps[1].machine)
+        // …et la liste complète d'un serveur qui ne l'a pas les retire ; la note reste.
+        again.setAdjustments(id, again.adjustmentsOf(id).withNote("à refaire"))
+        again.removeMealieExcept(emptySet())
+        again.forgetStepSettingsExcept(setOf("mealie-autre")) { MealieRecipes.isMealie(it) }
+        assertTrue(again.adjustmentsOf(id).steps.isEmpty())
+        assertEquals("à refaire", again.adjustmentsOf(id).note)
+        // Le retour à la recette efface le réglage.
+        again.upsertAll(listOf(r))
+        assertNull(again.setStepSetting(id, 1, mine))
+        again.clearStepSetting(id, 1)
+        assertTrue(again.adjustmentsOf(id).steps.isEmpty())
+        closeAll()
+        val third = newRepo()
+        third.load()
+        waitFor("liste") { third.loaded }
+        assertTrue(third.adjustmentsOf(id).steps.isEmpty())
+        assertEquals("à refaire", third.adjustmentsOf(id).note)
     }
 
     @Test fun savingOwnRecipeNeverWaitsForTheIndex() {

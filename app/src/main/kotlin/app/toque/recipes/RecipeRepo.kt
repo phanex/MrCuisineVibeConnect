@@ -11,9 +11,13 @@ import app.toque.Logbook
 import app.toque.core.mealie.MealieRecipes
 import app.toque.core.recipes.CommunityRecipes
 import app.toque.core.recipes.IndexedRecipe
+import app.toque.core.recipes.OwnStepSettings
 import app.toque.core.recipes.Recipe
 import app.toque.core.recipes.RecipeAdjustments
 import app.toque.core.recipes.RecipeCodec
+import app.toque.core.recipes.RecipeProblem
+import app.toque.core.recipes.SettingAuthor
+import app.toque.core.recipes.StepMachine
 import app.toque.core.recipes.RecipeSource
 import app.toque.core.robot.RecipeCompat
 import app.toque.core.robot.RobotProfiles
@@ -69,7 +73,11 @@ class RecipeRepo(private val context: Context, private val log: Logbook? = null)
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {}
+    }.apply {
+        setWriteAheadLoggingEnabled(true)
     }
+    /** Cache mémoire borné des recettes décodées : évite de relire SQLite et redécoder le JSON sur le fil principal. */
+    private val recipeCache = android.util.LruCache<String, Recipe>(24)
     private val exec = Executors.newSingleThreadExecutor { r -> Thread(r, "toque-recettes").apply { priority = Thread.NORM_PRIORITY - 1 } }
     /** Mises à jour de l'index en mémoire (recette perso enregistrée) sans attendre la base. */
     private val memo = Executors.newSingleThreadExecutor { r -> Thread(r, "toque-index") }
@@ -123,11 +131,14 @@ class RecipeRepo(private val context: Context, private val log: Logbook? = null)
     val imagesDir: File by lazy { File(context.filesDir, "images").apply { mkdirs() } }
 
     fun onChange(l: () -> Unit): () -> Unit {
-        listeners += l
-        return { listeners -= l }
+        synchronized(listeners) { listeners += l }
+        return { synchronized(listeners) { listeners -= l } }
     }
 
-    private fun notifyChanged() = main.post { for (l in ArrayList(listeners)) l() }
+    private fun notifyChanged() = main.post {
+        val copy = synchronized(listeners) { ArrayList(listeners) }
+        for (l in copy) l()
+    }
 
     /** Premier chargement du catalogue (une seule fois par processus, même si l'écran est recréé). */
     fun load() {
@@ -173,6 +184,7 @@ class RecipeRepo(private val context: Context, private val log: Logbook? = null)
 
     /** Recharge l'index après des écritures de la synchro : directement l'index complet (pas de retour aux titres seuls). */
     private fun reloadNow() {
+        recipeCache.evictAll()
         val db = helper.writableDatabase
         loadUserState(db)
         val snap = writtenSeq
@@ -427,6 +439,7 @@ class RecipeRepo(private val context: Context, private val log: Logbook? = null)
         v.put("json", RecipeCodec.encode(clean))
         v.put("updated", now)
         db.insertWithOnConflict("recipes", null, v, SQLiteDatabase.CONFLICT_REPLACE)
+        recipeCache.remove(r.id)
         if (summariesOk) {
             // Sans fiche (erreur), la recette est simplement refaite au prochain démarrage.
             try {
@@ -450,9 +463,10 @@ class RecipeRepo(private val context: Context, private val log: Logbook? = null)
         pending.lastOrNull { it.id == id && it.seq > written }
     }
 
-    /** Lecture d'une recette (rapide : une seule ligne). */
+    /** Lecture d'une recette (rapide : cache mémoire LRU, sinon une seule ligne SQLite). */
     fun get(id: String): Recipe? {
         pendingFor(id)?.let { return it.recipe?.copy(favorite = isFavorite(id)) }
+        recipeCache.get(id)?.let { return it.copy(favorite = isFavorite(id)) }
         helper.readableDatabase.rawQuery("SELECT json FROM recipes WHERE id = ?", arrayOf(id)).use { c ->
             if (!c.moveToFirst()) return null
             val r = try {
@@ -460,6 +474,7 @@ class RecipeRepo(private val context: Context, private val log: Logbook? = null)
             } catch (_: Exception) {
                 null
             } ?: return null
+            recipeCache.put(id, r)
             return r.copy(favorite = isFavorite(id))
         }
     }
@@ -498,15 +513,89 @@ class RecipeRepo(private val context: Context, private val log: Logbook? = null)
     fun setAdjustments(id: String, a: RecipeAdjustments) {
         if (!adjustmentsLoaded) loadAdjustments(helper.writableDatabase)
         if (a.isEmpty) adjustments.remove(id) else adjustments[id] = a
-        main.post { for (l in synchronized(adjustedListeners) { ArrayList(adjustedListeners) }) l(id) }
-        exec.execute {
-            val db = helper.writableDatabase
-            if (a.isEmpty) db.delete("adjustments", "id = ?", arrayOf(id))
-            else db.insertWithOnConflict("adjustments", null, ContentValues().apply {
-                put("id", id)
-                put("json", a.encode())
-            }, SQLiteDatabase.CONFLICT_REPLACE)
+        adjustedChanged(id)
+        exec.execute { writeAdjustments(helper.writableDatabase, id, a) }
+    }
+
+    private fun adjustedChanged(id: String) = main.post { for (l in synchronized(adjustedListeners) { ArrayList(adjustedListeners) }) l(id) }
+
+    private fun writeAdjustments(db: SQLiteDatabase, id: String, a: RecipeAdjustments) {
+        if (a.isEmpty) db.delete("adjustments", "id = ?", arrayOf(id))
+        else db.insertWithOnConflict("adjustments", null, ContentValues().apply {
+            put("id", id)
+            put("json", a.encode())
+        }, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    /**
+     * Le réglage du propriétaire [machine] (null : aucun) pour l'étape [index] de la recette [id], tapé
+     * par [by] ; null si enregistré, sinon le refus ([OwnStepSettings.problem], la règle de l'éditeur
+     * d'étape des recettes perso). Rien n'est enregistré sur un refus.
+     */
+    fun setStepSetting(id: String, index: Int, machine: StepMachine?, by: SettingAuthor = SettingAuthor.ROBOT): RecipeProblem? {
+        val r = get(id) ?: return RecipeProblem(OwnStepSettings.NOT_ALLOWED, "steps", index, OwnStepSettings.NOT_ALLOWED)
+        OwnStepSettings.problem(r, index, machine)?.let { return it }
+        setAdjustments(id, adjustmentsOf(id).withStep(r, index, machine, by))
+        return null
+    }
+
+    /**
+     * « J'ai vérifié ce réglage » à la cuisson guidée, à l'étape [index] de la recette [id] : le réglage du
+     * propriétaire venu d'un téléphone, s'il est toujours [machine], devient le sien (comme tapé sur le robot :
+     * plus « à vérifier »). Rien d'autre ne change ; un réglage qui ne passe plus la règle reste tel quel.
+     */
+    fun confirmStepSetting(id: String, index: Int, machine: StepMachine?) {
+        val r = get(id) ?: return
+        if (machine == null || !OwnStepSettings.appliesTo(r)) return
+        val a = adjustmentsOf(id)
+        val o = OwnStepSettings.owned(r, a)[index] ?: return
+        if (o.trusted || o.machine != machine || OwnStepSettings.problem(r, index, machine) != null) return
+        setAdjustments(id, a.withStep(r, index, machine, SettingAuthor.ROBOT))
+    }
+
+    /** L'étape [index] de la recette [id] revient au réglage de la recette. */
+    fun clearStepSetting(id: String, index: Int) {
+        val r = get(id) ?: return
+        val a = adjustmentsOf(id)
+        val next = a.withoutStep(r, index)
+        if (next != a) setAdjustments(id, next)
+    }
+
+    /**
+     * Remplace en mémoire et dans la base les adaptations [old] de [id] par [next] (fil des recettes),
+     * seulement si personne ne les a changées entre-temps (un appui sur l'écran passe avant).
+     */
+    private fun replaceAdjustments(db: SQLiteDatabase, id: String, old: RecipeAdjustments, next: RecipeAdjustments) {
+        val ok = if (next.isEmpty) adjustments.remove(id, old) else adjustments.replace(id, old, next)
+        if (!ok) return
+        writeAdjustments(db, id, next)
+        adjustedChanged(id)
+    }
+
+    /** Recettes reçues à nouveau : les réglages d'étapes dont le texte a changé ne serviront plus (fil des recettes). */
+    private fun pruneStepSettings(db: SQLiteDatabase, recipes: List<Recipe>) {
+        if (adjustments.isEmpty() && adjustmentsLoaded) return
+        loadAdjustments(db)
+        for (r in recipes) {
+            val a = adjustments[r.id] ?: continue
+            val next = a.keepingStepsOf(r)
+            if (next != a) replaceAdjustments(db, r.id, a, next)
         }
+    }
+
+    /**
+     * Liste complète d'une source reçue ([belongs] : ses identifiants ; [keep] : toutes ses recettes) :
+     * les réglages d'étapes des recettes de cette source qui n'y sont plus partent. Notes et quantités restent.
+     */
+    fun forgetStepSettingsExcept(keep: Set<String>, belongs: (String) -> Boolean) {
+        exec.submit {
+            val db = helper.writableDatabase
+            loadAdjustments(db)
+            for ((id, a) in HashMap(adjustments)) {
+                if (a.steps.isEmpty() || id in keep || !belongs(id)) continue
+                replaceAdjustments(db, id, a, a.copy(steps = emptyMap()))
+            }
+        }.get()
     }
 
     fun isFavorite(id: String): Boolean = synchronized(favorites) { id in favorites }
@@ -588,6 +677,7 @@ class RecipeRepo(private val context: Context, private val log: Logbook? = null)
         try {
             db.delete("recipes", "id NOT LIKE ? AND id NOT LIKE ? AND id NOT LIKE ?",
                 arrayOf(UserRecipes.ID_PREFIX + "%", CommunityRecipes.ID_PREFIX + "%", MealieRecipes.ID_PREFIX + "%"))
+            recipeCache.evictAll()
             val now = System.currentTimeMillis()
             for (r in recipes) {
                 writeRecipe(db, r, now)
@@ -614,6 +704,7 @@ class RecipeRepo(private val context: Context, private val log: Logbook? = null)
             } finally {
                 db.endTransaction()
             }
+            pruneStepSettings(db, recipes)
             if (rebuild) reloadNow()
         }.get()
     }
@@ -635,7 +726,10 @@ class RecipeRepo(private val context: Context, private val log: Logbook? = null)
             val gone = titles(db).filterKeys { it !in keep && isLidl(it) }
             db.beginTransaction()
             try {
-                for (id in gone.keys) db.delete("recipes", "id = ?", arrayOf(id))
+                for (id in gone.keys) {
+                    db.delete("recipes", "id = ?", arrayOf(id))
+                    recipeCache.remove(id)
+                }
                 carryOver(db, gone)
                 db.setTransactionSuccessful()
             } finally {
@@ -660,7 +754,10 @@ class RecipeRepo(private val context: Context, private val log: Logbook? = null)
             if (gone.isEmpty()) return@submit
             db.beginTransaction()
             try {
-                for (id in gone) db.delete("recipes", "id = ?", arrayOf(id))
+                for (id in gone) {
+                    db.delete("recipes", "id = ?", arrayOf(id))
+                    recipeCache.remove(id)
+                }
                 db.setTransactionSuccessful()
             } finally {
                 db.endTransaction()
@@ -674,7 +771,9 @@ class RecipeRepo(private val context: Context, private val log: Logbook? = null)
 
     /**
      * Retire les recettes Mealie absentes de [keep] (retirées du serveur, ou toutes en déliant),
-     * favorites comprises : le serveur fait foi. Leurs notes et cuissons restent.
+     * favorites comprises : le serveur fait foi. Leurs notes, réglages d'étapes et cuissons restent
+     * (relié à nouveau au même serveur, tout revient) ; les réglages d'étapes partent à la liste
+     * complète suivante qui ne les contient pas ([forgetStepSettingsExcept]).
      */
     fun removeMealieExcept(keep: Set<String>) {
         exec.submit {
@@ -683,7 +782,10 @@ class RecipeRepo(private val context: Context, private val log: Logbook? = null)
             if (gone.isEmpty()) return@submit
             db.beginTransaction()
             try {
-                for (id in gone) db.delete("recipes", "id = ?", arrayOf(id))
+                for (id in gone) {
+                    db.delete("recipes", "id = ?", arrayOf(id))
+                    recipeCache.remove(id)
+                }
                 db.setTransactionSuccessful()
             } finally {
                 db.endTransaction()
@@ -701,6 +803,7 @@ class RecipeRepo(private val context: Context, private val log: Logbook? = null)
     fun saveUser(r: Recipe) {
         require(UserRecipes.isUser(r.id))
         val rec = r.copy(source = RecipeSource.USER)
+        recipeCache.put(rec.id, rec)
         val ix = SearchWords.of(rec.copy(favorite = false))
         change(Change(0, rec.id, rec, ix)) { db ->
             db.beginTransaction()
@@ -716,11 +819,18 @@ class RecipeRepo(private val context: Context, private val log: Logbook? = null)
     /** Supprime une recette perso, avec sa note, ses corrections, son favori et ses cuissons. */
     fun deleteUser(id: String) {
         if (!UserRecipes.isUser(id)) return
+        recipeCache.remove(id)
         adjustments.remove(id)
         cooked.remove(id)
         synchronized(favorites) { favorites -= id }
         change(Change(0, id, null, null)) { db ->
-            for (table in listOf("recipes", "favorites", "adjustments", "cooked")) db.delete(table, "id = ?", arrayOf(id))
+            db.beginTransaction()
+            try {
+                for (table in listOf("recipes", "favorites", "adjustments", "cooked")) db.delete(table, "id = ?", arrayOf(id))
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
+            }
         }
     }
 

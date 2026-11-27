@@ -19,9 +19,10 @@ aide à le faire vivre.
 
 | Robot | Étiquette sous le robot | État | Installation |
 |---|---|---|---|
-| Monsieur Cuisine **Connect** | SKMC 1200 (A1, B2, C3) | Pris en charge | [Agent IA](AGENTS.md) ou [guide d'installation](docs/INSTALLATION.fr.md), puis `Toque-x.y.z.apk` |
+| Monsieur Cuisine **Connect** | SKMC 1200 (A1, B2, C3, D4) | Pris en charge | [Agent IA](AGENTS.md) ou [guide d'installation](docs/INSTALLATION.fr.md), puis `Toque-x.y.z.apk`. Tous les D4 et certains C3 ont la carte du SKMC 1100 A1 (`spm188a`) : même étape en plus que la ligne suivante ; le script d'installation lit la carte et dit laquelle il voit ([#115](https://github.com/Wuki60/MrCuisineVibeConnect/issues/115)) |
 | Monsieur Cuisine **Connect** | SKMC 1100 A1 | Pris en charge | Pareil, avec une étape de plus, `own-twrp` : TWRP reconstruit autour du noyau du robot ([#10](https://github.com/Wuki60/MrCuisineVibeConnect/issues/10)) |
-| Monsieur Cuisine **Smart** | SKMS 1200 | **En test** : essayé par des propriétaires de Smart, retours dans [#59](https://github.com/Wuki60/MrCuisineVibeConnect/issues/59) | [Guide du Smart](docs/SMART.md), puis `Toque-smart-x.y.z.apk` |
+| Monsieur Cuisine **Smart** | SKMS 1200 (A1, carte MediaTek, Android 8.1) | **En test** : essayé par des propriétaires de Smart, retours dans [#59](https://github.com/Wuki60/MrCuisineVibeConnect/issues/59) | [Guide du Smart](docs/SMART.md), puis `Toque-smart-x.y.z.apk` |
+| Monsieur Cuisine **Smart** | SKMS 1200 C1 (carte Allwinner, Android 10) | **Pas encore pris en charge** | Autre matériel : le guide du Smart ne s'applique pas ([#59](https://github.com/Wuki60/MrCuisineVibeConnect/issues/59)) |
 
 Chaque [version](https://github.com/Wuki60/MrCuisineVibeConnect/releases/latest) a deux APK faits du
 même code : **`Toque-x.y.z.apk` pour le Connect** et **`Toque-smart-x.y.z.apk` pour le Smart** (son
@@ -36,8 +37,8 @@ robot sans rien envoyer à sa base moteur et demande de le confirmer.
 > en charge du Smart vient des portages de Flav974 et de Tidusneo24150 ; le projet n'a pas de Smart.
 > À utiliser à vos risques, en suivant la procédure de premier essai.
 >
-> L'interface existe en **français**, **anglais**, **allemand**, **espagnol**, **catalan** et
-> **ukrainien** (*Réglages › Langue et heure*).
+> L'interface existe en **français**, **anglais**, **allemand**, **espagnol**, **catalan**,
+> **polonais** et **ukrainien** (*Réglages › Langue et heure*).
 
 ## Le site communautaire : [toqueapp.org](https://toqueapp.org)
 
@@ -82,8 +83,14 @@ faut Toque 0.10.0 ou plus récent sur le robot.
 **Relier un téléphone** : sur le robot, *Réglages › Téléphone › Appairer un téléphone*, puis scannez
 le QR code avec l'appli, ou saisissez le code à 6 chiffres affiché dessous (valable 2 minutes). Le
 robot n'écoute qu'une fois un téléphone appairé ou l'écran d'appairage ouvert, et un téléphone non
-appairé ne le voit pas, même sur le même Wi-Fi. L'écran d'appairage liste les téléphones appairés et
-retire ceux qui ne servent plus.
+appairé ne le voit pas, même sur le même Wi-Fi. L'écran d'appairage et *Réglages › Téléphone* listent
+les téléphones appairés : renommez-les, retirez ceux qui ne servent plus, ou mettez-en un en **lecture
+seule** (il suit le robot sans rien commander : écran mural, domotique).
+
+**Home Assistant** : [Toque Companion for Home Assistant](https://github.com/gornog/toque-companion-homeassistant)
+de @gornog (dans HACS) montre l'état du robot dans Home Assistant par le même appairage, avec seulement
+Pause, Stop et Tare, ou aucune commande en mode *capteurs seulement*. Pour un tel client, appairez-le en
+lecture seule.
 
 ## Installer avec un agent IA (Connect)
 
@@ -95,7 +102,7 @@ Le plus simple : confiez l'installation à un agent IA qui peut piloter votre PC
 
 Le fichier [AGENTS.md](AGENTS.md) lui décrit toute la procédure, et le script
 [`tools/setup/toque-setup.ps1`](tools/setup/toque-setup.ps1) (Windows) ou
-[`tools/setup/toque-setup.sh`](tools/setup/toque-setup.sh) (macOS) fait le travail étape par étape
+[`tools/setup/toque-setup.sh`](tools/setup/toque-setup.sh) (macOS, Linux) fait le travail étape par étape
 (téléchargements vérifiés, pilote sous Windows, sauvegarde, root, installation, ADB par Wi-Fi).
 L'agent ne vous demande que ce qu'il ne peut pas faire lui-même :
 
@@ -107,7 +114,7 @@ L'agent ne vous demande que ce qu'il ne peut pas faire lui-même :
 - appuyer une fois sur **Autoriser** sur l'écran du robot.
 
 Comptez 1 à 2 heures. Sans agent : [docs/INSTALLATION.fr.md](docs/INSTALLATION.fr.md) (Windows) ou
-[docs/MACOS.md](docs/MACOS.md) (macOS).
+[docs/MACOS.md](docs/MACOS.md) (macOS) ou [docs/LINUX.md](docs/LINUX.md) (Linux).
 
 ## Installer depuis un Mac (Connect)
 
@@ -128,6 +135,16 @@ Le guide complet, avec quoi faire si mtkclient n'atteint pas le robot : [docs/MA
 Un agent IA peut aussi le faire pour vous (voir plus haut). Testé de bout en bout sur un vrai
 SKMC 1200 C3 depuis un Mac Apple silicon en novembre 2026 (Mac Intel et SKMC 1100 A1 pas encore
 essayés : dites-nous). Merci à @julienperrault et @flexbox.
+
+## Installer depuis Linux (Connect)
+
+Le même script, `tools/setup/toque-setup.sh`, tourne sous Linux : mtkclient passe par libusb, et une
+règle udev (`tools/setup/linux/51-toque-mtk.rules`) donne à votre utilisateur l'accès au robot en mode
+téléchargement et tient ModemManager à l'écart. `prepare` affiche les commandes `sudo` à lancer une fois.
+
+Le guide complet : [docs/LINUX.md](docs/LINUX.md). Testé de bout en bout depuis Fedora 44 sur un vrai
+robot à carte `spm188a` (étiqueté SKMC 1200, donc `own-twrp` d'abord) en novembre 2026 ; autres
+distributions pas encore essayées.
 
 ## Ce que fait Toque
 
@@ -153,7 +170,7 @@ essayés : dites-nous). Merci à @julienperrault et @flexbox.
   peuvent être publiées depuis le robot. Le site est en français, anglais, allemand, espagnol,
   catalan et ukrainien ; le robot ne garde qu'une clé révocable, jamais le mot de passe.
 - **Votre serveur [Mealie](https://mealie.io)** (recettes auto-hébergées) : reliez-y le robot
-  (*Réglages › Autres*, avec votre identifiant ou un jeton d'API) et toutes ses recettes
+  (*Réglages › Recettes › Mealie*, avec votre identifiant ou un jeton d'API) et toutes ses recettes
   arrivent sur le robot, en lecture seule, chaque nuit ou à la demande, avec une pastille « Mealie »
   dans la liste. Les réglages écrits dans les étapes (« 5 min/100 °C/vitesse 1 », « 10 sec/vitesse 5 »,
   « Turbo 3 fois », « mode pétrin 2 min ») sont proposés et à vérifier avant de partir, comme pour les
@@ -210,8 +227,11 @@ essayés : dites-nous). Merci à @julienperrault et @flexbox.
   bouton rotatif (de 2 à 30 min, ou jamais, dans Réglages › Écran), un écran noir assombri affiche
   l'heure, et la température du bol quand il est chaud. Jamais pendant un programme ni sur la
   balance. Le geste qui réveille ne fait rien d'autre. Pendant la veille, l'anneau de la molette
-  reste normal, passe en veilleuse blanche très faible ou s'éteint (Réglages › Molette et sons).
-- **Capteur du bol inversé** : sur certains robots (vu sur un SKMC 1200 C3), la base signale le bol
+  garde sa lumière, la baisse (cinq niveaux, jamais plus forte qu'allumé) ou s'éteint. Sa luminosité
+  allumé se règle aussi, et, si le code couleur est coupé, sa couleur allumé et en veille, parmi
+  celles que ses LED rouge, verte et blanche savent faire (Réglages › Molette et sons › Lumière de la
+  molette).
+- **Capteur du bol inversé** : sur certains robots (vu sur un SKMC 1200 C3 et un SKMC 1100 A1), la base signale le bol
   présent quand il est retiré ; Réglages › Sécurité › Inverser le capteur du bol corrige cela.
 - **Pensé pour un robot sans boutons Android** : Toque s'ouvre au démarrage, et un bouton
   **« Retour à Toque »** reste affiché par-dessus l'appli d'origine quand on l'ouvre.

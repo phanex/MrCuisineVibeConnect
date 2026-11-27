@@ -222,12 +222,14 @@ object Smart {
      * [toqueError] : erreur constatée par Toque sur cette réponse ([SmartCodec.responseError]),
      * signalée comme une erreur de la base si la base n'en signale pas elle-même (octet 15).
      */
+    private fun word(raw: ByteArray, i: Int): Int = (u(raw, i) shl 8) or u(raw, i + 1)
+    private fun s16(raw: ByteArray, i: Int): Int = word(raw, i).toShort().toInt()
+
     fun decodeRx(raw: ByteArray, toqueError: Int = 0): Telemetry {
         validate(raw, RX_SIZE)
-        fun word(i: Int) = (u(raw, i) shl 8) or u(raw, i + 1)
-        fun s16(i: Int) = word(i).toShort().toInt()
         val status = u(raw, 12)
-        val errorCode = u(raw, 15).let { if (it != 0) it else toqueError }
+        val b15 = u(raw, 15)
+        val errorCode = if (b15 != 0) b15 else toqueError
         val levelEcho = u(raw, 17)
         val speedEcho = u(raw, 25)
         val functionEcho = u(raw, 28)
@@ -235,15 +237,21 @@ object Smart {
         val turboEcho = u(raw, 27)
         val motorOn = functionEcho != FN_STOP && (speedEcho > 0 || turboEcho > 0)
         val heaterOn = functionEcho != FN_STOP && levelEcho > 0
-        val warnings = ArrayList<String>(0)
-        if (status and 0x0F != 0) warnings += "Bits d'état 0-3 inattendus"
-        if (status and 0x10 != 0) warnings += "Bit d'erreur"
-        if (levelEcho !in TEMPERATURE_LEVELS.indices) warnings += "Niveau de température hors table"
-        if (speedEcho > 20) warnings += "Vitesse hors 0..20"
-        if (turboEcho != 0 && turboEcho != TURBO_MOTOR_VALUE) warnings += "Touche turbo inattendue"
-        if (u(raw, 9) !in intArrayOf(CMD_ACCESS, CMD_SET, CMD_TARE)) warnings += "Commande répondue inconnue"
-        for (i in 47..51) if (raw[i].toInt() != 0) { warnings += "Octets 47-51 non nuls"; break }
+        val cmdEcho = u(raw, 9)
+        var warnings: ArrayList<String>? = null
+        fun warn(msg: String) {
+            if (warnings == null) warnings = ArrayList(2)
+            warnings!!.add(msg)
+        }
+        if (status and 0x0F != 0) warn("Bits d'état 0-3 inattendus")
+        if (status and 0x10 != 0) warn("Bit d'erreur")
+        if (levelEcho !in TEMPERATURE_LEVELS.indices) warn("Niveau de température hors table")
+        if (speedEcho > 20) warn("Vitesse hors 0..20")
+        if (turboEcho != 0 && turboEcho != TURBO_MOTOR_VALUE) warn("Touche turbo inattendue")
+        if (cmdEcho != CMD_ACCESS && cmdEcho != CMD_SET && cmdEcho != CMD_TARE) warn("Commande répondue inconnue")
+        for (i in 47..51) if (raw[i].toInt() != 0) { warn("Octets 47-51 non nuls"); break }
         val weight = (u(raw, 30) shl 24) or (u(raw, 31) shl 16) or (u(raw, 32) shl 8) or u(raw, 33)
+        val reportedSpeed = if (turboEcho != 0) 10 else speedEcho / 2
         return Telemetry(
             raw = raw.copyOf(),
             status = status,
@@ -266,20 +274,20 @@ object Smart {
             bowlNtcDetected = status and 0x40 == 0,
             lidOpen = status and 0x80 != 0,
             extendedState = functionEcho,
-            targetSpeedLevel = if (turboEcho != 0) 10 else speedEcho / 2,
+            targetSpeedLevel = reportedSpeed,
             targetRpm = 0,
             actualRpm = 0,
             targetTemperatureLevel = levelEcho,
             targetTemperature = celsiusForLevel(levelEcho),
-            actualTemperature = s16(20),
+            actualTemperature = s16(raw, 20),
             weight = weight,
-            firmwareVersion = word(10),
+            firmwareVersion = word(raw, 10),
             scaleStateRaw = u(raw, 34),
             scaleState = "normal",
             calibrationStep = u(raw, 35),
             unknownByte24 = 0,
-            warnings = warnings,
-            reportedSpeedLevel = if (turboEcho != 0) 10 else speedEcho / 2,
+            warnings = warnings ?: emptyList(),
+            reportedSpeedLevel = reportedSpeed,
         )
     }
 
@@ -328,54 +336,13 @@ object Smart {
  * Découpe le flux reçu (ou émis) en trames Smart : réassemble les fragments, accepte les
  * trames collées, se resynchronise après des octets corrompus.
  */
-class SmartStreamParser(private val size: Int = Smart.RX_SIZE) : FrameParser {
-    init {
-        require(size == Smart.RX_SIZE || size == Smart.TX_SIZE)
-    }
-
-    private val buffer = ByteArray(size)
-    private var count = 0
-    override var discardedBytes = 0L
-        private set
-    override var invalidFrames = 0L
-        private set
-
-    override fun reset() {
-        count = 0
-    }
-
-    private fun dropFirst() {
-        System.arraycopy(buffer, 1, buffer, 0, count - 1)
-        count--
-        discardedBytes++
-    }
-
-    override fun feed(data: ByteArray, length: Int, out: MutableList<ByteArray>): MutableList<ByteArray> {
-        val l = size - 1
-        for (i in 0 until length) {
-            buffer[count++] = data[i]
-            while (count > 0) {
-                if ((buffer[0].toInt() and 0xFF) != Smart.START) { dropFirst(); continue }
-                if (count < 2) break
-                if (buffer[1].toInt() != (l shr 8)) { invalidFrames++; dropFirst(); continue }
-                if (count < 3) break
-                if ((buffer[2].toInt() and 0xFF) != (l and 0xFF)) { invalidFrames++; dropFirst(); continue }
-                if (count < size) break
-                val candidate = buffer.copyOf(size)
-                try {
-                    Smart.validate(candidate, size)
-                } catch (e: MccProtocolException) {
-                    invalidFrames++
-                    dropFirst()
-                    continue
-                }
-                out.add(candidate)
-                count = 0
-            }
-        }
-        return out
-    }
-}
+class SmartStreamParser(size: Int = Smart.RX_SIZE) : FixedFrameParser(
+    frameSize = size.also { require(it == Smart.RX_SIZE || it == Smart.TX_SIZE) },
+    byte0 = Smart.START,
+    byte1 = (size - 1) shr 8,
+    byte2 = (size - 1) and 0xFF,
+    validator = { Smart.validate(it, size) },
+)
 
 /**
  * Codec du Smart, avec la numérotation de l'appli d'origine : chaque nouvelle trame prend la

@@ -12,13 +12,17 @@ import app.toque.core.companion.CompanionHub
 import app.toque.core.companion.HostCalls
 import app.toque.core.companion.EditError
 import app.toque.core.companion.ImageData
+import app.toque.core.companion.OwnStepWrite
+import app.toque.core.companion.OwnStepsRead
 import app.toque.core.companion.RecipeWrite
 import app.toque.core.companion.StartCommand
 import app.toque.core.companion.ServingsChange
 import app.toque.core.companion.ServingsReply
 import app.toque.core.i18n.tr
 import app.toque.core.machine.Verdict
+import app.toque.core.recipes.OwnStepSettings
 import app.toque.core.recipes.Recipe
+import app.toque.core.recipes.SettingAuthor
 import app.toque.core.recipes.adjusted
 import app.toque.core.recipes.corrected
 import app.toque.core.robot.RecipeCompat
@@ -227,6 +231,52 @@ class RobotHost(
             o.done -> o.value ?: RecipeWrite(error = EditError.of(CommandResult.noAnswer()))
             o.skipped -> RecipeWrite(error = EditError.of(CommandResult.timeout()))
             else -> RecipeWrite(error = EditError.of(CommandResult.noAnswer()))
+        }
+    }
+
+    override val takesOwnSteps: Boolean get() = true
+
+    /** La recette de la source, telle que la page de la recette l'affiche, et les réglages du propriétaire. */
+    override fun ownSteps(id: String): OwnStepsRead? {
+        if (id.length > MAX_ID) return null
+        val repo = app.recipes
+        val r = repo.get(id)?.takeIf { cookable(it) } ?: return null
+        val a = repo.adjustmentsOf(r.id)
+        return OwnStepsRead(r, r.adjusted(a), a.steps)
+    }
+
+    /**
+     * Sur le fil principal, d'un bloc, comme la page de la recette : relire la recette, décider, enregistrer
+     * (RecipeRepo.setStepSetting revérifie la règle ; la page affichée suit par RecipeRepo.onAdjusted). Jamais
+     * exécuté s'il n'a pas pu commencer à temps.
+     */
+    override fun writeOwnStep(id: String, decide: (read: OwnStepsRead?) -> OwnStepWrite): OwnStepWrite {
+        val o = HostCalls.attempt<OwnStepWrite>(post, timeout) { done ->
+            val repo = app.recipes
+            val w = decide(ownSteps(id))
+            if (w.error != null || !w.changed) done(w.done(ownSteps(id)))
+            else {
+                val problem = if (w.clear) {
+                    repo.clearStepSetting(id, w.index)
+                    null
+                } else repo.setStepSetting(id, w.index, w.machine, SettingAuthor.PHONE)
+                if (problem != null) done(w.failed(EditError(if (problem.code == OwnStepSettings.NOT_ALLOWED) 409 else 422, problem.code,
+                    tr("Étape %d : %s", w.index + 1, problem.message), "steps", w.index)))
+                else {
+                    // Venu d'un téléphone : à vérifier sur le robot avant son lancement, même si un réglage au même
+                    // résumé avait été vérifié à ce rang (dans ce même bloc, avant toute cuisson).
+                    CookScreen.forgetConfirmations(app.prefs, id, listOf(w.index))
+                    val by = w.phone.ifBlank { "un téléphone" }
+                    app.log.write("compagnon", if (w.clear) "étape ${w.index + 1} de $id ramenée au réglage de la recette depuis $by"
+                        else "réglage de l'étape ${w.index + 1} de $id donné depuis $by, à vérifier sur le robot")
+                    done(w.done(ownSteps(id)))
+                }
+            }
+        }
+        return when {
+            o.done -> o.value ?: OwnStepWrite(error = EditError.of(CommandResult.noAnswer()))
+            o.skipped -> OwnStepWrite(error = EditError.of(CommandResult.timeout()))
+            else -> OwnStepWrite(error = EditError.of(CommandResult.noAnswer()))
         }
     }
 

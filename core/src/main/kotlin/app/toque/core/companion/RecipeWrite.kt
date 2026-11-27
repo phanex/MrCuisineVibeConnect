@@ -493,15 +493,22 @@ object RecipeEdits {
      */
     const val MAX_BODY_BYTES = 192 * 1024
 
+    private val HEX_LOWER = "0123456789abcdef".toCharArray()
+    private val SPACES = Regex("\\s+")
+
     /** Version d'une recette enregistrée : empreinte de son contenu (le favori, changé à part, n'en fait pas partie). */
     fun version(r: Recipe): String {
         val bytes = MessageDigest.getInstance("SHA-256").digest(RecipeCodec.encode(r.copy(favorite = false)).toByteArray(Charsets.UTF_8))
-        val sb = StringBuilder()
-        for (i in 0 until 8) sb.append(String.format(java.util.Locale.ROOT, "%02x", bytes[i].toInt() and 0xFF))
-        return sb.toString()
+        val chars = CharArray(16)
+        for (i in 0 until 8) {
+            val v = bytes[i].toInt() and 0xFF
+            chars[i * 2] = HEX_LOWER[v ushr 4]
+            chars[i * 2 + 1] = HEX_LOWER[v and 0xF]
+        }
+        return String(chars)
     }
 
-    private fun clean(t: String) = t.trim().replace(Regex("\\s+"), " ")
+    private fun clean(t: String) = SPACES.replace(t.trim(), " ")
 
     /**
      * La recette [base] (enregistrée, ou la recette vide d'une création) récrite d'après [req], ou son

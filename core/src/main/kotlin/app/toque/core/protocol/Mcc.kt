@@ -84,7 +84,8 @@ class Telemetry(
      * se juge sur le bit moteur ([motorStopped]), jamais sur ce niveau.
      */
     val shownSpeedLevel: Int get() = if (speedFromTarget) targetSpeedLevelSigned.coerceAtMost(10) else actualSpeedLevel
-    val hex: String get() = Mcc.hex(raw)
+    @Volatile private var cachedHex: String? = null
+    val hex: String get() = cachedHex ?: Mcc.hex(raw).also { cachedHex = it }
 }
 
 object Mcc {
@@ -172,36 +173,48 @@ object Mcc {
         if ((raw[size - 2].toInt() and 0xFF) != checksum(raw, size - 2)) throw MccProtocolException("somme de contrôle")
     }
 
+    private val ACTUAL_SPEED_UPPER = intArrayOf(558, 1008, 1437, 3359, 6349, 9309, 12312, 15315, 18232)
+
     fun actualSpeedLevel(rpm: Int): Int {
         if (rpm <= 0) return 0
-        val upper = intArrayOf(558, 1008, 1437, 3359, 6349, 9309, 12312, 15315, 18232)
-        for (i in upper.indices) if (rpm <= upper[i]) return i + 1
+        for (i in ACTUAL_SPEED_UPPER.indices) if (rpm <= ACTUAL_SPEED_UPPER[i]) return i + 1
         return 10
     }
 
+    private fun u(raw: ByteArray, i: Int): Int = raw[i].toInt() and 0xFF
+    private fun word(raw: ByteArray, i: Int): Int = (u(raw, i) shl 8) or u(raw, i + 1)
+
     fun decodeRx(raw: ByteArray): Telemetry {
         validate(raw, RX_SIZE)
-        fun u(i: Int) = raw[i].toInt() and 0xFF
-        fun word(i: Int) = (u(i) shl 8) or u(i + 1)
-        val status = u(3)
+        val status = u(raw, 3)
         val mode = status and 3
         val error = status and 0x10 != 0
-        val warnings = ArrayList<String>(0)
-        if (u(6) > 10) warnings += "Niveau de vitesse cible hors 0..10"
-        if (u(11) > 19) warnings += "Niveau de température cible hors 0..19"
-        if (u(4) !in intArrayOf(0, 3, 4, 5)) warnings += "État étendu inconnu"
-        if (error && u(5) !in ERROR_MAP) warnings += "Erreur non répertoriée"
-        if (!error && u(5) != 0) warnings += "Code d'erreur sans drapeau d'erreur"
-        if (u(22) and 0xF8 != 0) warnings += "Bits de balance inconnus"
-        if (u(22) and 7 == 0) warnings += "Aucun drapeau de balance"
-        if (u(23) !in intArrayOf(0, 1, 2, 3, 4, 5, 7)) warnings += "Étape de calibration inconnue"
+        val ext = u(raw, 4)
+        val errCode = u(raw, 5)
+        val spd = u(raw, 6)
+        val tmpLvl = u(raw, 11)
+        val scaleRaw = u(raw, 22)
+        val calStep = u(raw, 23)
+        var warnings: ArrayList<String>? = null
+        fun warn(msg: String) {
+            if (warnings == null) warnings = ArrayList(2)
+            warnings!!.add(msg)
+        }
+        if (spd > 10) warn("Niveau de vitesse cible hors 0..10")
+        if (tmpLvl > 19) warn("Niveau de température cible hors 0..19")
+        if (ext != 0 && ext != 3 && ext != 4 && ext != 5) warn("État étendu inconnu")
+        if (error && errCode !in ERROR_MAP) warn("Erreur non répertoriée")
+        if (!error && errCode != 0) warn("Code d'erreur sans drapeau d'erreur")
+        if (scaleRaw and 0xF8 != 0) warn("Bits de balance inconnus")
+        if (scaleRaw and 7 == 0) warn("Aucun drapeau de balance")
+        if (calStep !in 0..5 && calStep != 7) warn("Étape de calibration inconnue")
         val scale = when {
-            u(22) and 4 != 0 -> "overload"
-            u(22) and 1 != 0 -> "calibration"
-            u(22) and 2 != 0 -> "normal"
+            scaleRaw and 4 != 0 -> "overload"
+            scaleRaw and 1 != 0 -> "calibration"
+            scaleRaw and 2 != 0 -> "normal"
             else -> "not_available"
         }
-        val weight = (u(16) shl 24) or (u(17) shl 16) or (u(18) shl 8) or u(19)
+        val weight = (u(raw, 16) shl 24) or (u(raw, 17) shl 16) or (u(raw, 18) shl 8) or u(raw, 19)
         return Telemetry(
             raw = raw.copyOf(),
             status = status,
@@ -211,25 +224,25 @@ object Mcc {
             scaleStable = status and 0x04 != 0,
             direction = if (status and 0x08 != 0) Direction.CLOCKWISE else Direction.COUNTER_CLOCKWISE,
             errorDetected = error,
-            errorCode = u(5),
-            androidErrorCode = if (error) ERROR_MAP[u(5)] ?: 6 else 0,
+            errorCode = errCode,
+            androidErrorCode = if (error) ERROR_MAP[errCode] ?: 6 else 0,
             aboveTargetTemperature = status and 0x20 != 0,
             bowlNtcDetected = status and 0x40 != 0,
             lidOpen = status and 0x80 != 0,
-            extendedState = u(4),
-            targetSpeedLevel = u(6),
-            targetRpm = word(7),
-            actualRpm = word(9),
-            targetTemperatureLevel = u(11),
-            targetTemperature = word(12),
-            actualTemperature = word(14),
+            extendedState = ext,
+            targetSpeedLevel = spd,
+            targetRpm = word(raw, 7),
+            actualRpm = word(raw, 9),
+            targetTemperatureLevel = tmpLvl,
+            targetTemperature = word(raw, 12),
+            actualTemperature = word(raw, 14),
             weight = weight,
-            firmwareVersion = word(20),
-            scaleStateRaw = u(22),
+            firmwareVersion = word(raw, 20),
+            scaleStateRaw = scaleRaw,
             scaleState = scale,
-            calibrationStep = u(23),
-            unknownByte24 = u(24),
-            warnings = warnings,
+            calibrationStep = calStep,
+            unknownByte24 = u(raw, 24),
+            warnings = warnings ?: emptyList(),
         )
     }
 
@@ -250,52 +263,10 @@ object Mcc {
  * Découpage robuste d'un flux d'octets : réassemble les trames fragmentées, accepte les
  * trames collées et se resynchronise après des octets corrompus. Garde au plus 26 octets.
  */
-class MccStreamParser(private val expectedSize: Int = Mcc.RX_SIZE) : FrameParser {
-    init {
-        require(expectedSize == Mcc.TX_SIZE || expectedSize == Mcc.RX_SIZE)
-    }
-
-    private val buffer = ByteArray(expectedSize)
-    private var count = 0
-    override var discardedBytes = 0L
-        private set
-    override var invalidFrames = 0L
-        private set
-    val bufferedBytes: Int get() = count
-
-    override fun reset() {
-        count = 0
-    }
-
-    private fun dropFirst() {
-        System.arraycopy(buffer, 1, buffer, 0, count - 1)
-        count--
-        discardedBytes++
-    }
-
-    override fun feed(data: ByteArray, length: Int, out: MutableList<ByteArray>): MutableList<ByteArray> {
-        val kind = if (expectedSize == Mcc.TX_SIZE) 0xA1 else 0xB1
-        for (i in 0 until length) {
-            buffer[count++] = data[i]
-            while (count > 0) {
-                if ((buffer[0].toInt() and 0xFF) != 0x55) { dropFirst(); continue }
-                if (count < 2) break
-                if ((buffer[1].toInt() and 0xFF) != expectedSize) { invalidFrames++; dropFirst(); continue }
-                if (count < 3) break
-                if ((buffer[2].toInt() and 0xFF) != kind) { invalidFrames++; dropFirst(); continue }
-                if (count < expectedSize) break
-                val candidate = buffer.copyOf(expectedSize)
-                try {
-                    Mcc.validate(candidate, expectedSize)
-                } catch (e: MccProtocolException) {
-                    invalidFrames++
-                    dropFirst()
-                    continue
-                }
-                out.add(candidate)
-                count = 0
-            }
-        }
-        return out
-    }
-}
+class MccStreamParser(expectedSize: Int = Mcc.RX_SIZE) : FixedFrameParser(
+    frameSize = expectedSize.also { require(it == Mcc.TX_SIZE || it == Mcc.RX_SIZE) },
+    byte0 = 0x55,
+    byte1 = expectedSize,
+    byte2 = if (expectedSize == Mcc.TX_SIZE) 0xA1 else 0xB1,
+    validator = { Mcc.validate(it, expectedSize) },
+)

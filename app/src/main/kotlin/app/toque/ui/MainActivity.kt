@@ -3,8 +3,10 @@ package app.toque.ui
 import app.toque.core.companion.CommandResult
 import android.app.Activity
 import android.content.Intent
+import android.graphics.Rect
 import android.media.AudioManager
 import android.media.ToneGenerator
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -12,8 +14,12 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
+import android.widget.AdapterView
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -33,6 +39,7 @@ import app.toque.core.machine.SafetyPolicy
 import app.toque.core.machine.Snapshot
 import app.toque.core.machine.Verdict
 import app.toque.core.ring.RingColour
+import app.toque.update.Updater
 import app.toque.core.robot.DeviceFacts
 import app.toque.core.robot.RobotDetector
 import app.toque.core.robot.RobotProfile
@@ -54,10 +61,27 @@ class MainActivity : Activity() {
     lateinit var app: ToqueApp
         private set
     private lateinit var root: FrameLayout
+    private lateinit var column: LinearLayout
     private lateinit var content: FrameLayout
     private lateinit var overlay: FrameLayout
     private lateinit var topBar: TopBar
     private lateinit var machineBar: MachineBar
+    private val visibleFrame = Rect()
+    private val rootLoc = IntArray(2)
+    private val imm by lazy { getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager }
+    /** Hauteur du clavier virtuel à l'écran (0 quand il est fermé). */
+    var keyboardHeight = 0
+        private set
+    /** Marge basse à appliquer dans [root] au-dessus du clavier (0 si [adjustResize] a déjà réduit [root]). */
+    var keyboardMargin = 0
+        private set
+    /** Appelé quand le clavier s'ouvre ou se ferme pendant qu'une fenêtre modale est ouverte. */
+    var overlayOnKeyboard: ((Boolean) -> Unit)? = null
+    /** Bas de la partie de la fenêtre que le clavier laisse visible (les essais, sans clavier, le remplacent). */
+    var visibleBottom: () -> Int = {
+        window.decorView.getWindowVisibleDisplayFrame(visibleFrame)
+        visibleFrame.bottom
+    }
     private val stack = ArrayList<Screen>()
     private val main = Handler(Looper.getMainLooper())
     private var unsubscribe: (() -> Unit)? = null
@@ -76,8 +100,15 @@ class MainActivity : Activity() {
         private set
     private var swallowTouch = false
     var knobListener: ((KeyEvent) -> Unit)? = null
+    private var knobLongHandled = false
+    private var lastKnobPressTime = 0L
+    private val knobLongPressRunnable = Runnable {
+        knobLongHandled = true
+        (current as? app.toque.ui.screens.ProgramsScreen)?.onKnobLongPress()
+    }
     private lateinit var timerAlarm: TimerAlarm
     private var unsubscribeTimers: (() -> Unit)? = null
+    private var activityStopped = false
     /** La fenêtre ouverte laisse la barre machine (et son bouton Stop) hors du voile. */
     private var overlaySparesBar = false
 
@@ -106,24 +137,32 @@ class MainActivity : Activity() {
 
         root = FrameLayout(this)
         root.background = Ui.background()
-        val column = Ui.vertical(this)
+        root.isFocusable = true
+        root.isFocusableInTouchMode = true
+        if (Build.VERSION.SDK_INT >= 26) FocusHighlightApi26.off(root)
+        column = Ui.vertical(this)
         topBar = TopBar(this)
         column.addView(topBar, Ui.lp(Ui.MATCH, Ui.u(TopBar.HEIGHT)))
         content = FrameLayout(this)
         column.addView(content, Ui.lp(Ui.MATCH, 0, 1f))
         machineBar = MachineBar(this)
+        machineBar.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            if (bottom - top != oldBottom - oldTop) machineBar.post { spareMachineBar() }
+        }
         column.addView(machineBar, Ui.lp(Ui.MATCH, Ui.WRAP))
         root.addView(column, Ui.flp())
         overlay = FrameLayout(this)
         overlay.visibility = View.GONE
         root.addView(overlay, Ui.flp())
         setContentView(root)
+        root.viewTreeObserver.addOnGlobalLayoutListener { updateKeyboardInset() }
         timerAlarm = TimerAlarm(this, root)
         standby = Standby(this, root)
         splash = Splash(this, root)
         updates = UpdateAlert(this)
         standby.onWake = { updates.onWake() }
         KnobLight.log = { m -> app.log.write("molette", m) }
+        KnobLight.idle(prefs.ring.on)
 
         try {
             tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 85)
@@ -343,6 +382,10 @@ class MainActivity : Activity() {
         updates.onStart()
         startTimers()
         root.postDelayed(syncCheck, 60_000)
+        if (activityStopped) {
+            activityStopped = false
+            current?.onShow()
+        }
     }
 
     // ------------------------------------------------------------------ minuteurs de cuisine
@@ -370,16 +413,63 @@ class MainActivity : Activity() {
     /** Hauteur de la barre machine quand elle est affichée (à laisser libre), 0 sinon. */
     fun machineBarSpace(): Int = if (machineBar.visibility == View.VISIBLE) machineBar.height.takeIf { it > 0 } ?: Ui.u(MachineBar.HEIGHT) else 0
 
+    private fun setBottomMargin(v: View, want: Int) {
+        val lp = v.layoutParams as FrameLayout.LayoutParams
+        if (lp.bottomMargin != want) {
+            lp.bottomMargin = want
+            v.layoutParams = lp
+        }
+    }
+
+    /**
+     * Marge basse de l'écran au-dessus du clavier. Sous une fenêtre ouverte, l'écran du dessous ne bouge pas
+     * (c'est la fenêtre qui se place au-dessus du clavier), sauf quand la barre machine est affichée : son
+     * bouton Stop reste toujours au-dessus du clavier.
+     */
+    private fun columnKeyboardMargin(): Int = if (overlayShown && machineBarSpace() == 0) 0 else keyboardMargin
+
     private fun spareMachineBar() {
         val bottom = machineBarSpace()
-        timerAlarm.spare(bottom)
-        if (overlay.visibility == View.VISIBLE) {
-            val lp = overlay.layoutParams as FrameLayout.LayoutParams
-            val want = if (overlaySparesBar) bottom else 0
-            if (lp.bottomMargin != want) {
-                lp.bottomMargin = want
-                overlay.layoutParams = lp
-            }
+        setBottomMargin(column, columnKeyboardMargin())
+        timerAlarm.spare(keyboardMargin + bottom)
+        if (overlayShown) setBottomMargin(overlay, keyboardMargin + if (overlaySparesBar) bottom else 0)
+        toastView?.let { setBottomMargin(it, maxOf(Ui.u(110), keyboardMargin + bottom + Ui.u(16))) }
+    }
+
+    /**
+     * En mode plein écran immersif, Android ne réduit pas toujours le contenu au-dessus du clavier :
+     * on mesure la zone réellement visible ([getWindowVisibleDisplayFrame]) pour remonter l'écran,
+     * les fenêtres modales et les messages au-dessus du clavier, et proposer de le masquer.
+     */
+    private fun updateKeyboardInset() {
+        // Appelé à chaque mise en page de l'écran (plusieurs fois par seconde pendant une cuisson) : sans champ de
+        // saisie ni clavier ouvert, rien à mesurer, et la zone visible n'est pas demandée au système (un appel
+        // à WindowManager à chaque fois).
+        if (keyboardHeight == 0 && window.currentFocus !is EditText) return
+        val decorH = window.decorView.height
+        if (decorH <= 0 || root.height <= 0) return
+        val visible = visibleBottom()
+        val rawKb = (decorH - visible).coerceAtLeast(0)
+        val kb = if (rawKb > Ui.u(90)) rawKb else 0
+        val margin = if (kb > 0) {
+            root.getLocationInWindow(rootLoc)
+            (rootLoc[1] + root.height - visible).coerceAtLeast(0)
+        } else 0
+        if (kb == keyboardHeight && margin == keyboardMargin) return
+        val wasShown = keyboardHeight > 0
+        keyboardHeight = kb
+        keyboardMargin = margin
+        val nowShown = kb > 0
+        topBar.setKeyboardVisible(nowShown && !overlayShown)
+        spareMachineBar()
+        if (wasShown != nowShown) {
+            // L'écran sous une fenêtre ouverte ne se resserre pas pour un clavier qui sert à la fenêtre.
+            if (!nowShown || !overlayShown) current?.onKeyboard(nowShown)
+            overlayOnKeyboard?.invoke(nowShown)
+            if (!nowShown) immersive()
+        }
+        if (nowShown) (currentFocus as? EditText)?.let { f ->
+            f.post { f.bringPointIntoView(f.selectionEnd.coerceAtLeast(0)) }
         }
     }
 
@@ -400,7 +490,13 @@ class MainActivity : Activity() {
         if (prefs.vendorSession) endVendorSession()
     }
 
+    override fun onPause() {
+        main.removeCallbacks(knobLongPressRunnable)
+        super.onPause()
+    }
+
     override fun onStop() {
+        main.removeCallbacks(knobLongPressRunnable)
         unsubscribeTimers?.invoke()
         unsubscribeTimers = null
         Timers.of(this).onRing = null
@@ -417,6 +513,8 @@ class MainActivity : Activity() {
         // Toque n'est plus à l'écran (appli d'origine, paramètres Android…) : blanc du robot.
         KnobLight.release()
         updates.onStop()
+        activityStopped = true
+        current?.onHide()
         super.onStop()
     }
 
@@ -426,13 +524,19 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        main.removeCallbacksAndMessages(null)
+        Updater.onInstallError = null
         tone?.release()
         super.onDestroy()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) immersive()
+        if (hasFocus) {
+            immersive()
+            // Smart : la rotation du système reste sur le paysage de Toque (#59). Rien sur le Connect.
+            RotationLock.apply(this, prefs) { m -> app.log.write("écran", m) }
+        }
     }
 
     @Suppress("DEPRECATION")
@@ -484,12 +588,15 @@ class MainActivity : Activity() {
     }
 
     private fun show(s: Screen) {
+        lastKnobPressTime = 0L
+        main.removeCallbacks(knobLongPressRunnable)
         content.removeAllViews()
         val v = s.view
         (v.parent as? FrameLayout)?.removeView(v)
         content.addView(v, Ui.flp())
         topBar.setTitle(s.title, s.titleCounter, stack.size > 1)
         s.onShow()
+        s.onKeyboard(false)
         s.onSnapshot(snapshot)
     }
 
@@ -517,7 +624,10 @@ class MainActivity : Activity() {
             if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) swallowTouch = false
             return true
         }
-        return super.dispatchTouchEvent(event)
+        noteTap(event)
+        val handled = super.dispatchTouchEvent(event)
+        if (event.actionMasked == MotionEvent.ACTION_UP) closeKeyboardAfterTapOutside(event)
+        return handled
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -532,7 +642,7 @@ class MainActivity : Activity() {
         }
         // Message de fin de minuteur, ou fenêtre ouverte : la molette agit sur eux, jamais sur l'écran dessous ;
         // une fenêtre sans réglage de molette (confirmation) ne se valide pas d'un appui de molette.
-        if (!isBack && (timerAlarm.shown || overlay.visibility == View.VISIBLE) && currentFocus !is android.widget.EditText) {
+        if (!isBack && (timerAlarm.shown || overlayShown && currentFocus !is EditText)) {
             val k = knobKind(event.keyCode)
             if (k != 0) {
                 if (event.action == KeyEvent.ACTION_DOWN) {
@@ -542,25 +652,35 @@ class MainActivity : Activity() {
                 return true
             }
         }
-        if (!isBack && event.action == KeyEvent.ACTION_DOWN && overlay.visibility != View.VISIBLE) {
-            val k = event.keyCode
-            // Par défaut : les flèches, et les touches du bouton du robot (clavier mtk-kpd :
-            // F6 à droite, F7 à gauche, F5 à l'appui).
-            val left = prefs.knobLeft.let {
-                if (it >= 0) it == k else k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_F7
-            }
-            val right = prefs.knobRight.let {
-                if (it >= 0) it == k else k == KeyEvent.KEYCODE_DPAD_RIGHT || k == KeyEvent.KEYCODE_F6
-            }
-            val press = prefs.knobPress.let {
-                if (it >= 0) it == k else k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER || k == KeyEvent.KEYCODE_F5
-            }
+        if (!isBack && !overlayShown) {
+            val k = knobKind(event.keyCode)
+            if (k != 0 && event.action == KeyEvent.ACTION_DOWN && !prefs.knobSetupDone) prefs.knobSetupDone = true
             val s = current
-            if ((left || right || press) && !prefs.knobSetupDone) prefs.knobSetupDone = true
-            if (s != null && currentFocus !is android.widget.EditText) {
-                if (left && s.onKnob(-1)) return true
-                if (right && s.onKnob(1)) return true
-                if (press && s.onKnobPress()) return true
+            // Programmes (#105) : appui long = retour, double appui ; l'appui simple part au relâchement.
+            if (k == PRESS && s is app.toque.ui.screens.ProgramsScreen && currentFocus !is EditText) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    if (event.repeatCount == 0) {
+                        knobLongHandled = false
+                        main.postDelayed(knobLongPressRunnable, 500L)
+                    }
+                    return true
+                } else if (event.action == KeyEvent.ACTION_UP) {
+                    main.removeCallbacks(knobLongPressRunnable)
+                    if (!knobLongHandled) {
+                        val now = android.os.SystemClock.uptimeMillis()
+                        if (now - lastKnobPressTime < 350L && s.onKnobDoubleClick()) {
+                            lastKnobPressTime = 0L
+                        } else {
+                            lastKnobPressTime = now
+                            s.onKnobPress()
+                        }
+                    }
+                    return true
+                }
+            }
+            if (k != 0 && event.action == KeyEvent.ACTION_DOWN && s != null && currentFocus !is EditText) {
+                if (k == PRESS && s.onKnobPress()) return true
+                if (k != PRESS && s.onKnob(k)) return true
             }
         }
         return super.dispatchKeyEvent(event)
@@ -694,7 +814,7 @@ class MainActivity : Activity() {
         t.gravity = Gravity.CENTER
         t.maxWidth = Ui.u(820)
         val lp = Ui.flp(Ui.WRAP, Ui.WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
-        lp.bottomMargin = Ui.u(110)
+        lp.bottomMargin = maxOf(Ui.u(110), keyboardMargin + machineBarSpace() + Ui.u(16))
         root.addView(t, lp)
         toastView = t
         t.alpha = 0f
@@ -715,9 +835,13 @@ class MainActivity : Activity() {
      * (son bouton Stop reste à portée) quand un programme tourne.
      */
     fun showOverlay(card: View, width: Int = 640, dismissOnScrim: Boolean = true, spareMachineBar: Boolean = false) {
+        // Avant de refermer le clavier : la fenêtre d'avant, qu'on remplace, n'a plus à suivre son départ.
+        overlayOnKeyboard = null
         hideKeyboard()
         overlayKnob = null
         overlaySparesBar = spareMachineBar
+        column.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+        topBar.setKeyboardVisible(false)
         overlay.removeAllViews()
         overlay.setBackgroundColor(Ui.SCRIM)
         overlay.isClickable = true
@@ -731,10 +855,16 @@ class MainActivity : Activity() {
     }
 
     fun closeOverlay() {
+        // Avant de refermer le clavier : la fenêtre s'en va, elle n'a plus à suivre son départ.
+        overlayOnKeyboard = null
+        if (keyboardHeight > 0 || currentFocus is EditText) hideKeyboard()
         overlay.visibility = View.GONE
         overlay.removeAllViews()
         overlayKnob = null
         overlaySparesBar = false
+        column.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
+        topBar.setKeyboardVisible(false)
+        spareMachineBar()
     }
 
     /** Dialogue de confirmation. */
@@ -806,9 +936,87 @@ class MainActivity : Activity() {
         immersive()
     }
 
+    fun showKeyboard(field: View, afterPost: (() -> Unit)? = null) {
+        field.requestFocus()
+        field.post {
+            imm.showSoftInput(field, InputMethodManager.SHOW_IMPLICIT)
+            afterPost?.invoke()
+        }
+    }
+
     fun hideKeyboard() {
-        val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
-        currentFocus?.let { imm.hideSoftInputFromWindow(it.windowToken, 0) }
+        // Le champ en cours est demandé à la fenêtre : les essais ne le suivent que par elle.
+        val focused = window.currentFocus
+        val token = focused?.windowToken ?: window.decorView.windowToken
+        imm.hideSoftInputFromWindow(token, 0)
+        if (focused is EditText) {
+            focused.clearFocus()
+            root.requestFocus()
+        }
+        // Une fenêtre ouverte apprend tout de suite que son clavier part, sans attendre qu'Android le
+        // constate : elle se replace pendant qu'il se referme, pas après.
+        if (keyboardHeight > 0) overlayOnKeyboard?.invoke(false)
+    }
+
+    /** Hauteur dont dispose une fenêtre ouverte quand le clavier est fermé (la barre machine épargnée, s'il y a lieu). */
+    fun overlayRoom(): Int = root.height - (if (overlaySparesBar) machineBarSpace() else 0)
+
+    // ------------------------------------------------------------------ appui à côté du champ
+
+    private var tapField: EditText? = null
+    private var tapArmed = false
+    private var tapX = 0f
+    private var tapY = 0f
+
+    private fun noteTap(event: MotionEvent) {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                tapField = window.currentFocus as? EditText
+                tapArmed = tapField != null || keyboardHeight > 0
+                tapX = event.x
+                tapY = event.y
+            }
+            MotionEvent.ACTION_CANCEL -> tapArmed = false
+        }
+    }
+
+    /**
+     * Ce robot n'a pas de bouton Retour, donc rien pour refermer le clavier : un appui bref ailleurs que sur
+     * un champ le referme, sur une page comme dans une fenêtre ouverte (sa carte, le voile autour). Un
+     * bouton garde son effet et décide lui-même (« Suivant » garde le clavier, « OK » le referme) ; une
+     * ligne de liste aussi. Faire défiler la page ne le referme pas.
+     */
+    private fun closeKeyboardAfterTapOutside(up: MotionEvent) {
+        if (!tapArmed) return
+        tapArmed = false
+        val field = tapField
+        tapField = null
+        val slop = ViewConfiguration.get(this).scaledTouchSlop
+        if (Math.abs(up.x - tapX) > slop || Math.abs(up.y - tapY) > slop) return
+        // L'appui a donné la main à un autre champ : le clavier sert encore.
+        val now = window.currentFocus
+        if (now is EditText && now !== field) return
+        var v: View? = viewAt(window.decorView, tapX, tapY)
+        while (v != null) {
+            if (v is EditText) return
+            // Le voile d'une fenêtre ouverte : rien à y presser, même s'il écoute les appuis pour se fermer.
+            if (v === overlay) break
+            if (v.hasOnClickListeners() || v.parent is AdapterView<*>) return
+            v = v.parent as? View
+        }
+        hideKeyboard()
+    }
+
+    /** La vue affichée sous le point ([x], [y] dans le repère du parent de [v]), la plus au-dessus. */
+    private fun viewAt(v: View, x: Float, y: Float): View? {
+        // Là où la vue est dessinée : sa place, plus son décalage (une carte qui glisse).
+        if (v.visibility != View.VISIBLE || x < v.x || x >= v.x + v.width || y < v.y || y >= v.y + v.height) return null
+        if (v is ViewGroup) {
+            val cx = x - v.x + v.scrollX
+            val cy = y - v.y + v.scrollY
+            for (i in v.childCount - 1 downTo 0) viewAt(v.getChildAt(i), cx, cy)?.let { return it }
+        }
+        return v
     }
 
     // ------------------------------------------------------------------ appli d'origine
@@ -871,7 +1079,27 @@ class MainActivity : Activity() {
     }
 
     /** Paramètres Android (accès caché), avec le bouton « Retour à Toque » pour en revenir. */
-    fun openAndroidSettings() {
+    fun openAndroidSettings() = openOutside(Intent(android.provider.Settings.ACTION_SETTINGS))
+
+    /**
+     * L'appli Magisk (ses notifications, les droits accordés), sans passer par un PC. Elle est ouverte par
+     * son lanceur : le nom de son écran change d'une version à l'autre. Introuvable (désinstallée, ou masquée
+     * sous un autre nom par son propre réglage) : un message. Avant d'ouvrir, un rappel : Magisk propose une
+     * réinstallation qui réécrit le démarrage du robot.
+     */
+    fun openMagisk() {
+        val launch = packageManager.getLaunchIntentForPackage(MAGISK_PACKAGE)
+        if (launch == null) {
+            toast(tr("Magisk est introuvable sur ce robot : désinstallé, ou masqué sous un autre nom."), Ui.WARN)
+            return
+        }
+        confirm(tr("Ouvrir Magisk ?"),
+            tr("Magisk donne à Toque l'accès root dont il a besoin. Vous pouvez y régler ses notifications. N'y lancez jamais « Installation directe » et refusez toute réinstallation proposée : elle réécrit le démarrage du robot."),
+            tr("Ouvrir")) { openOutside(launch) }
+    }
+
+    /** Ouvre [intent] hors de Toque, avec le bouton « Retour à Toque » : le robot n'a pas de touche Retour. */
+    private fun openOutside(intent: Intent) {
         Thread {
             val ok = ReturnBubble.ensurePermission(this)
             main.post {
@@ -882,7 +1110,7 @@ class MainActivity : Activity() {
                 prefs.returnBubble = true
                 ReturnBubble.start(this)
                 try {
-                    startActivity(Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 } catch (_: Exception) {
                     prefs.returnBubble = false
                     ReturnBubble.stop(this)
@@ -894,6 +1122,8 @@ class MainActivity : Activity() {
     companion object {
         private var reopenSettings = false
         private const val STORAGE_REQUEST = 7
+        /** L'appli Magisk sous son nom d'origine (son réglage « Masquer l'appli » lui en donne un autre). */
+        const val MAGISK_PACKAGE = "com.topjohnwu.magisk"
         private const val PRESS = 2
 
         /** MotionEvent.AXIS_SCROLL (API 26), valeur fixe pour Android 6. */
@@ -905,5 +1135,17 @@ class MainActivity : Activity() {
             clockFormat.timeZone = java.util.TimeZone.getDefault()
             return clockFormat.format(Date())
         }
+    }
+}
+
+/**
+ * À part de [MainActivity] : une classe qui nomme une méthode absente d'Android 6, même derrière un test de
+ * version, n'y est plus vérifiée à l'installation mais à chaque démarrage. Celle-ci n'est chargée qu'à partir
+ * d'Android 8.
+ */
+@android.annotation.TargetApi(26)
+private object FocusHighlightApi26 {
+    fun off(v: View) {
+        v.defaultFocusHighlightEnabled = false
     }
 }

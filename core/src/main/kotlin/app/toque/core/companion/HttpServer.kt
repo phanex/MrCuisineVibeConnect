@@ -121,7 +121,7 @@ class HttpServer(
     }
 
     @Volatile private var server: ServerSocket? = null
-    private var pool: ThreadPoolExecutor? = null
+    @Volatile private var pool: ThreadPoolExecutor? = null
     private val active: MutableSet<Conn> = Collections.synchronizedSet(HashSet())
     private val perClient = HashMap<String, Int>()
     private var total = 0
@@ -173,8 +173,18 @@ class HttpServer(
             } catch (_: InterruptedException) {
                 return
             }
-            val t = now()
-            val late = synchronized(active) { active.filter { t > it.deadline } }
+            val late = synchronized(active) {
+                if (active.isEmpty()) return@synchronized emptyList<Conn>()
+                val t = now()
+                var out: ArrayList<Conn>? = null
+                for (c in active) {
+                    if (t > c.deadline) {
+                        if (out == null) out = ArrayList(2)
+                        out.add(c)
+                    }
+                }
+                out ?: emptyList()
+            }
             for (c in late) closeQuietly(c.socket)
         }
     }
@@ -290,7 +300,7 @@ class HttpServer(
     }
 
     private companion object {
-        const val REAP_MS = 100L
+        const val REAP_MS = 500L
     }
 }
 
@@ -372,7 +382,7 @@ object HttpParser {
         var leading = true
         var seen = 0
         while (true) {
-            checkDeadline(deadlineMs)
+            if ((seen and 63) == 0) checkDeadline(deadlineMs)
             val b = input.read()
             if (b < 0) throw HttpProtocolException(400, "Incomplete request")
             if (++seen > limits.maxHeaderBytes) throw HttpProtocolException(431, "Headers too large")
@@ -423,6 +433,7 @@ object HttpParser {
                     i += 3
                 }
                 c == '+' && plusIsSpace -> { out.write(' '.code); i++ }
+                c.code < 128 -> { out.write(c.code); i++ }
                 else -> {
                     val bytes = c.toString().toByteArray(Charsets.UTF_8)
                     out.write(bytes, 0, bytes.size)

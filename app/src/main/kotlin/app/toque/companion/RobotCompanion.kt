@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import app.toque.ToqueApp
 import app.toque.core.companion.CompanionHub
+import app.toque.core.companion.CookSession
 import app.toque.core.companion.CompanionStore
 import app.toque.core.companion.RobotInfo
 import app.toque.core.companion.WaitingCodec
@@ -145,6 +146,7 @@ class RobotCompanion(private val app: ToqueApp) {
         // Nombre de personnes changé sur la page d'une recette : la recette en attente, si c'est elle, suit.
         app.recipes.onAdjusted { id -> safe("personnes") { app.recipes.getAdjusted(id)?.let { hub.recipeServingsChanged(id, it.servings) } } }
         io.execute { restoreWaiting() }
+        io.execute { restoreSuspended() }
         syncServer()
     }
 
@@ -242,6 +244,23 @@ class RobotCompanion(private val app: ToqueApp) {
             } catch (t: Throwable) {
                 app.log.write("compagnon", "recette en attente non enregistrée : $t")
             }
+        }
+    }
+
+    /**
+     * Après un redémarrage : la recette que l'accueil propose de reprendre, vue par les téléphones en
+     * `suspendedSession` (étape où elle en était, étapes d'avant faites), jusqu'à sa reprise ou son abandon.
+     */
+    private fun restoreSuspended() {
+        try {
+            val id = app.prefs.guidedRecipe
+            if (id.isEmpty()) return
+            val r = app.recipes.getAdjusted(id) ?: return
+            if (r.steps.isEmpty()) return
+            val step = app.prefs.guidedStep.coerceIn(0, r.steps.size - 1)
+            hub.suspendSession(CookSession.of(r, step, (0 until step).toSet()))
+        } catch (t: Throwable) {
+            app.log.write("compagnon", "recette à reprendre illisible : $t")
         }
     }
 

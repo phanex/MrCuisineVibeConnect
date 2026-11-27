@@ -19,9 +19,10 @@ it going.
 
 | Robot | Label under the robot | Status | How to install |
 |---|---|---|---|
-| Monsieur Cuisine **Connect** | SKMC 1200 (A1, B2, C3) | Supported | [AI agent](AGENTS.md) or [install guide](docs/INSTALLATION.md), then `Toque-x.y.z.apk` |
+| Monsieur Cuisine **Connect** | SKMC 1200 (A1, B2, C3, D4) | Supported | [AI agent](AGENTS.md) or [install guide](docs/INSTALLATION.md), then `Toque-x.y.z.apk`. Every D4 and some C3 have the board of the SKMC 1100 A1 (`spm188a`): same extra step as the next line; the install script reads the board and says which one it sees ([#115](https://github.com/Wuki60/MrCuisineVibeConnect/issues/115)) |
 | Monsieur Cuisine **Connect** | SKMC 1100 A1 | Supported | Same, with one more step, `own-twrp`: TWRP rebuilt around the robot's own kernel ([#10](https://github.com/Wuki60/MrCuisineVibeConnect/issues/10)) |
-| Monsieur Cuisine **Smart** | SKMS 1200 | **In test**: tested by Smart owners, reports in [#59](https://github.com/Wuki60/MrCuisineVibeConnect/issues/59) | [Smart guide](docs/SMART.en.md), then `Toque-smart-x.y.z.apk` |
+| Monsieur Cuisine **Smart** | SKMS 1200 (A1, MediaTek board, Android 8.1) | **In test**: tested by Smart owners, reports in [#59](https://github.com/Wuki60/MrCuisineVibeConnect/issues/59) | [Smart guide](docs/SMART.en.md), then `Toque-smart-x.y.z.apk` |
+| Monsieur Cuisine **Smart** | SKMS 1200 C1 (Allwinner board, Android 10) | **Not supported yet** | Other hardware: the Smart guide does not apply to it ([#59](https://github.com/Wuki60/MrCuisineVibeConnect/issues/59)) |
 
 Each [release](https://github.com/Wuki60/MrCuisineVibeConnect/releases/latest) has two APKs built from
 the same code: **`Toque-x.y.z.apk` for the Connect** and **`Toque-smart-x.y.z.apk` for the Smart**
@@ -36,8 +37,8 @@ robot without sending anything to its motor base and asks you to confirm it.
 > comes from Flav974's and Tidusneo24150's ports; the project does not own a Smart. Use at your own
 > risk and follow the first-run procedure.
 >
-> The interface is available in **English**, **French**, **German**, **Spanish**, **Catalan** and
-> **Ukrainian** (*Settings › Language and time*), and other languages can be added with a single file
+> The interface is available in **English**, **French**, **German**, **Spanish**, **Catalan**,
+> **Polish** and **Ukrainian** (*Settings › Language and time*), and other languages can be added with a single file
 > (see below).
 
 ## Community site: [toqueapp.org](https://toqueapp.org)
@@ -82,7 +83,13 @@ needs Toque 0.10.0 or later on the robot.
 **Link a phone**: on the robot, *Settings › Phone › Pair a phone*, then scan the QR code with the app,
 or type the 6-digit code shown under it (valid 2 minutes). The robot listens only once a phone is
 paired or the pairing screen is open, and a phone that is not paired cannot see it, even on the same
-Wi-Fi. The pairing screen lists the paired phones and removes the ones you no longer use.
+Wi-Fi. The pairing screen and *Settings › Phone* list the paired phones: rename them, remove the ones
+you no longer use, or set one **read-only** (it follows the robot and commands nothing: a wall screen,
+home automation).
+
+**Home Assistant**: [Toque Companion for Home Assistant](https://github.com/gornog/toque-companion-homeassistant)
+by @gornog (in HACS) shows the robot's state in Home Assistant through the same pairing, with only
+Pause, Stop and Tare, or none in its *sensor only* mode. For such a client, pair it read-only.
 
 ## Install with an AI agent (Connect)
 
@@ -94,7 +101,7 @@ Copilot…) do the install. Give it this message:
 
 [AGENTS.md](AGENTS.md) describes the whole procedure to the agent, and
 [`tools/setup/toque-setup.ps1`](tools/setup/toque-setup.ps1) (Windows) or
-[`tools/setup/toque-setup.sh`](tools/setup/toque-setup.sh) (macOS) does the work step by step
+[`tools/setup/toque-setup.sh`](tools/setup/toque-setup.sh) (macOS, Linux) does the work step by step
 (verified downloads, driver on Windows, backup, root, install, ADB over Wi-Fi). The agent only
 asks you for what it cannot do itself:
 
@@ -106,7 +113,7 @@ asks you for what it cannot do itself:
 - tap **Grant** once on the robot's screen.
 
 Allow 1 to 2 hours. Without an agent: [docs/INSTALLATION.md](docs/INSTALLATION.md) (Windows) or
-[docs/MACOS.en.md](docs/MACOS.en.md) (macOS).
+[docs/MACOS.en.md](docs/MACOS.en.md) (macOS) or [docs/LINUX.en.md](docs/LINUX.en.md) (Linux).
 
 ## Install from a Mac (Connect)
 
@@ -126,6 +133,16 @@ The full guide, with what to do when mtkclient does not reach the robot:
 [docs/MACOS.en.md](docs/MACOS.en.md). An AI agent can also run it for you (see above).
 Done end to end on a real SKMC 1200 C3 from an Apple silicon Mac in November 2026 (Intel Macs and the
 SKMC 1100 A1 not tested yet: please report). Thanks to @julienperrault and @flexbox.
+
+## Install from Linux (Connect)
+
+The same script, `tools/setup/toque-setup.sh`, runs on Linux: mtkclient goes through libusb, and a
+udev rule (`tools/setup/linux/51-toque-mtk.rules`) gives your user access to the robot in download
+mode and keeps ModemManager away from it. `prepare` prints the one-time `sudo` commands.
+
+The full guide: [docs/LINUX.en.md](docs/LINUX.en.md). Done end to end from Fedora 44 on a real
+robot with an `spm188a` board (labelled SKMC 1200, so `own-twrp` first) in November 2026; other
+distributions not tested yet.
 
 ## Features
 
@@ -149,7 +166,7 @@ SKMC 1100 A1 not tested yet: please report). Thanks to @julienperrault and @flex
   French, English, German, Spanish, Catalan and Ukrainian; only a revocable key of the robot is kept,
   never the password.
 - **Your own [Mealie](https://mealie.io) server** (self-hosted recipes): link the robot to it
-  (*Settings › Other*, with your username or an API token) and all its recipes arrive on
+  (*Settings › Recipes › Mealie*, with your username or an API token) and all its recipes arrive on
   the robot, read-only, nightly or on demand, with a "Mealie" chip in the list. Settings written in
   the steps ("5 min/100 °C/speed 1", "10 sec/speed 5", "Turbo 3 times", "dough mode 2 min") are
   suggested and must be checked before they start, like imported recipes. Only a token of the robot is
@@ -199,9 +216,11 @@ SKMC 1100 A1 not tested yet: please report). Thanks to @julienperrault and @flex
 - **Standby**, like the stock app: after a few minutes without a touch or a turn of the knob
   (2 to 30 min, or never, in *Settings › Screen*), a dimmed black screen shows the time, and the
   bowl temperature when it is hot. Never during a program or on the scale. The gesture that wakes
-  the screen does nothing else. During standby, the knob ring stays normal, dims to a faint white
-  night-light, or turns off (*Settings › Knob and sounds*).
-- **Bowl sensor that reads the wrong way round**: on some robots (seen on an SKMC 1200 C3) the
+  the screen does nothing else. During standby, the knob ring keeps its light, dims it (five
+  levels, never brighter than when on) or turns off. Its brightness when on can be set too, and, with
+  the colour code switched off, its colour when on and during standby, among those its red, green and
+  white LEDs can make (*Settings › Knob and sounds › Knob light*).
+- **Bowl sensor that reads the wrong way round**: on some robots (seen on an SKMC 1200 C3 and an SKMC 1100 A1) the
   base reports the bowl as present when it is removed; *Settings › Safety › Invert the bowl
   sensor* fixes it.
 - **Made for a robot without Android buttons**: Toque opens at startup, and a **Back to Toque**

@@ -1,6 +1,9 @@
 package app.toque.ui.screens
 
 import android.content.Context
+import android.graphics.Outline
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
@@ -8,8 +11,8 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewOutlineProvider
 import android.view.inputmethod.EditorInfo
-import android.view.inputmethod.InputMethodManager
 import android.widget.AbsListView
 import android.widget.BaseAdapter
 import android.widget.EditText
@@ -85,24 +88,35 @@ class RecipesScreen(
     /** Les résultats affichés correspondent au catalogue chargé (sinon : rien n'est encore connu). */
     private var resultsLoaded = false
     private var generation = 0
+    private var focusedOnce = false
+    private var compactCards = false
+    private lateinit var rootBox: LinearLayout
+    private lateinit var searchBar: LinearLayout
+    private lateinit var searchField: LinearLayout
+    private lateinit var clearBtn: View
     private lateinit var input: EditText
     private lateinit var chipScroller: HorizontalScrollView
     private lateinit var chips: LinearLayout
+    private var filtersRow: View? = null
     private lateinit var grid: GridView
     private lateinit var sortButton: LinearLayout
     private lateinit var sortLabel: TextView
     private lateinit var empty: LinearLayout
+    private lateinit var emptyIcon: View
     private lateinit var emptyText: TextView
     private var refreshBtn: View? = null
+    private lateinit var newRecipeBtn: View
     private val adapter = Adapter()
     private var unsub: (() -> Unit)? = null
     private val runSearch = Runnable { search() }
+    private val focusInput = Runnable { a.showKeyboard(input) }
     private val knob by lazy { KnobFocus(view, ListKnob()) }
     /** Recette encadrée par la molette (position dans [results]), -1 : aucune. */
     private var framedCard = -1
 
     override fun build(): View {
         val root = Ui.vertical(c)
+        rootBox = root
         root.setPadding(Ui.u(24), Ui.u(6), Ui.u(24), 0)
         // La page prend le focus que le champ de recherche rend : la molette revient alors à la liste
         // (un champ qui a le focus garde les touches de la molette pour lui).
@@ -110,10 +124,18 @@ class RecipesScreen(
         root.descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS
 
         val bar = Ui.horizontal(c)
+        searchBar = bar
         val field = Ui.horizontal(c)
+        searchField = field
         field.setPadding(Ui.u(20), 0, Ui.u(10), 0)
         field.background = Ui.round(Ui.SURFACE, 32f, Ui.STROKE, 1f)
         field.addView(Icon(c, Icon.Kind.SEARCH, Ui.TEXT2), LinearLayout.LayoutParams(Ui.u(26), Ui.u(26)).apply { rightMargin = Ui.u(12) })
+        val clear = Icon(c, Icon.Kind.CLOSE, Ui.TEXT2).apply {
+            setPadding(Ui.u(12), Ui.u(12), Ui.u(12), Ui.u(12))
+            visibility = View.GONE
+            setOnClickListener { input.setText("") }
+        }
+        clearBtn = clear
         input = EditText(c).apply {
             setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.uf(21f))
             setTextColor(Ui.TEXT)
@@ -128,6 +150,7 @@ class RecipesScreen(
                 override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c1: Int) {}
                 override fun afterTextChanged(s: Editable?) {
                     query = s?.toString() ?: ""
+                    clearBtn.visibility = if (query.isEmpty()) View.GONE else View.VISIBLE
                     refreshSort()
                     view.removeCallbacks(runSearch)
                     view.postDelayed(runSearch, 120)
@@ -136,24 +159,22 @@ class RecipesScreen(
             setOnEditorActionListener { _, _, _ -> leaveField(); true }
         }
         field.addView(input, LinearLayout.LayoutParams(0, Ui.MATCH, 1f))
-        val clear = Icon(c, Icon.Kind.CLOSE, Ui.TEXT2)
-        clear.setPadding(Ui.u(10), Ui.u(10), Ui.u(10), Ui.u(10))
-        clear.setOnClickListener { input.setText("") }
-        field.addView(clear, LinearLayout.LayoutParams(Ui.u(48), Ui.u(48)))
+        field.addView(clear, LinearLayout.LayoutParams(Ui.u(52), Ui.u(52)))
         bar.addView(field, LinearLayout.LayoutParams(0, Ui.u(64), 1f))
         if (favorites) {
             // Favoris : reprendre tout de suite ceux du compte toqueapp.org (et les recettes du site).
             refreshBtn = Ui.button(c, tr("Actualiser"), Ui.Style.SECONDARY, Icon.Kind.SYNC, height = 64, textSize = 18f) { refreshFavorites() }
                 .also { bar.addView(it, Ui.lp(Ui.WRAP, Ui.WRAP, l = 16)) }
         }
-        bar.addView(Ui.button(c, tr("Nouvelle recette"), Ui.Style.SECONDARY, Icon.Kind.PLUS, height = 64, textSize = 18f) {
+        newRecipeBtn = Ui.button(c, tr("Nouvelle recette"), Ui.Style.SECONDARY, Icon.Kind.PLUS, height = 64, textSize = 18f) {
             a.hideKeyboard()
             a.push(RecipeEditScreen(a, UserRecipes.blank(), isNew = true))
-        }, Ui.lp(Ui.WRAP, Ui.WRAP, l = 16))
+        }.also { bar.addView(it, Ui.lp(Ui.WRAP, Ui.WRAP, l = 16)) }
         root.addView(bar)
 
         // Pastilles (elles défilent), puis le tri, toujours visible à droite.
         val filters = Ui.horizontal(c, Gravity.CENTER_VERTICAL)
+        filtersRow = filters
         chipScroller = HorizontalScrollView(c).apply {
             isHorizontalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
@@ -174,7 +195,7 @@ class RecipesScreen(
             horizontalSpacing = Ui.u(14)
             verticalSpacing = Ui.u(14)
             stretchMode = GridView.STRETCH_COLUMN_WIDTH
-            selector = android.graphics.drawable.ColorDrawable(0)
+            selector = ColorDrawable(0)
             isVerticalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
             setPadding(0, 0, 0, Ui.u(20))
@@ -191,7 +212,9 @@ class RecipesScreen(
         }
         body.addView(grid, Ui.flp())
         empty = Ui.vertical(c, Gravity.CENTER)
-        empty.addView(Icon(c, Icon.Kind.BOOK, Ui.TEXT3), LinearLayout.LayoutParams(Ui.u(64), Ui.u(64)))
+        emptyIcon = Icon(c, Icon.Kind.BOOK, Ui.TEXT3).also {
+            empty.addView(it, LinearLayout.LayoutParams(Ui.u(64), Ui.u(64)))
+        }
         emptyText = Ui.text(c, "", 21f, Ui.TEXT2).apply { gravity = Gravity.CENTER; setLineSpacing(0f, 1.2f) }
         empty.addView(emptyText, Ui.lp(Ui.u(640), Ui.WRAP, t = 16))
         body.addView(empty, Ui.flp())
@@ -206,6 +229,28 @@ class RecipesScreen(
     private fun leaveField() {
         a.hideKeyboard()
         if (input.hasFocus()) input.clearFocus()
+    }
+
+    override fun onKeyboard(visible: Boolean) {
+        filtersRow?.visibility = if (visible) View.GONE else View.VISIBLE
+        if (visible == compactCards) return
+        compactCards = visible
+        rootBox.setPadding(Ui.u(24), Ui.u(if (visible) 2 else 6), Ui.u(24), 0)
+        val barH = Ui.u(if (visible) 54 else 64)
+        (searchField.layoutParams as LinearLayout.LayoutParams).height = barH
+        refreshBtn?.minimumHeight = barH
+        newRecipeBtn.minimumHeight = barH
+        searchBar.requestLayout()
+        emptyIcon.visibility = if (visible) View.GONE else View.VISIBLE
+        emptyText.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.uf(if (visible) 18f else 21f))
+        (emptyText.layoutParams as LinearLayout.LayoutParams).topMargin = Ui.u(if (visible) 0 else 16)
+        grid.numColumns = if (visible) 2 else 4
+        grid.horizontalSpacing = Ui.u(if (visible) 12 else 14)
+        grid.verticalSpacing = Ui.u(if (visible) 8 else 14)
+        grid.setPadding(0, Ui.u(if (visible) 4 else 0), 0, Ui.u(if (visible) 8 else 20))
+        adapter.notifyDataSetChanged()
+        if (visible && knob.shown && knob.index <= chips.childCount) knob.hide()
+        if (knob.shown && framedCard >= 0) grid.post { follow(framedCard) }
     }
 
     /** « Trier : A à Z ⌄ » : ouvre le choix de l'ordre. */
@@ -390,13 +435,15 @@ class RecipesScreen(
         showLitChip()
         search()
         unsub = a.app.recipes.onChange { buildChips(); search() }
-        if (focusSearch) view.postDelayed({
-            input.requestFocus()
-            (c.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
-        }, 150)
+        if (focusSearch && !focusedOnce) {
+            focusedOnce = true
+            view.postDelayed(focusInput, 150)
+        }
     }
 
     override fun onHide() {
+        view.removeCallbacks(focusInput)
+        view.removeCallbacks(runSearch)
         knob.hide()
         unsub?.invoke()
     }
@@ -418,13 +465,17 @@ class RecipesScreen(
     private inner class ListKnob : KnobFocus.Slots {
         private val chipCount: Int get() = chips.childCount
         private val sortSlot: Int get() = chipCount
+        private val filtersShown: Boolean get() = filtersRow?.visibility == View.VISIBLE
         override val size: Int get() = chipCount + 1 + results.size
-        override fun start(): Int =
-            if (results.isNotEmpty()) sortSlot + 1 + grid.firstVisiblePosition.coerceIn(0, results.size - 1) else 0
+        override fun start(): Int = when {
+            results.isNotEmpty() -> sortSlot + 1 + grid.firstVisiblePosition.coerceIn(0, results.size - 1)
+            filtersShown -> 0
+            else -> -1
+        }
         override fun usable(i: Int): Boolean = when {
             i < 0 -> false
-            i < chipCount -> true
-            i == sortSlot -> sortButton.isEnabled
+            i < chipCount -> filtersShown
+            i == sortSlot -> filtersShown && sortButton.isEnabled
             else -> i - sortSlot - 1 < results.size
         }
         override fun mark(i: Int, on: Boolean) {
@@ -472,7 +523,7 @@ class RecipesScreen(
             val child = grid.getChildAt(pos - first)
             val limit = grid.height - grid.paddingBottom
             if (child == null) {
-                val row = (grid.getChildAt(0)?.height ?: Ui.u(232)) + grid.verticalSpacing
+                val row = (grid.getChildAt(0)?.height ?: Ui.u(if (compactCards) 60 else 232)) + grid.verticalSpacing
                 val top = grid.getChildAt(0)?.top ?: 0
                 if (top == lastTop) return
                 lastTop = top
@@ -487,9 +538,10 @@ class RecipesScreen(
 
     /** Cadre sur la case affichée de la recette encadrée (la grille recycle ses cases). */
     private fun refreshFrames() {
+        val radius = if (compactCards) 18f else 22f
         for (i in 0 until grid.childCount) {
-            val holder = grid.getChildAt(i).tag as? Holder ?: continue
-            KnobFocus.frame(holder.root, grid.firstVisiblePosition + i == framedCard, 22f)
+            val child = grid.getChildAt(i) ?: continue
+            KnobFocus.frame(child, grid.firstVisiblePosition + i == framedCard, radius)
         }
     }
 
@@ -533,80 +585,144 @@ class RecipesScreen(
         }
     }
 
+    private val metaSb = StringBuilder(48)
+
+    private fun metaOf(e: SearchIndex.Entry): String {
+        val sb = metaSb
+        sb.setLength(0)
+        fun add(s: String) {
+            if (sb.isNotEmpty()) sb.append(" · ")
+            sb.append(s)
+        }
+        val u = a.app.recipes.usage(e.id)
+        val usage = selection.usage
+        if (u != null && usage == RecipeChip.Kind.FREQUENT) add(if (u.count == 1) tr("1 fois") else tr("%d fois", u.count))
+        if (u != null && usage == RecipeChip.Kind.RECENT) add(ago(u.lastMs))
+        // Le critère du tri en tête : la note (avec le nombre de notes), ou la durée.
+        val byRating = sort == RecipeSort.RATING && usage == null
+        val byTime = sort == RecipeSort.DURATION && usage == null
+        if (byTime && e.totalMinutes > 0) {
+            if (sb.isNotEmpty()) sb.append(" · ")
+            sb.append(e.totalMinutes).append(" min")
+        }
+        if (e.ratingCount > 0) {
+            if (sb.isNotEmpty()) sb.append(" · ")
+            sb.append("★ ").append(String.format(I18n.locale, "%.1f", e.rating))
+            if (byRating) sb.append(" (").append(e.ratingCount).append(')')
+        }
+        if (!byTime && e.totalMinutes > 0) {
+            if (sb.isNotEmpty()) sb.append(" · ")
+            sb.append(e.totalMinutes).append(" min")
+        }
+        if (e.category.isNotBlank()) add(e.category)
+        return sb.toString()
+    }
+
+    /** « Perso », « Mealie », ou la langue (« DE ») d'une recette venue d'une autre langue. */
+    private fun badgeOf(e: SearchIndex.Entry): String {
+        val lang = e.language.substringBefore('-')
+        return if (e.source == RecipeSource.USER) tr("Perso")
+        else if (e.source == RecipeSource.MEALIE) "Mealie"
+        else if (e.source == RecipeSource.COMMUNITY && lang == I18n.code.substringBefore('-')) ""
+        else lang.uppercase()
+    }
+
     private inner class Adapter : BaseAdapter() {
         override fun getCount() = results.size
         override fun getItem(position: Int) = results[position]
         override fun getItemId(position: Int) = position.toLong()
+        override fun getViewTypeCount() = 2
+        override fun getItemViewType(position: Int) = if (compactCards) 1 else 0
 
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-            val holder = (convertView?.tag as? Holder) ?: Holder(c)
+            val holder = (convertView?.tag as? CardHolder)?.takeIf { it.compact == compactCards }
+                ?: if (compactCards) CompactHolder(c) else Holder(c)
             holder.bind(results[position].entry)
-            KnobFocus.frame(holder.root, position == framedCard, 22f)
+            KnobFocus.frame(holder.root, position == framedCard, holder.frameRadius)
             return holder.root
         }
     }
 
-    private inner class Holder(c: Context) {
-        val root = Ui.vertical(c)
+    private abstract inner class CardHolder(c: Context, val compact: Boolean) {
+        val root = if (compact) Ui.horizontal(c, Gravity.CENTER_VERTICAL) else Ui.vertical(c)
         val imageBox = FrameLayout(c)
-        val image = ImageView(c)
-        val initials = Ui.text(c, "", 44f, 0x55FFFFFF, Ui.THIN)
-        val title = Ui.ellipsize(Ui.text(c, "", 18f, Ui.TEXT, Ui.MEDIUM), 2)
-        val meta = Ui.ellipsize(Ui.text(c, "", 15f, Ui.TEXT2))
-        val star = Icon(c, Icon.Kind.STAR_FILLED, Ui.ACCENT)
-        /** « Perso », ou la langue (« DE ») d'une recette venue d'une autre langue. */
-        val badge = Ui.text(c, "", 13f, Ui.ON_PHOTO, Ui.MEDIUM).apply {
-            setPadding(Ui.u(10), Ui.u(3), Ui.u(10), Ui.u(3))
-            background = Ui.round(0xB3000000.toInt(), 20f)
+        val image = ImageView(c).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
+        val initials = Ui.text(
+            c, "", if (compact) 16f else 44f,
+            if (compact) (if (Ui.light) 0x661A2332 else 0x77FFFFFF) else (if (Ui.light) 0x551A2332 else 0x55FFFFFF),
+            if (compact) Ui.MEDIUM else Ui.THIN,
+        )
+        val title = Ui.ellipsize(Ui.text(c, "", if (compact) 17f else 18f, Ui.TEXT, Ui.MEDIUM), if (compact) 1 else 2)
+        val meta = Ui.ellipsize(Ui.text(c, "", if (compact) 14f else 15f, Ui.TEXT2))
+        val star = Icon(c, Icon.Kind.STAR_FILLED, if (compact) Ui.ACCENT_INK else Ui.ACCENT)
+        val badge = Ui.text(c, "", if (compact) 12f else 13f, if (compact) Ui.ACCENT_INK else Ui.ON_PHOTO, Ui.MEDIUM)
+        val frameRadius = if (compact) 18f else 22f
+        private val imgSize = Ui.u(if (compact) 96 else 260)
+        private val placeholderBg = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0, 0)).apply {
+            if (compact) setCornerRadius(Ui.uf(12f))
         }
+        private var lastBucket = -1
 
         init {
             root.tag = this
-            root.background = Ui.round(Ui.SURFACE, 22f)
-            root.layoutParams = AbsListView.LayoutParams(AbsListView.LayoutParams.MATCH_PARENT, Ui.u(232))
-            image.scaleType = ImageView.ScaleType.CENTER_CROP
+            root.background = Ui.round(Ui.SURFACE, frameRadius)
+            root.layoutParams = AbsListView.LayoutParams(AbsListView.LayoutParams.MATCH_PARENT, Ui.u(if (compact) 60 else 232))
             imageBox.addView(initials, Ui.flp(Ui.WRAP, Ui.WRAP, Gravity.CENTER))
             imageBox.addView(image, Ui.flp())
-            imageBox.addView(star, Ui.flp(Ui.u(26), Ui.u(26), Gravity.TOP or Gravity.END).apply { setMargins(0, Ui.u(10), Ui.u(10), 0) })
-            imageBox.addView(badge, Ui.flp(Ui.WRAP, Ui.WRAP, Gravity.TOP or Gravity.START).apply { setMargins(Ui.u(10), Ui.u(10), 0, 0) })
             imageBox.clipToOutline = true
-            imageBox.outlineProvider = object : android.view.ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: android.graphics.Outline) {
-                    outline.setRoundRect(0, 0, view.width, view.height + Ui.u(22), Ui.uf(22f))
-                }
-            }
-            root.addView(imageBox, LinearLayout.LayoutParams(Ui.MATCH, Ui.u(128)))
-            root.addView(title, Ui.lp(l = 14, t = 10, r = 12))
-            root.addView(meta, Ui.lp(l = 14, t = 4, r = 12))
+            imageBox.background = placeholderBg
         }
 
         fun bind(e: SearchIndex.Entry) {
             title.text = e.title
-            val parts = ArrayList<String>()
-            val u = a.app.recipes.usage(e.id)
-            val usage = selection.usage
-            if (u != null && usage == RecipeChip.Kind.FREQUENT) parts += if (u.count == 1) tr("1 fois") else tr("%d fois", u.count)
-            if (u != null && usage == RecipeChip.Kind.RECENT) parts += ago(u.lastMs)
-            // Le critère du tri en tête : la note (avec le nombre de notes), ou la durée.
-            val byRating = sort == RecipeSort.RATING && usage == null
-            val byTime = sort == RecipeSort.DURATION && usage == null
-            if (byTime && e.totalMinutes > 0) parts += "${e.totalMinutes} min"
-            if (e.ratingCount > 0) parts += "★ " + String.format(I18n.locale, "%.1f", e.rating) + if (byRating) " (${e.ratingCount})" else ""
-            if (!byTime && e.totalMinutes > 0) parts += "${e.totalMinutes} min"
-            if (e.category.isNotBlank()) parts += e.category
-            meta.text = parts.joinToString(" · ")
+            meta.text = metaOf(e)
             star.visibility = if (a.app.recipes.isFavorite(e.id)) View.VISIBLE else View.GONE
-            // Recette de la communauté : sa langue seulement si ce n'est pas celle de l'interface.
-            val lang = e.language.substringBefore('-')
-            val tag = if (e.source == RecipeSource.USER) tr("Perso")
-                else if (e.source == RecipeSource.MEALIE) "Mealie"
-                else if (e.source == RecipeSource.COMMUNITY && lang == I18n.code.substringBefore('-')) ""
-                else lang.uppercase()
+            val tag = badgeOf(e)
             badge.text = tag
             badge.visibility = if (tag.isEmpty()) View.GONE else View.VISIBLE
-            imageBox.background = Ui.gradient(Ui.placeholderColors(e.title), 0f)
+            val bucket = Ui.placeholderBucket(e.title)
+            if (bucket != lastBucket) {
+                lastBucket = bucket
+                placeholderBg.colors = Ui.placeholderPair(bucket)
+            }
             initials.text = Ui.initials(e.title)
-            ImageLoader.load(image, a.app.recipes.imageFile(e.image), Ui.u(260))
+            ImageLoader.load(image, a.app.recipes.imageFile(e.image), imgSize)
+        }
+    }
+
+    /** Ligne compacte affichée au-dessus du clavier pendant la saisie : vignette, titre lisible et durée. */
+    private inner class CompactHolder(c: Context) : CardHolder(c, compact = true) {
+        init {
+            root.setPadding(Ui.u(8), 0, Ui.u(12), 0)
+            badge.setPadding(Ui.u(8), Ui.u(2), Ui.u(8), Ui.u(2))
+            badge.background = Ui.round(Ui.ACCENT_DIM, 12f)
+            imageBox.outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) =
+                    outline.setRoundRect(0, 0, view.width, view.height, Ui.uf(12f))
+            }
+            root.addView(imageBox, LinearLayout.LayoutParams(Ui.u(44), Ui.u(44)))
+            val texts = Ui.vertical(c)
+            texts.addView(title)
+            texts.addView(meta, Ui.lp(t = 2))
+            root.addView(texts, LinearLayout.LayoutParams(0, Ui.WRAP, 1f).apply { leftMargin = Ui.u(12); rightMargin = Ui.u(8) })
+            root.addView(badge, Ui.lp(Ui.WRAP, Ui.WRAP, r = 6))
+            root.addView(star, LinearLayout.LayoutParams(Ui.u(20), Ui.u(20)))
+        }
+    }
+
+    private inner class Holder(c: Context) : CardHolder(c, compact = false) {
+        init {
+            badge.setPadding(Ui.u(10), Ui.u(3), Ui.u(10), Ui.u(3))
+            badge.background = Ui.round(0xB3000000.toInt(), 20f)
+            imageBox.addView(star, Ui.flp(Ui.u(26), Ui.u(26), Gravity.TOP or Gravity.END).apply { setMargins(0, Ui.u(10), Ui.u(10), 0) })
+            imageBox.addView(badge, Ui.flp(Ui.WRAP, Ui.WRAP, Gravity.TOP or Gravity.START).apply { setMargins(Ui.u(10), Ui.u(10), 0, 0) })
+            imageBox.outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) =
+                    outline.setRoundRect(0, 0, view.width, view.height + Ui.u(22), Ui.uf(22f))
+            }
+            root.addView(imageBox, LinearLayout.LayoutParams(Ui.MATCH, Ui.u(128)))
+            root.addView(title, Ui.lp(l = 14, t = 10, r = 12))
+            root.addView(meta, Ui.lp(l = 14, t = 4, r = 12))
         }
     }
 }

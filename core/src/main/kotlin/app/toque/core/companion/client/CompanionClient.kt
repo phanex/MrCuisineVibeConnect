@@ -14,19 +14,24 @@ import app.toque.core.companion.FavoriteReply
 import app.toque.core.companion.FavoriteRequest
 import app.toque.core.companion.Hello
 import app.toque.core.companion.JournalPage
+import app.toque.core.companion.OwnStepRequest
+import app.toque.core.companion.OwnStepsWire
 import app.toque.core.companion.PairReply
 import app.toque.core.companion.PairRequest
 import app.toque.core.companion.PairingManager
 import app.toque.core.companion.PairingPayload
+import app.toque.core.companion.PhoneWire
 import app.toque.core.companion.ProveReply
 import app.toque.core.companion.ProveRequest
 import app.toque.core.companion.RecipeDetail
+import app.toque.core.companion.RenamePhoneRequest
 import app.toque.core.companion.SendRecipeRequest
 import app.toque.core.companion.StartRequest
 import app.toque.core.companion.ServingsRequest
 import app.toque.core.companion.StateWire
 import app.toque.core.companion.WhoAmI
 import app.toque.core.json.Json
+import app.toque.core.recipes.StepMachine
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
@@ -224,6 +229,20 @@ class CompanionClient(
     /** « Ma version » de la recette Lidl [id] : la copie enregistrée dans « Mes recettes ». */
     fun copyRecipe(id: String): EditableRecipe = EditableRecipe.fromMap(json(call("POST", "/api/recipes/${enc(id)}/copy", null)))
 
+    /** Les étapes d'une recette qui prend le réglage du propriétaire (Mealie), et l'éditeur d'étape du robot (voir state.can.ownSettings). */
+    fun ownSteps(id: String): OwnStepsWire = OwnStepsWire.fromMap(json(call("GET", "/api/recipes/${enc(id)}/steps", null)))
+
+    /**
+     * Le réglage [machine] (null : sans le robot) pour l'étape [index] de la recette [id], désignée aussi par son
+     * empreinte [key] (StepWire.key) ; rend les étapes relues. À vérifier ensuite sur le robot.
+     */
+    fun setOwnStep(id: String, index: Int, key: String, machine: StepMachine?): OwnStepsWire =
+        OwnStepsWire.fromMap(json(call("POST", "/api/recipes/${enc(id)}/steps/$index", OwnStepRequest(key, machine).toMap())))
+
+    /** L'étape [index] (empreinte [key]) de la recette [id] revient au réglage de la recette ; rend les étapes relues. */
+    fun clearOwnStep(id: String, index: Int, key: String): OwnStepsWire =
+        OwnStepsWire.fromMap(json(call("DELETE", "/api/recipes/${enc(id)}/steps/$index?key=${enc(key)}", null)))
+
     /** « Arrêter la recette » guidée ouverte sur le robot (voir state.can.stopRecipe). */
     fun stopRecipe(): CommandReply = command("POST", "/api/session/stop", null)
 
@@ -242,6 +261,13 @@ class CompanionClient(
     fun adjust(req: AdjustRequest): CommandReply = command("POST", "/api/machine/adjust", req.toMap())
     /** Lance une cuisson manuelle (seule commande qui démarre quelque chose, voir state.can.start). */
     fun start(req: StartRequest): CommandReply = command("POST", "/api/machine/start", req.toMap())
+
+    /**
+     * Donne à ce téléphone le nom [name] sur le robot (voir state.can.renamePhone) ; vide : « Téléphone N ».
+     * Réponse : ce téléphone tel que le robot le connaît désormais (nom nettoyé).
+     */
+    fun renameMe(name: String): PhoneWire =
+        PhoneWire.fromMap(json(call("POST", "/api/phones/me", RenamePhoneRequest(name).toMap())))
 
     /** « Oublier » : retire ce téléphone de la liste du robot, puis oublie le jeton. */
     fun forget(): CommandReply {

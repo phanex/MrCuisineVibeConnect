@@ -30,8 +30,8 @@ android {
         // Pour publier une mise à jour : augmenter les deux valeurs. Chaque version a deux APK, de la même
         // source : Toque-x.y.z.apk (Connect) et Toque-smart-x.y.z.apk (gradlew -PtoqueSmart=true, Smart).
         // L'outil de mise à jour prend celui de son robot (Releases.parse).
-        versionCode = 19
-        versionName = "0.11.0"
+        versionCode = 20
+        versionName = "0.12.0"
         // APK du Monsieur Cuisine Smart (gradlew -PtoqueSmart=true) : le JIT d'Android 8.1 de sa tablette
         // compile mal certaines expressions Kotlin (portages Flav974 et Camybrith) ; le mode sûr le
         // contourne mais ralentit toute l'appli. Jamais dans l'APK du Connect.
@@ -55,7 +55,9 @@ android {
             signingConfig = signingConfigs.getByName("toque")
         }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("toque")
         }
     }

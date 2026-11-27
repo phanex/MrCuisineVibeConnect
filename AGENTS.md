@@ -6,8 +6,9 @@ procedure, written so that the agent does everything it can by itself and asks t
 what needs hands, eyes or a Windows security prompt.
 
 Humans: the same procedure by hand is in [docs/INSTALLATION.md](docs/INSTALLATION.md) (Connect,
-Windows), [docs/MACOS.en.md](docs/MACOS.en.md) (Connect, macOS) and [docs/SMART.en.md](docs/SMART.en.md)
-(Smart). On **macOS**, also read *Installing from macOS (Connect)* below before starting.
+Windows), [docs/MACOS.en.md](docs/MACOS.en.md) (Connect, macOS), [docs/LINUX.en.md](docs/LINUX.en.md)
+(Connect, Linux) and [docs/SMART.en.md](docs/SMART.en.md) (Smart). On **macOS** or **Linux**, also read
+*Installing from macOS (Connect)* below, and on Linux *Installing from Linux (Connect)*, before starting.
 
 ## First: which robot?
 
@@ -18,8 +19,9 @@ procedures. **Before anything else, ask the person to read the model on the labe
 | Label under the robot | Robot | Tablet | Follow | Toque APK |
 |---|---|---|---|---|
 | **SKMC 1200** (A1, B2, C3) | Monsieur Cuisine **Connect** | Android 6.0 | This guide, from *What you are doing* | `Toque-X.Y.Z.apk` |
-| **SKMC 1100 A1**, **SKMC 1200 D4** | Monsieur Cuisine **Connect** | Android 6.0 | This guide, with the extra step `own-twrp` (board `spm188a`) | `Toque-X.Y.Z.apk` |
-| **SKMS 1200** | Monsieur Cuisine **Smart** (in test) | Android 8.1 | *Monsieur Cuisine Smart (SKMS 1200)* below | `Toque-smart-X.Y.Z.apk` |
+| **SKMC 1100 A1**, **SKMC 1200 D4**, some **SKMC 1200 C3** | Monsieur Cuisine **Connect** | Android 6.0 | This guide, with the extra step `own-twrp` (board `spm188a`; on a C3 the backup decides, see *Which TWRP*) | `Toque-X.Y.Z.apk` |
+| **SKMS 1200** (A1, MediaTek board) | Monsieur Cuisine **Smart** (in test) | Android 8.1 | *Monsieur Cuisine Smart (SKMS 1200)* below | `Toque-smart-X.Y.Z.apk` |
+| **SKMS 1200 C1** (Allwinner board, Android 10) | Monsieur Cuisine **Smart** | Android 10 | **Stop**: not supported yet; the Smart root guide does not apply (another board, its PC shows it as `VID_1F3A&PID_EFE8`). Point to [#59](https://github.com/Wuki60/MrCuisineVibeConnect/issues/59) | none |
 | anything else | unknown | | Stop. Ask the person to open an issue with a photo of the label | |
 
 - If ADB already works (a robot rooted earlier), check that the tablet agrees with the label:
@@ -126,7 +128,7 @@ Then: Toque › Settings › Recipes › Lidl › **Sync** (about 15 minutes the
 stays at 0 and "never synced" stays shown until every recipe has been fetched: that is normal, do not
 restart the sync.
 
-### Which TWRP: the robot's own kernel on an SKMC 1100 A1
+### Which TWRP: the robot's own kernel on an SKMC 1100 A1 (and on the SKMC 1200 with that board)
 
 The TWRP image of this guide carries a kernel built in April 2018 for the SKMC 1200's board
 (project `l706_dfbh_v_695`). An SKMC 1100 A1 (system image `v4.3a_2022-09-15`, stock app 1.1.28) is
@@ -148,6 +150,11 @@ rebuilt around its own kernel.
   it: `-Step flash-twrp -Twrp own-kernel` (the choice for a board the guide's kernel was not built
   for) or `-Twrp guide`. `-Twrp guide` is refused on an SKMC 1100 A1. Ask them to report the model
   and the project name in an issue.
+
+The label is not enough: every **SKMC 1200 D4** and some **SKMC 1200 C3** (one made in 03/2020,
+[#115](https://github.com/Wuki60/MrCuisineVibeConnect/issues/115)) have the `spm188a` board too. The
+script reads it from the backup and takes the same path as on an SKMC 1100 A1; tell the person which
+board it saw. On such a C3, one owner reports in #115 that the rest went through like on an SKMC 1100 A1.
 
 Done end to end on one SKMC 1100 A1 in November 2026: TWRP started with a stable picture and
 working touch, then `root`, `flash-root` (10.98 MB and 26.98 MB sent in console mode), `android`,
@@ -276,6 +283,26 @@ Same rules, safety checks and robot steps as Windows above, with these differenc
   off, retry (`--libusb` tries libusb instead); (3) fallback: do only `backup` and `flash-twrp` on
   Windows, copy backups into `~/Toque/backup/`, run `backup` on the Mac, and continue from `root`.
 
+## Installing from Linux (Connect)
+
+Same script and steps as macOS above (`bash tools/setup/toque-setup.sh <step>`, work folder
+`~/Toque`), with these differences ([docs/LINUX.en.md](docs/LINUX.en.md)):
+
+- **Prerequisites**: libusb 1.0, Python 3.10+ with `venv`, git, unzip, curl. `prepare` checks them and
+  prints the distribution's install command. Those and the udev rule need **sudo**: show the person
+  the commands and let **them** run them (never type a password).
+- **USB access**: the udev rule [tools/setup/linux/51-toque-mtk.rules](tools/setup/linux/51-toque-mtk.rules)
+  (copied once to `/etc/udev/rules.d/`, then `udevadm control --reload-rules && udevadm trigger`)
+  lets the user reach MediaTek devices (`0e8d`) and keeps ModemManager away from them. `status` and
+  `prepare` say whether it is installed and whether ModemManager is running.
+- **mtkclient** goes through **libusb** by default on Linux (the macOS serial driver path is
+  `--serial`, kept as a fallback). Done end to end once, from Fedora 44 on an `spm188a` robot
+  (`own-twrp` first), in November 2026; other distributions are untested: tell the person.
+- **When mtkclient does not reach the robot**: `lsusb | grep 0e8d` right after switching on should
+  show `0e8d:2000` for a few seconds (nothing: cable, port, hub; `0e8d:2008` = Android running, switch
+  off first); `/dev/ttyACM*` present but silent: retry with `--serial`; ModemManager probing the port
+  in `journalctl -f`: the udev rule is missing.
+
 ## Monsieur Cuisine Smart (SKMS 1200): in test
 
 Toque drives the Smart since 0.8.0, but the project has no Smart: **Smart owners test it and report
@@ -337,6 +364,7 @@ Undo: Toque › Settings › Advanced › *Back to the stock app* (it re-enables
 | `prepare`: SP Flash Tool checksum mismatch, file sizes right | The RAR was extracted without its password: some tools write garbage of the right size | Extract again with the password `spflashtool.com` and check that no error is reported |
 | Magisk app: *Requires additional setup*, then *reinstall Magisk… recovery mode cannot get device info* | Magisk app's own check, harmless here | Accept a reboot if offered; **never** use *Direct install* (it rewrites `boot`). Back out of the install screen |
 | Toque says "bowl not detected" with the bowl in place, and "detected" without it | The bowl sensor is reversed on many robots (B2, C3, SKMC 1100) | Settings › Safety › **Invert the bowl sensor**; check *Settings › Advanced › Motor base diagnostics*, then enable *Require bowl detection* |
+| The temperature shows "< 37 °C" (or 0 °C on older versions) at rest | The base reports the measured temperature in steps (0, 37, 45, 50… °C) and sends 0 below 37 °C (SKMC 1100 A1, firmware 4924) | Normal. Heating works: a 60 °C setting showed 37 → 45 → 50 → 60 °C |
 | The rotary knob does nothing | Knob keys not set up | Tap the *Rotary knob not set up* pill on Home and follow the 3 steps |
 | Scale shows "overload · 0 g" right after the install | The robot was resting on the cable or the open cover | Put the robot flat on its feet with nothing under it, screw the cover back, restart it |
 

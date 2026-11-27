@@ -91,6 +91,17 @@ Protocol version: **1** (`COMPANION_PROTOCOL`).
     checked (the robot: `CookScreen.forgetConfirmations`, see « Own recipes written on the phone »), and never to
     chain into the previous step a setting typed on a phone and not yet checked (`Step.reviewAlone`).
     `RecipeWrite.phone` is the phone's name, for the host's log. Default false: a `machine` member is `400`, as before.
+  - `takesOwnSteps` true says the host takes the owner's setting for a step of a received recipe (Mealie) typed on a
+    phone (`state.can.ownSettings`, `RecipeDetail.ownSettings`; see « The owner's setting for a step of a Mealie
+    recipe »). `ownSteps(id)` reads, on the server thread, the recipe as received (`OwnStepsRead.source`, the one the
+    step keys come from), as shown (`shown`: owner's settings, corrections and number of people), and the owner's
+    settings by key (`own`); null when unknown or not cookable by the robot chosen. `writeOwnStep(id, decide)` runs on
+    the main thread in one block: read (`ownSteps`), call `decide(read)`, and when the answer is a change
+    (`OwnStepWrite.changed`) store it as the robot's recipe page does, as typed on a phone (`clear`:
+    `RecipeRepo.clearStepSetting`; else `RecipeRepo.setStepSetting(id, index, machine, SettingAuthor.PHONE)`, which
+    checks again and may still refuse: `OwnStepWrite.failed`), forget every remembered confirmation or adoption at
+    that rank (`CookScreen.forgetConfirmations`), then answer with the recipe read again (`OwnStepWrite.done`).
+    `OwnStepWrite.phone` is the phone's name, for the host's log. Defaults: false, null, and `409 unsupported`.
   - `clear` does what the robot's **OK** button does: `MachineClient.clearFinished()`, which removes
     a finished or stopped job from the display and nothing else (the controller ignores a job that has
     not ended). Its default implementation refuses (`unsupported`).
@@ -164,7 +175,12 @@ travels only inside the LAN request that consumes it.
 - Each phone gets its own random **256-bit token** (64 lowercase hex), sent once in the pairing reply.
   The robot keeps only its SHA-256; comparison is constant-time. At most **8** phones.
 - Phones are named "Téléphone N" (lowest free N, translated) and listed on the robot with pairing date
-  and last seen. The robot removes a phone with `hub.pairing.remove(id)`; a phone removes itself with
+  and last seen. The owner can give one another name on the robot (`hub.pairing.rename(id, label)`: one
+  line, at most 24 characters, empty to go back to "Téléphone N"); that name is the one the journal, the
+  robot's messages and `PhoneWire.name` then carry, with no change to the protocol. A phone can also
+  name itself (`POST /api/phones/me`, same cleaning, when `state.can.renamePhone` says so); either
+  way the name given is also sent alone as `PhoneWire.label`. The robot removes a
+  phone with `hub.pairing.remove(id)`; a phone removes itself with
   `DELETE /api/phones/me` ("Oublier"). A removed phone gets `401` on every call.
 - Authentication: `Authorization: Bearer <token>` on every call except `/api/hello`, `/api/pair`
   and `/api/prove`. No cookies, no CORS headers, ever: a web page from another site can neither send
@@ -256,6 +272,9 @@ response has `Connection: close`, `Cache-Control: no-store` (images: `private, m
 | POST | `/api/recipes/{id}/edit` | yes | save an own recipe written on the phone |
 | POST | `/api/recipes/{id}/copy` | yes | « Ma version » of a Lidl recipe: its own copy, saved in « Mes recettes » |
 | GET | `/api/editor` | yes | the editor's bounds for a new recipe, and the step settings it offers (lot B) |
+| GET | `/api/recipes/{id}/steps` | yes | the steps of a Mealie recipe, with their keys and owner's settings, and the step editor |
+| POST | `/api/recipes/{id}/steps/{rank}` | yes | the owner's robot setting for one step of a Mealie recipe, without a copy |
+| DELETE | `/api/recipes/{id}/steps/{rank}` | yes | that step back to the recipe's own setting (`?key=`) |
 | POST | `/api/waiting` | yes | send a recipe to the robot (it waits there) |
 | DELETE | `/api/waiting` | yes | remove the waiting recipe |
 | POST | `/api/machine/pause` | yes | pause |
@@ -267,6 +286,7 @@ response has `Connection: close`, `Cache-Control: no-store` (images: `private, m
 | POST | `/api/machine/clear` | yes | close the ended job shown on the robot (its OK button) |
 | POST | `/api/session/stop` | yes | stop the guided recipe open on the robot (its « Arrêter la recette ») |
 | POST | `/api/robot/appearance` | yes | set the robot's colour and/or theme (Settings › Screen) |
+| POST | `/api/phones/me` | yes | rename this phone (its own name only) |
 | DELETE | `/api/phones/me` | yes | forget this phone |
 
 Without a valid token every path except the first three answers `401 unauthorized`, including unknown
@@ -385,7 +405,7 @@ fixed chips.
 ### GET /api/recipes/{id}
 
 `RecipeDetail`: `id, title, category, servings, servingUnit, prepMinutes, totalMinutes, difficulty`
-(1 easy, 2 medium, 3 hard)`, favorite, user, author, rating, ratingCount, hasImage, ingredients, steps, language`.
+(1 easy, 2 medium, 3 hard)`, favorite, user, author, rating, ratingCount, hasImage, ingredients, steps, language, source`.
 ```json
 {"id":"perso-veloute-de-potimarron","title":"Velouté de potimarron","category":"Soupes","servings":4,"servingUnit":"",
  "prepMinutes":10,"totalMinutes":35,"difficulty":1,"favorite":true,"user":true,"author":"","rating":0,"ratingCount":0,"hasImage":true,
@@ -408,6 +428,22 @@ names). With it, the phone computes the sheet for another number itself with the
 (`Wires.forServings(sheet, n)`, from a sheet at `servings == baseServings`) and shows it during the
 tap; the robot's answer to `POST …/servings` then confirms it (same values). A robot from before
 this field sends none: the phone uses its own interface language.
+
+`source` says where the recipe comes from, the robot's `RecipeSource` in lower case: `imported` (Lidl),
+`user` (« Ma recette », same as `user` true), `community` (toqueapp.org) or `mealie` (a self-hosted Mealie
+server, read-only on the robot: its page says « Depuis Mealie », and « Ma version » makes an own copy,
+`POST /api/recipes/{id}/copy`, the Mealie recipe staying as it is). Absent on a robot from before this
+field: the phone then knows only `user`. A value it does not know (a newer robot) reads as `imported`.
+
+`ownSettings` (written only when true) says the owner may give a step of this recipe their own robot setting
+from the phone, without a copy (a Mealie recipe, on a robot whose host has `takesOwnSteps`; see « The owner's
+setting for a step of a Mealie recipe »). Each step then also carries `key`, the fingerprint of its text in the
+recipe as received (`OwnStepSettings.keys`, 16 hex, `-2`… for a second step with the same text), and `own`:
+`robot` when the step carries a setting the owner typed on the robot (trusted), `phone` when it came from a phone
+(`needsReview` is then true: still to check on the robot), absent otherwise. `machine` is always the setting that
+will run (the owner's one when there is one). Steps of other recipes, and every step of a robot from before these
+fields, have neither `key` nor `own`; an older phone ignores them. The same fields come with `?base=1` and in the
+reply of `POST …/servings`.
 
 `?base=1`: the recipe with the user's corrections but at its own number of people
 (`Recipe.corrected(adjustments)`, `servings == baseServings`), whatever number is chosen on the
@@ -621,6 +657,85 @@ step setting only to a robot whose editor replies carry `settings` (for a new re
 of lot A has no `settings` and answers `400` « Machine settings are set on the robot… » to a `machine` member. An
 older phone sends no `machine` member: every stored setting stays through `from`, exactly as before.
 
+### The owner's setting for a step of a Mealie recipe (`/api/recipes/{id}/steps`)
+
+On the robot, a step of a recipe received from a Mealie server can be given the owner's own robot setting without
+making a copy (`RecipeScreen`, « Mon réglage », core `recipes/OwnStepSettings.kt`): the setting is kept beside the
+recipe (`RecipeAdjustments.steps`), applied over it at each display (`Recipe.corrected`), and survives the syncs as
+long as the step's text does not change. These routes let a phone do the same. The phone is a keyboard; the robot
+judges, stores and has it checked on the robot. Only the recipes `OwnStepSettings.appliesTo` accepts take them
+(Mealie for now); a step's text, weighing and order never change here.
+
+Names. `steps` is the collection of the recipe's steps as the owner sets them, `steps/{rank}` one of them. A POST on
+that one sets it, a DELETE takes the owner's setting away (the server has no PUT or PATCH). The rank is in the path
+so that the refusals name it (`step`); the key goes with it so that the robot can tell the step is still the one
+the phone read.
+
+`GET /api/recipes/{id}/steps` answers `OwnStepsWire` (core `companion/OwnStepEdit.kt`):
+```json
+{"id":"mealie-0b1c2d3e","title":"Gâteau du verger",
+ "steps":[{"index":0,"key":"3f0a6c9e1b2d4f58","text":"Mettre la farine dans le bol.","machine":null,"recipe":null,"own":"","needsReview":false},
+  {"index":1,"key":"a41c07d9e6b35f20","text":"Mélanger.","machine":{"program":"petrir","seconds":90,"speed":4,"tempC":0,"reverse":false,
+   "accessory":"BLADE","pulses":0,"summary":"Pétrir 1 min 30 s"},"recipe":{"program":"manuel","seconds":30,"speed":3,"tempC":0,
+   "reverse":false,"accessory":"BLADE","pulses":0,"summary":"30 s · vitesse 3"},"own":"phone","needsReview":true}],
+ "settings":{"kinds":[…],"manual":{…}}}
+```
+`key` as in `RecipeDetail`; `text` as the robot shows it; `machine` the setting that will run; `recipe` the
+recipe's own setting (what « Réglage de la recette » gives back; read from the step's text by the Mealie sync, so
+usually to check); `own` `robot`, `phone` or empty; `needsReview` to check on the robot before it runs; `settings`
+the robot's step editor (`StepSettingsWire`, as in « Own recipes written on the phone »), always present here.
+Errors: `404 not_found`, `409 own_setting_not_allowed` « Cette recette ne prend pas votre réglage du robot » (not a
+Mealie recipe: an own recipe is edited, a Lidl one copied), `409 unsupported` (a host without `takesOwnSteps`).
+
+`POST /api/recipes/{id}/steps/{rank}`, body (strict, exactly these two members):
+```json
+{"key":"a41c07d9e6b35f20","machine":{"program":"petrir","seconds":90,"speed":4,"tempC":0,"reverse":false,"accessory":"BLADE","pulses":0}}
+```
+`rank` a decimal step rank 0–10000 (else `400 bad_request` « Invalid parameter: index »); `key` the step's key as the
+phone read it (16 hex, optional `-N`); `machine` the seven fields of a lot B setting (`SettingWire`, same reading
+bounds) or `null` for « no robot setting at this step ». Another member, a missing one, a bad key: `400 bad_request`
+(`field` `steps`, `step` the rank); a bad `machine`: `400` « Invalid machine setting ». Then, on the robot's main
+thread just before writing (`OwnStepEdits.decide`):
+- `404 not_found`; `409 own_setting_not_allowed`; `409 cooking` « Recette en cours sur le robot » (a guided session
+  is open on that recipe; also checked when the request arrives);
+- `409 stale` « La recette a changé sur le robot » when the step at `rank` does not have that `key` any more: its
+  text changed at the source (a sync), steps moved, or the rank is gone. A setting is never attached to a step whose
+  text changed since the phone read it; the phone reads the recipe again;
+- a setting equal to the step's current one (the same owner's setting, whoever typed it; or, without one, the
+  recipe's own setting when it is not to check) changes nothing and keeps its author: a setting the owner typed on
+  the robot stays trusted;
+- `422` « Étape N : … » (`field` `steps`, `step` the rank): first the rule of the robot's recipe page,
+  `OwnStepSettings.problem` (`RecipeRules.step`: the safety rules, `step_machine`), then what the robot's step editor
+  offers, as for every setting typed on a phone (`StepSettings.refusal` for the robot chosen: a kind the robot
+  lacks, a field the kind does not set, its bounds, what the robot can do; `step_machine`). Nothing is stored.
+
+Accepted, the setting is stored as typed on a phone (`OwnStepSetting(machine, SettingAuthor.PHONE)`, `"by":"phone"`
+in the adjustments) and is **not trusted**: `withOwnSettings` gives that step `needsReview` and `reviewAlone`. On the
+robot, its recipe page (redrawn at once through `RecipeRepo.onAdjusted` when it shows that recipe) marks it « Du
+téléphone : à vérifier »; the step editor opened from it says « Réglage saisi sur le téléphone : vérifiez-le avant
+de l'enregistrer. », and its OK stores it as the owner's own (`SettingAuthor.ROBOT`, « Étape N : réglage du téléphone
+vérifié »); guided cooking shows it on its own card (« Réglage saisi sur le téléphone : vérifiez-le avant de
+lancer. »), never chained into the previous step's program, « Lancer » disabled until « J'ai vérifié ce réglage »,
+which also makes it the owner's own (`RecipeRepo.confirmStepSetting`, only if it is still that setting). In the same
+main-thread block as the save, the robot forgets every remembered confirmation and adopted nearest setting at that
+rank (`CookScreen.forgetConfirmations`), so that a setting with the same summary as one checked before at that rank
+is asked again. `null` (no robot setting) has nothing to check. The commands still go through `MachineController`
+with its checks; nothing here starts anything. The robot's own log says which phone set which step.
+
+`DELETE /api/recipes/{id}/steps/{rank}?key=…`: the step goes back to the recipe's own setting (as « Réglage de la
+recette » on the robot), the remembered confirmations at that rank are forgotten too. `key` is required (`400
+bad_request` « Invalid parameter: key » without a valid one) and checked as above (`409 stale`), as are `404`,
+`409 own_setting_not_allowed` and `409 cooking`. Nothing to take away: nothing is written.
+
+Both replies are `OwnStepsWire` read again in the same block. Nothing is journaled in the phones' journal and the
+revision does not move (nothing of the state changes); the phone reads the sheet again (`GET /api/recipes/{id}`) for
+its marks.
+
+Compatibility. A robot from before these routes has no `can.ownSettings` and no `ownSettings` on its sheets (and
+answers `404`/`405` here): the phone shows nothing new. A host without `takesOwnSteps` gives `can.ownSettings`
+refused (`unsupported`), no `ownSettings`, and `409 unsupported` on these routes. An older phone ignores the new
+fields. The protocol version does not change.
+
 ### GET /api/recipes/{id}/image
 
 Bytes, `Content-Type` `image/jpeg`, `image/png` or `image/webp`. `404` when the recipe has no image.
@@ -751,6 +866,37 @@ once the interface is rebuilt. Journal: `appearance` « Apparence changée depui
 clair » (no alert). `504 timeout` / `no_answer` as for the other commands. A robot from before this route has no
 `can.setAppearance`: the phone offers nothing; an older phone ignores the flag.
 
+### POST /api/phones/me
+
+Gives this phone (the one whose token is sent, never another) a name on the robot, as the owner can
+on the robot's list of phones. Body `{"name":"Cuisine de Léa"}`, nothing else (any other key, a name
+that is not a string or longer than 200 characters: `400 bad_request`, nothing changed). The robot
+cleans it like its own field (`PairingManager.cleanLabel`): one line (control characters and runs of
+spaces become one space), trimmed, at most 24 characters (`MAX_LABEL`, longer is cut). An empty or
+blank name goes back to the default « Téléphone N ». Reply `200`: this phone's `PhoneWire` as the robot
+now knows it (`name` the displayed name, `label` the name given, absent for the default):
+```json
+{"id":"1eeddd36","number":1,"name":"Cuisine de Léa","pairedAt":1795340083523,"lastSeenAt":1795340090000,"method":"code","label":"Cuisine de Léa"}
+```
+The new name is the one the journal, the robot's messages and `state.me` carry from then on; a change
+moves `revision` (a rename on the robot's list too). Nothing is journaled. Allowed to any paired phone
+for itself (`state.can.renamePhone`, always allowed by a robot that has this route). A robot from before
+this route has no `can.renamePhone` and answers `405 method_not_allowed`: the phone offers no
+« Renommer »; an older phone ignores the flag and the `label` field.
+
+### POST /api/phones/me/read-only
+
+Puts this phone in **read-only** (Toque 0.12.0 or later), for a wall screen or a home-automation
+client that should never command anything: body `{}` (or none), reply `200` with this phone's
+`PhoneWire` (`"readOnly":true`). One way only: a phone cannot leave read-only itself; the owner gives
+the controls back on the robot (*Settings › Phone*, « Rendre les commandes »), and can also put any
+phone in read-only there. A read-only phone reads everything (`GET` routes, the long poll, the
+journal, recipes, images) and keeps what concerns itself only (`POST /api/phones/me`,
+`POST /api/phones/me/read-only`, `DELETE /api/phones/me`). Every other `POST` or `DELETE` is answered
+`403 read_only`, whatever `can` says; in `state.can` every action but `renamePhone` reads
+`{"allowed":false,"code":"read_only",…}`. `state.me.readOnly` is written only when true. An older robot
+answers `405 method_not_allowed` and has no `readOnly`.
+
 ### DELETE /api/phones/me
 
 Removes this phone from the robot. Reply `{"ok":true,"revision":…}`; the token is dead afterwards.
@@ -799,11 +945,12 @@ differ, so compute countdowns from the moment the response arrived, not from `se
 | `revision` | grows on every visible change; pass it back as `since` |
 | `serverTime` | robot wall clock at the response |
 | `robot` | `id` (stable random id, 12 hex), `name`, `appVersion`, `language` (UI language code), `protocol`, and its look so that the phone can match it: `accent` (the colour chosen in Settings › Screen, `#RRGGBB` in upper case) and `theme` (`dark` or `light`). Both are absent on a robot that does not know them (before 0.8.0): the phone then keeps its own colour and theme. A change of colour or theme on the robot moves `revision` like any visible change. `anyAccent`: `true` when `POST /api/robot/appearance` takes any colour of the colour wheel (any colour its guard accepts), not only the ten; written only when true, so absent on an older robot (read as false: offer it only the ten) and an older phone ignores it. `accent` may then be a wheel colour: a phone shows it as is. `model`: the robot model, the id of its profile (`mc-connect` or `mc-smart`); written only when known, so absent on an older robot (the phone then infers it from `limits`: `heatNoStir` false is the Smart) |
-| `me` | this phone: `id`, `number`, `name`, `pairedAt`, `lastSeenAt`, `method` (`qr` / `code`) |
+| `me` | this phone: `id`, `number`, `name`, `pairedAt`, `lastSeenAt`, `method` (`qr` / `code`); `label`: the name given to it (on the robot or with `POST /api/phones/me`), written only when there is one, so absent for « Téléphone N » and on an older robot; `readOnly`: `true` when this phone is read-only (`POST /api/phones/me/read-only`), written only then |
 | `machine` | the base, always present |
 | `job` | the current or last job, `null` when none is shown on the robot; an ended job (`FINISHED`, `ABORTED`) stays until OK is pressed on the robot or sent by a phone (`POST /api/machine/clear`) |
-| `can` | what this phone may do now (section 6): `pause`, `resume`, `stop`, `adjust`, `tare`, `sendRecipe`, `removeWaiting`, `start`, `clear`, `favorite`, `stopRecipe`, `editRecipes`, `setAppearance` |
+| `can` | what this phone may do now (section 6): `pause`, `resume`, `stop`, `adjust`, `tare`, `sendRecipe`, `removeWaiting`, `start`, `clear`, `favorite`, `stopRecipe`, `editRecipes`, `setAppearance`, `renamePhone`, `ownSettings` |
 | `session` | the guided recipe on the robot, `null` when none |
+| `suspendedSession` | the guided recipe left on the robot without being finished or stopped, the one its home screen offers to resume (« Reprendre »), same shape as `session`; also after a restart of Toque (then `startedAt` is 0, the steps before `current` are in `done`, `running` is empty). Gone when it is resumed (it becomes `session` again), dropped on the robot, or another recipe is started. Written only when there is one and no `session` (Toque 0.12.0 or later) |
 | `waiting` | the recipe waiting on the robot's home screen, `null` when none |
 | `last` | the last finished activity (journal), `null` when none ("Dernière activité") |
 | `journalSeq` | `seq` of the last journal line (0: empty); fetch `/api/journal?after=` when it moves |
@@ -827,6 +974,8 @@ differ, so compute countdowns from the moment the response arrived, not from `se
 | `motorOn`, `heaterOn` | reported by the base |
 | `turbo` | a Turbo press is running |
 | `tempKnown` | the base is measuring the temperature right now. Written only when `false`: absent means `true` (the Connect, an older robot). `false` on the Smart outside a heating (its base measures only while heating, and during a heated job): `tempC` is then not a measurement, do not show it. Read it together with `hasSample` |
+| `weightValid` | `weightG` is a real weighing: link `READY`, a sample, scale state normal, motor and Turbo stopped (with the blade turning, the Connect's base sends 0). Written only when `false`: absent means `true` (or an older robot). Toque 0.12.0 or later |
+| `heating` | Toque asks the base to heat right now: a job runs (`RUNNING`, not paused) and its setting has a temperature, no fault. Prefer it to `heaterOn`, which the base also reports during programs that do not heat. Always written by Toque 0.12.0 or later; absent: an older robot, fall back on `heaterOn` |
 
 **`job`**
 
@@ -1008,8 +1157,12 @@ Each pause, step end and job end appears once. A job end inside a recipe gives `
 | Remove the waiting recipe | yes | a recipe waits | `no_waiting` |
 | Change a recipe's favourite | yes, any paired phone, no confirmation (`can.favorite`) | the recipe exists | `not_found`, `unsupported` |
 | Write an own recipe (create, save, « Ma version ») | yes, any paired phone (`can.editRecipes`); text, ingredients, weighings, and a step's machine setting on a robot that says so (`settings`), never starting anything | own recipe (`perso-`), not cooked, not open in the robot's editor, version current, the editor's limits, typed settings judged by the step editor's rules and checked once on the robot before their first start | `not_user`, `already_user`, `cooking`, `editing`, `stale`, `busy`, limit codes and `step_machine` (422), `unsupported` |
+| Give a step of a Mealie recipe the owner's setting | yes, any paired phone (`can.ownSettings`), never starting anything | a recipe that takes them (`RecipeDetail.ownSettings`), not cooked, the step still the one read (`key`), judged by the recipe page's rule and the step editor's; stored as from a phone and checked once on the robot before it runs | `own_setting_not_allowed`, `cooking`, `stale`, `step_machine` (422), `not_found`, `unsupported` |
 | Stop the guided recipe (« Arrêter la recette ») | yes, any paired phone, after the phone's own confirmation | a guided recipe is open on the robot (`can.stopRecipe`) | `no_recipe`, `unsupported` |
 | Change the robot's colour or theme | yes, any paired phone, after the person said yes on the phone (`can.setAppearance`) | one of the robot's ten colours, `dark` or `light`; no program, Home alone on the robot's screen, no dialog | `bad_request` (400), `busy`, `unsupported` |
+| Rename this phone | yes, each phone its own name only (`can.renamePhone`) | the phone is still paired | `bad_request` (400) |
+| Put this phone in read-only | yes, each phone itself only, one way (`POST /api/phones/me/read-only`) | the phone is still paired | |
+| Anything else, from a read-only phone | **never** (`403 read_only`) | the owner gives the controls back on the robot | `read_only` |
 | Clear an ended job (OK) | yes, any paired phone | the robot shows a job `FINISHED` or `ABORTED` (whoever started or stopped it); only removes it from the display | `nothing_ended` |
 | Start a manual cooking | yes, if the robot's switch « Lancement depuis le téléphone » is on | (1) switch on; (2) link `READY`, a sample, no fault; (3) no job starting, running, stopping or paused, no Turbo (a finished job still shown is fine); (4) no guided recipe open on the robot; (5) lid closed, bowl in place (detected, not removed); (6) settings inside the bounds of the robot's Cuisson manuelle screen; (7) `SafetyPolicy.checkJob` finds no violation, hot blend included. `state.can.start` reflects (1)–(5). | `disabled`, `link`, `fault`, `busy`, `recipe`, `lid`, `bowl`, bounds codes, `hot_blend`, controller codes |
 | Start a recipe, a step, a program | **never** (no endpoint) | | |
@@ -1039,7 +1192,7 @@ English technical message.
 | 400 | `bad_request`, `bad_json`, and malformed HTTP |
 | 401 | `unauthorized` (no token, unknown token, phone removed) |
 | 422 | a recipe written on the phone refused by the editor's limits (`title_missing`, `weigh_range`, `step_machine`…), with `field` and `step` |
-| 403 | `wrong_code` |
+| 403 | `wrong_code`; `read_only` (a command from a read-only phone) |
 | 404 | `not_found` |
 | 405 | `method_not_allowed` (also `OPTIONS`, so no CORS preflight can succeed) |
 | 408 | `request_timeout` (request too slow) |
@@ -1093,7 +1246,8 @@ an eavesdropper. Per-request signing was considered and left out for now.
   `recipe(id, base = false)` (`base`: `?base=1`), `setServings(id, n)`, `image(id)` (null if none), `sendRecipe(id)`, `removeWaiting()`, `pause()`, `resume()`,
   `stop()`, `tare()`, `adjust(AdjustRequest)`, `start(StartRequest)`, `clear()`, `setFavorite(id, on)` (`FavoriteReply`),
   `stopRecipe()`, `setAppearance(accent, theme)`, `editable(id)`, `saveRecipe(id, RecipeEditRequest)`, `createRecipe(RecipeEditRequest)`, `copyRecipe(id)`
-  (each answers `EditableRecipe`), `editor()` (`EditorWire`), `forget()` (drops the token even if the reply is lost).
+  (each answers `EditableRecipe`), `editor()` (`EditorWire`), `ownSteps(id)`, `setOwnStep(id, rank, key, machine)`,
+  `clearOwnStep(id, rank, key)` (each answers `OwnStepsWire`), `renameMe(name)` (`PhoneWire`), `forget()` (drops the token even if the reply is lost).
   Every authenticated call first proves the address (once per address, again after a network error).
   Errors: `CompanionException(status, error)` (`unauthorized` when 401), `RobotProofException` (the
   address did not prove it is this phone's robot; the token was not sent), `IOException` for the
@@ -1173,6 +1327,10 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8088/api/mach
 - `recipe(id)` should return `repo.getAdjusted(id)`; `image(id)` the bytes of `repo.imageFile(...)`.
 - `baseRecipe(id)` (`?base=1`) is `repo.get(id).corrected(repo.adjustmentsOf(id))`, read on the server
   thread like `recipe(id)`. Its default returns `recipe(id)`, which the phone treats as an older robot.
+- `ownSteps(id)` is `repo.get(id)` (cookable), its `adjusted(adjustmentsOf(id))` and `adjustmentsOf(id).steps`;
+  `writeOwnStep` runs on the main thread through `HostCalls.attempt`, stores with `repo.setStepSetting(…, PHONE)` or
+  `repo.clearStepSetting`, then `CookScreen.forgetConfirmations(prefs, id, listOf(rank))`. `RecipeRepo.onAdjusted`
+  redraws the recipe page; `RecipeScreen` marks a phone's setting « Du téléphone : à vérifier ».
 - `writeRecipe` runs on the main thread through `HostCalls.attempt`; the robot's editor says it has a recipe open
   with `RecipeEditScreen.isEditing(id)` (its open instances, weakly held, still on the activity's stack).
 - Import of a recipe file (`RecipeFiles.import`): a file never says what was checked on this robot, so every step

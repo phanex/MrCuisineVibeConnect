@@ -47,8 +47,22 @@
   mijoter et fermenter vont jusqu'à la durée de l'appli d'origine (12 h au plus).
 - **Recettes Lidl du Smart** : Réglages › Recettes › Lidl › Synchroniser (la première fois, toutes les
   fiches sont relues).
+- **Rotation de l'écran bloquée** (0.12.0) : la tablette du Smart est en portrait de nature, et Android
+  pouvait passer l'image en portrait un instant pendant que le tactile restait en paysage (appuis à
+  côté, [#59](https://github.com/Wuki60/MrCuisineVibeConnect/issues/59)). En « Machine réelle », une fois
+  Toque affiché, il coupe la rotation automatique d'Android et fixe celle où il est, par root
+  (`settings put system accelerometer_rotation 0` et `user_rotation`). L'appli d'origine tourne aussi
+  en paysage ; pour revenir en arrière : `adb shell settings put system accelerometer_rotation 1`.
 - **Pas encore** : chauffe sans mélange (vitesse 0) en cuisson manuelle ; import de la base de
   l'appli d'origine ; liste des codes d'erreur de la base.
+
+> **SKMS 1200 C1 (carte Allwinner, Android 10) : pas encore pris en charge.** Les Smart plus récents
+> (le C1, firmware 3090, appli d'origine V2.22) ont une carte Allwinner R818 au lieu de la MediaTek :
+> le guide de root ne s'applique pas (le PC le voit comme `VID_1F3A&PID_EFE8`, le mode de flashage
+> d'Allwinner), son port série est `/dev/ttyS2` et ses trames diffèrent un peu. Un travail a commencé
+> dans Camybrith Cooking ([issue #1](https://github.com/Tidusneo24150/camybrith-cooking/issues/1),
+> [pull request #4](https://github.com/Tidusneo/camybrith-cooking/pull/4)) ; faites un retour dans #59
+> si vous en avez un.
 
 ## Installer
 
