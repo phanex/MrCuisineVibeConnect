@@ -39,8 +39,8 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
         lateinit var unit: TextView
         var temp: TextView? = null
         lateinit var card: LinearLayout
-        lateinit var minusIcon: Icon
-        lateinit var plusIcon: Icon
+        lateinit var minusBtn: LinearLayout
+        lateinit var plusBtn: LinearLayout
     }
 
     private fun smart(f: Feature, icon: Icon.Kind, text: String, p: SmartProgram, default: Int, step: Int,
@@ -139,9 +139,8 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
             }
             card.addView(Ui.spacer(c, weight = 1f), LinearLayout.LayoutParams(1, 0, 1f))
             val dur = Ui.horizontal(c)
-            val minusBtn = Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.MINUS, height = 56) { selected = i; focusedIndex = i; editing = true; bump(p, -1) }
-            p.minusIcon = minusBtn.getChildAt(0) as Icon
-            dur.addView(minusBtn, Ui.lp(Ui.u(56), Ui.WRAP))
+            p.minusBtn = Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.MINUS, height = 56) { selected = i; focusedIndex = i; editing = true; bump(p, -1) }
+            dur.addView(p.minusBtn, Ui.lp(Ui.u(56), Ui.WRAP))
             // Le nombre en grand sur une ligne, l'unité en dessous : les cartes sont étroites à 4 par ligne.
             val gauge = Ui.vertical(c, Gravity.CENTER_HORIZONTAL)
             p.value = Ui.fitText(c, 38f, 24f, Ui.TEXT, Ui.LIGHT).apply { gravity = Gravity.CENTER }
@@ -149,9 +148,8 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
             p.unit = Ui.text(c, "", 14f, Ui.TEXT2).apply { gravity = Gravity.CENTER }
             gauge.addView(p.unit, Ui.lp(Ui.MATCH, Ui.WRAP, t = 1))
             dur.addView(gauge, LinearLayout.LayoutParams(0, Ui.WRAP, 1f))
-            val plusBtn = Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.PLUS, height = 56) { selected = i; focusedIndex = i; editing = true; bump(p, 1) }
-            p.plusIcon = plusBtn.getChildAt(0) as Icon
-            dur.addView(plusBtn, Ui.lp(Ui.u(56), Ui.WRAP))
+            p.plusBtn = Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.PLUS, height = 56) { selected = i; focusedIndex = i; editing = true; bump(p, 1) }
+            dur.addView(p.plusBtn, Ui.lp(Ui.u(56), Ui.WRAP))
             card.addView(dur, Ui.lp(t = 10))
             if (p.maxC > p.minC) {
                 // Température exacte (sous-vide, mijoter, fermenter), dans les bornes de l'appli d'origine.
@@ -166,10 +164,10 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
             }
             card.isClickable = true
             card.setOnClickListener { selected = i; focusedIndex = i; editing = true; refresh() }
-            row.addView(card, LinearLayout.LayoutParams(0, Ui.MATCH, 1f).apply { if (i % 4 != 3 && (many || i < progs.size - 1)) rightMargin = Ui.u(16) })
+            row.addView(card, LinearLayout.LayoutParams(0, Ui.MATCH, 1f).apply { if (i % 4 != 3) rightMargin = Ui.u(16) })
         }
         // Dernière ligne incomplète : des places vides gardent la largeur des cartes.
-        if (many && progs.size % 4 != 0) for (k in progs.size % 4 until 4)
+        if (progs.size % 4 != 0) for (k in progs.size % 4 until 4)
             row.addView(View(c), LinearLayout.LayoutParams(0, Ui.MATCH, 1f).apply { if (k < 3) rightMargin = Ui.u(16) })
         if (many) {
             rows.addView(row, Ui.lp(Ui.MATCH, Ui.u(rowHeight(progs.size - 1 - (progs.size - 1) % 4))))
@@ -248,9 +246,12 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
             p.card.background = Ui.round(if (isEditing) Ui.SURFACE2 else Ui.SURFACE, 26f, strokeColor, strokeWidth)
             p.value.setTextColor(if (isEditing) Ui.ACCENT_INK else Ui.TEXT)
             p.unit.setTextColor(if (isEditing) Ui.ACCENT_INK else Ui.TEXT2)
+            val btnFill = if (isEditing) Ui.ACCENT_DIM else Ui.SURFACE3
             val btnFg = if (isEditing) Ui.ACCENT_INK else Ui.TEXT
-            p.minusIcon.color = btnFg
-            p.plusIcon.color = btnFg
+            p.minusBtn.background = Ui.pressable(Ui.round(btnFill, 28f), 28f)
+            p.plusBtn.background = Ui.pressable(Ui.round(btnFill, 28f), 28f)
+            (p.minusBtn.getChildAt(0) as Icon).color = btnFg
+            (p.plusBtn.getChildAt(0) as Icon).color = btnFg
         }
     }
 

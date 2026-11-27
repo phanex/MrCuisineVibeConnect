@@ -94,7 +94,10 @@ class ValueCard(c: Context, label: String, icon: Icon.Kind) : LinearLayout(c) {
         iconView.color = fg
         unitView.setTextColor(fg)
         valueView.setTextColor(if (focusState == State.EDITING && baseValueColor == Ui.TEXT) Ui.ACCENT_INK else baseValueColor)
+        val btnFill = if (focusState == State.EDITING) Ui.ACCENT_DIM else Ui.SURFACE3
         val btnFg = if (focusState == State.EDITING) Ui.ACCENT_INK else Ui.TEXT
+        minus.background = Ui.pressable(Ui.round(btnFill, 30f), 30f)
+        plus.background = Ui.pressable(Ui.round(btnFill, 30f), 30f)
         (minus.getChildAt(0) as? Icon)?.color = btnFg
         (plus.getChildAt(0) as? Icon)?.color = btnFg
     }
