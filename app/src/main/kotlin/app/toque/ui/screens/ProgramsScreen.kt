@@ -243,7 +243,7 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
                 isActive -> Ui.ACCENT to 2f
                 else -> Ui.STROKE to 1f
             }
-            p.card.background = Ui.round(if (isEditing) Ui.SURFACE2 else Ui.SURFACE, 26f, strokeColor, strokeWidth)
+            p.card.background = Ui.round(Ui.SURFACE, 26f, strokeColor, strokeWidth)
             p.value.setTextColor(if (isEditing) Ui.ACCENT_INK else Ui.TEXT)
             p.unit.setTextColor(if (isEditing) Ui.ACCENT_INK else Ui.TEXT2)
             val btnFill = if (isEditing) Ui.ACCENT_DIM else Ui.SURFACE3

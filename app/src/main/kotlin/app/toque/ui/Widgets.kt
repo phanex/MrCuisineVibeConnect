@@ -88,9 +88,8 @@ class ValueCard(c: Context, label: String, icon: Icon.Kind) : LinearLayout(c) {
             State.FOCUSED -> Ui.ACCENT to 2f
             State.EDITING -> Ui.ACCENT to 3.5f
         }
-        val bg = if (focusState == State.EDITING) Ui.SURFACE2 else Ui.SURFACE
         val fg = if (focusState == State.EDITING) Ui.ACCENT_INK else Ui.TEXT2
-        background = Ui.round(bg, 26f, strokeColor, strokeWidth)
+        background = Ui.round(Ui.SURFACE, 26f, strokeColor, strokeWidth)
         iconView.color = fg
         unitView.setTextColor(fg)
         valueView.setTextColor(if (focusState == State.EDITING && baseValueColor == Ui.TEXT) Ui.ACCENT_INK else baseValueColor)
