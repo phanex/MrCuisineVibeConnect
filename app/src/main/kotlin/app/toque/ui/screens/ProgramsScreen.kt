@@ -115,6 +115,14 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
         )
 
         fun features(): List<Feature> = ORDER.filter { RobotProfiles.active.capabilities.has(it) }
+
+        fun availableFeatures(prefs: app.toque.Prefs): List<Feature> {
+            val active = RobotProfiles.active
+            val emulate = active == RobotProfiles.MC_CONNECT && prefs.emulateSmartPrograms
+            return ORDER.filter {
+                active.capabilities.has(it) || (emulate && RobotProfiles.MC_SMART.capabilities.has(it))
+            }
+        }
     }
 
     override fun build(): View {
@@ -162,12 +170,6 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
             card.addView(Ui.text(c, p.text, 15f, Ui.TEXT2).apply {
                 setLineSpacing(0f, 1.15f)
             }, Ui.lp(t = 6))
-            if (i == cleaning && cleaning >= 0) rinseRecipe()?.let { r ->
-                // La recette de rinçage du catalogue Lidl, quand elle est synchronisée.
-                card.addView(Ui.button(c, tr("Recette Lidl"), Ui.Style.GHOST, Icon.Kind.BOOK, height = 46, textSize = 16f) {
-                    a.app.recipes.get(r)?.let { a.push(RecipeScreen(a, it)) }
-                }, Ui.lp(Ui.WRAP, Ui.WRAP, t = 8))
-            }
             card.addView(Ui.spacer(c, weight = 1f), LinearLayout.LayoutParams(1, 0, 1f))
             val dur = Ui.horizontal(c)
             p.minusBtn = Ui.button(c, "", Ui.Style.SECONDARY, Icon.Kind.MINUS, height = 56) { selected = i; focusedIndex = i; editing = true; bump(p, -1) }
@@ -201,7 +203,7 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
         if (progs.size % 4 != 0) for (k in progs.size % 4 until 4)
             row.addView(View(c), LinearLayout.LayoutParams(0, Ui.MATCH, 1f).apply { if (k < 3) rightMargin = Ui.u(16) })
         if (many) {
-            rows.addView(row, Ui.lp(Ui.MATCH, Ui.u(rowHeight(progs.size - 1 - (progs.size - 1) % 4))))
+            rows.addView(row, Ui.lp(Ui.MATCH, rowHeight(row)))
             val sv = Ui.scroll(c, rows)
             scroller = sv
             root.addView(sv, LinearLayout.LayoutParams(Ui.MATCH, 0, 1f))
@@ -335,21 +337,6 @@ class ProgramsScreen(a: MainActivity, openOnCleaning: Boolean = false) : Screen(
         refresh()
     }
 
-    companion object {
-        private val ALL_FEATURES = listOf(
-            Feature.KNEAD, Feature.STEAM, Feature.TOAST, Feature.YOGURT, Feature.CLEANING,
-            Feature.MIXER, Feature.SMOOTHIE, Feature.EGGS, Feature.SOUS_VIDE, Feature.SLOW_COOK,
-            Feature.FERMENT, Feature.RICE, Feature.KETTLE, Feature.PREWASH, Feature.LONG_CLEAN,
-        )
-
-        fun availableFeatures(prefs: app.toque.Prefs): List<Feature> {
-            val active = RobotProfiles.active
-            val emulate = active == RobotProfiles.MC_CONNECT && prefs.emulateSmartPrograms
-            return ALL_FEATURES.filter {
-                active.capabilities.has(it) || (emulate && RobotProfiles.MC_SMART.capabilities.has(it))
-            }
-        }
-    }
     override fun onKnobPress(): Boolean {
         val s = a.snapshot
         if (s.busy) {

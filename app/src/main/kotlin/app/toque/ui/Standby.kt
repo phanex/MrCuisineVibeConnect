@@ -146,7 +146,7 @@ class Standby(private val a: MainActivity, private val root: FrameLayout) {
                     RootShell.run("echo 0 > /sys/class/leds/lcd-backlight/brightness", 5_000)
                 }
             }
-            KnobLight.start(0)
+            KnobLight.start(app.toque.core.ring.Rgb(0, 0, 0))
         } else {
             val b = Ui.vertical(a, Gravity.CENTER_HORIZONTAL)
             val t = Ui.text(a, "", 150f, 0xFF7C828B.toInt(), Ui.THIN)

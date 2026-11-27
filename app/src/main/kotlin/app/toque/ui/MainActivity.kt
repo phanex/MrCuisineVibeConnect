@@ -506,11 +506,6 @@ class MainActivity : Activity() {
         super.onPause()
     }
 
-    override fun onPause() {
-        main.removeCallbacks(knobLongPressRunnable)
-        super.onPause()
-    }
-
     override fun onStop() {
         main.removeCallbacks(knobLongPressRunnable)
         unsubscribeTimers?.invoke()
