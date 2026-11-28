@@ -1,4 +1,10 @@
 {
   "Extinction totale": "Глибокий сон",
-  "Coupe complètement l'alimentation de la machine et éteint l'écran. L'anneau lumineux est éteint (le réglage ci-dessus ne s'applique pas). Un appui sur l'écran ou la molette la réveille instantanément.": "Повністю знеструмлює силовий блок та вимикає підсвітку екрана. Світлове кільце вимкнене (налаштування вище не діє). Дотик до екрана чи дія коліщатком миттєво пробуджують робота."
+  "Coupe complètement l'alimentation de la machine et éteint l'écran. L'anneau lumineux est éteint (le réglage ci-dessus ne s'applique pas). Un appui sur l'écran ou la molette la réveille instantanément.": "Повністю знеструмлює силовий блок та вимикає підсвітку екрана. Світлове кільце вимкнене (налаштування вище не діє). Дотик до екрана чи дія коліщатком миттєво пробуджують робота.",
+  "%d sur %d affichés": "Показано %d з %d",
+  "Ajoute les programmes automatiques du Smart, adaptés aux paliers de température du Connect.": "Додає автоматичні програми Smart, адаптовані під температурні щаблі Connect.",
+  "Choix des programmes": "Вибір програм",
+  "Tout activer": "Увімкнути всі",
+  "Tout désactiver": "Вимкнути всі",
+  "Émulation des programmes du Smart": "Емуляція додаткових програм Smart"
 }
