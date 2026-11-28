@@ -202,9 +202,9 @@ class TempRing(c: Context) : View(c) {
 }
 
 /** Bouton « maintenir pour Turbo ». */
-class HoldButton(c: Context, label: String, icon: Icon.Kind = Icon.Kind.BOLT, private val onDown: () -> Unit, private val onUp: () -> Unit) : LinearLayout(c) {
+class HoldButton(c: Context, label: String, icon: Icon.Kind = Icon.Kind.BLADE, private val onDown: () -> Unit, private val onUp: () -> Unit) : LinearLayout(c) {
     private val text: TextView
-    private val iconView = Icon(c, icon, Ui.WARN)
+    private val iconView = Icon(c, icon, Ui.TEXT)
 
     init {
         orientation = HORIZONTAL
@@ -212,7 +212,7 @@ class HoldButton(c: Context, label: String, icon: Icon.Kind = Icon.Kind.BOLT, pr
         setPadding(Ui.u(22), 0, Ui.u(22), 0)
         minimumHeight = Ui.u(64)
         background = Ui.round(Ui.SURFACE3, 32f)
-        addView(iconView, LayoutParams(Ui.u(26), Ui.u(26)).apply { rightMargin = Ui.u(10) })
+        addView(iconView, LayoutParams(Ui.u(32), Ui.u(32)).apply { rightMargin = Ui.u(12) })
         text = Ui.text(c, label, 20f, Ui.TEXT, Ui.MEDIUM)
         addView(text)
         isClickable = true
@@ -222,16 +222,15 @@ class HoldButton(c: Context, label: String, icon: Icon.Kind = Icon.Kind.BOLT, pr
         if (!isEnabled) return false
         when (e.action) {
             MotionEvent.ACTION_DOWN -> {
-                background = Ui.round(Ui.WARN, 32f)
-                text.setTextColor(Ui.ON_WARN)
-                // L'éclair est de la couleur du bouton allumé : il passe en blanc, sinon il disparaît.
-                iconView.color = android.graphics.Color.WHITE
+                background = Ui.round(Ui.ACCENT, 32f)
+                text.setTextColor(Ui.ON_ACCENT)
+                iconView.color = Ui.ON_ACCENT
                 onDown()
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 background = Ui.round(Ui.SURFACE3, 32f)
                 text.setTextColor(Ui.TEXT)
-                iconView.color = Ui.WARN
+                iconView.color = Ui.TEXT
                 onUp()
             }
         }
