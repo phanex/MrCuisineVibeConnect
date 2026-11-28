@@ -530,10 +530,10 @@ class SettingsScreen(a: MainActivity, private val startOn: Family? = null) : Scr
 
         group(p, tr("Programmes"))
         val progInfo = Ui.vertical(c)
-        progInfo.addView(Ui.text(c, tr("Choix des programmes"), 18f, Ui.TEXT))
+        progInfo.addView(Ui.text(c, tr("Programmes affichés sur l'écran Programmes :"), 18f, Ui.TEXT))
         programsText = hint("")
         progInfo.addView(programsText, Ui.lp(t = 4))
-        p.addView(setting(progInfo, Ui.button(c, tr("Choix des programmes"), Ui.Style.SECONDARY, height = 52, textSize = 18f) {
+        p.addView(setting(progInfo, Ui.button(c, tr("Choisir"), Ui.Style.SECONDARY, height = 52, textSize = 18f) {
             a.push(VisibleProgramsScreen(a))
         }), Ui.lp(t = 8, b = 8))
         refreshPrograms()
